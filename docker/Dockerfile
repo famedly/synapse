@@ -134,6 +134,13 @@ COPY --from=requirements /synapse/requirements.txt /synapse/
 RUN --mount=type=cache,target=/root/.cache/pip \
   pip install --prefix="/install" --no-deps --no-warn-script-location -r /synapse/requirements.txt
 
+# Install famedly required addons
+
+RUN --mount=type=cache,target=/root/.cache/pip \
+  pip install setuptools \
+  && pip install --prefix="/install" --no-warn-script-location synapse-token-authenticator \
+  && pip install --prefix="/install" --no-warn-script-location synapse-s3-storage-provider
+
 # Copy over the rest of the synapse source code.
 COPY synapse /synapse/synapse/
 COPY rust /synapse/rust/
