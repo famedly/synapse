@@ -1,0 +1,101 @@
+image: alpine
+
+default:
+  tags:
+    - famedly
+    - docker
+
+stages:
+  - test
+  - build
+
+.docker-template:
+  image: docker:latest
+  stage: build
+  variables:
+    DOCKER_BUILDKIT: 1
+  services:
+    - docker:dind
+  before_script:
+    - docker login -u "$CI_REGISTRY_USER" -p "$CI_REGISTRY_PASSWORD" $CI_REGISTRY
+
+lint+mypy+test:
+  stage: test
+  image: docker.io/python:3.9-slim
+  script:
+    - apt-get update && apt-get install -y git build-essential libffi-dev libjpeg-dev libpq-dev libssl-dev libwebp-dev libxml++2.6-dev libxslt1-dev zlib1g-dev curl
+    - curl https://sh.rustup.rs -sSf | sh -s -- -y --default-toolchain stable --profile minimal --component clippy --component rustfmt
+    - source "$HOME/.cargo/env"
+    - pip install poetry
+    - poetry install --extras all --no-interaction --sync -vvv
+    - sed -i -e 's/python -m black/python -m black --check --diff/' ./scripts-dev/lint.sh
+    - poetry run ./scripts-dev/lint.sh
+    - poetry run trial -j"$(nproc)" tests
+
+complement:
+  image: deb11-docker.qcow2
+  stage: test
+  tags:
+    - famedly
+    - libvirt
+    - generic
+  variables:
+    COMPLEMENT_REF: main
+  before_script:
+    - sudo bash -c "echo 'deb http://deb.debian.org/debian bullseye-backports main' >  /etc/apt/sources.list.d/backports.list"
+    - sudo apt-get -y update --allow-releaseinfo-change
+    - sudo apt-get -y install libolm-dev golang-go/bullseye-backports golang-src/bullseye-backports wget g++ bash
+    - curl -LJO "https://gitlab-runner-downloads.s3.amazonaws.com/latest/deb/gitlab-runner_amd64.deb"
+    - sudo dpkg -i gitlab-runner_amd64.deb
+  script:
+    - go install gotest.tools/gotestsum@latest
+    - export PATH="$PATH:$HOME/go/bin"
+    - sed -i -e 's/,msc2716//' -e 's|go test -v|gotestsum --junitfile report.xml --format standard-verbose -- |' ./scripts-dev/complement.sh
+    - ./scripts-dev/complement.sh
+  allow_failure: true
+  artifacts:
+    when: always
+    reports:
+      junit: complement-master/report.xml
+
+sytest:
+  extends: .docker-template
+  stage: test
+  before_script:
+    - apk add curl perl perl-utils make perl-xml-generator
+  script:
+    - mkdir logs
+    - docker run -i -e SYTEST_BRANCH="master" -v $(pwd)/logs:/logs -v $(pwd):/src:ro matrixdotorg/sytest-synapse:buster
+  after_script:
+    - curl -LOJ https://raw.githubusercontent.com/matrix-org/sytest/b4f61a88af44fe5850bddac4e170ca1f4e3be79a/tap-to-junit-xml.pl
+    - perl tap-to-junit-xml.pl --input logs/results.tap --output report.xml  --puretap
+  artifacts:
+    when: always
+    reports:
+      junit: report.xml
+
+docker-release:
+  extends: .docker-template
+  rules:
+    - if: '$CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+_\d+$/'
+  script:
+    - docker build --pull -t "${CI_REGISTRY_IMAGE}:latest" -t "${CI_REGISTRY_IMAGE}:${CI_COMMIT_TAG}" -t "${CI_REGISTRY_IMAGE}:${CI_COMMIT_TAG%_*}" -f docker/Dockerfile .
+    - docker push "${CI_REGISTRY_IMAGE}:latest"
+    - docker push "${CI_REGISTRY_IMAGE}:${CI_COMMIT_TAG}"
+    - docker push "${CI_REGISTRY_IMAGE}:${CI_COMMIT_TAG%_*}"
+
+docker-tags:
+  extends: .docker-template
+  rules:
+    - if: '$CI_COMMIT_TAG && $CI_COMMIT_TAG !~ /^v\d+\.\d+\.\d+_\d+$/'
+  script:
+    - docker build --pull -t "${CI_REGISTRY_IMAGE}:${CI_COMMIT_TAG}" -f docker/Dockerfile .
+    - docker push "${CI_REGISTRY_IMAGE}:${CI_COMMIT_TAG}"
+
+docker-branches:
+  extends: .docker-template
+  rules:
+    - if: $CI_COMMIT_BRANCH
+  script:
+    - docker build --pull -t "${CI_REGISTRY_IMAGE}:${CI_COMMIT_REF_SLUG}" -f docker/Dockerfile .
+    - docker push "${CI_REGISTRY_IMAGE}:${CI_COMMIT_REF_SLUG}"
