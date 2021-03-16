@@ -27,6 +27,27 @@ SLAs. ESS can be used to support any Matrix-based frontend client.
 
 .. contents::
 
+Rebasing this fork
+==================
+
+This is the Famedly Fork of synapse. It applies a few patches, which need to
+be rebased upon every synapse release. To do this, the following workflow is used:
+
+- Checkout `master` of the fork, then `fetch -a` from the upstream
+
+- Rebase all commits (from our master) upon `upstream/master`: `git rebase upstream/master`
+
+- Switch to the `release-vM.m.f` branch (comes from upstream), and merge the
+  master into it using `git merge --ff-only master`. Then push the `release-*`
+  branch to the famedly-remote.
+
+- The CI is configured in a way that creating a tag on the `release-`-branch
+  will create a new release. The tag needs to have the form `v$originalSynapseVersion_$count`,
+  so `v1.29.0_1`, `v1.29.0_2` and so on - as content, we suggest `v$synapseVersion - $date`.
+  If we change our patchset after we already released a version of synapse, we force-push to
+  the `release-` branch and increase the counter and push a new tag.
+
+
 🛠️ Installing and configuration
 ===============================
 
