@@ -17,6 +17,9 @@ Matrix project <https://matrix.org/docs/guides/introduction>`_, and the `formal 
 Rebasing this fork
 ==================
 
+TL;DR: There's a `./make_release.sh` script which does the things below.
+It currently doesn't handle rebase conflicts gracefully yet.
+
 This is the Famedly Fork of synapse. It applies a few patches, which need to
 be rebased upon every synapse release. To do this, the following workflow is used:
 
