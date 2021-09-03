@@ -234,15 +234,30 @@ class ServerMetricsStore(EventPushActionsWorkerStore, SQLBaseStore):
         """
         Returns number of users seen in the past time_from period
         """
-        sql = """
-            SELECT COUNT(*) FROM (
-                SELECT user_id FROM user_ips
-                WHERE last_seen > ?
-                GROUP BY user_id
-            ) u
-        """
-        txn.execute(sql, (time_from,))
-        # Mypy knows that fetchone() might return None if there are no rows.
+        exclude_list = [
+            "@" + localpart + ":" + self.hs.config.server.server_name
+            for localpart in self.hs.config.metrics.report_stats_exclude_alias_list
+        ]
+
+        if not exclude_list:
+            sql = """
+                SELECT COUNT(*) FROM (
+                    SELECT user_id FROM user_ips
+                    WHERE last_seen > ?
+                    GROUP BY user_id
+                ) u
+            """
+            txn.execute(sql, (time_from,))
+        else:
+            sql = """
+                SELECT COUNT(*) FROM (
+                    SELECT user_id FROM user_ips
+                    WHERE last_seen > ? AND user_id NOT IN ?
+                    GROUP BY user_id
+                ) u
+            """
+            txn.execute(sql, (time_from, tuple(exclude_list)))
+
         # We know better: "SELECT COUNT(...) FROM ..." without any GROUP BY always
         # returns exactly one row.
         (count,) = cast(Tuple[int], txn.fetchone())
