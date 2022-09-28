@@ -162,9 +162,8 @@ which are no longer maintained.</p>
 summaries.</p>
 </li>
 <li>
-<p>If Synapse was installed using <a href="setup/installation.html#prebuilt-packages">prebuilt
-packages</a>, you will need to follow the
-normal process for upgrading those packages.</p>
+<p>If Synapse was installed using <a href="setup/installation.html#prebuilt-packages">prebuilt packages</a>,
+you will need to follow the normal process for upgrading those packages.</p>
 </li>
 <li>
 <p>If Synapse was installed using pip then upgrade to the latest
@@ -232,6 +231,60 @@ dpkg -i matrix-synapse-py3_1.3.0+stretch1_amd64.deb
 </code></pre>
 </li>
 </ul>
+<h1 id="upgrading-to-v1680"><a class="header" href="#upgrading-to-v1680">Upgrading to v1.68.0</a></h1>
+<p>Two changes announced in the upgrade notes for v1.67.0 have now landed in v1.68.0.</p>
+<h2 id="sqlite-version-requirement"><a class="header" href="#sqlite-version-requirement">SQLite version requirement</a></h2>
+<p>Synapse now requires a SQLite version of 3.27.0 or higher if SQLite is configured as
+Synapse's database.</p>
+<p>Installations using</p>
+<ul>
+<li>Docker images <a href="https://hub.docker.com/r/matrixdotorg/synapse">from <code>matrixdotorg</code></a>,</li>
+<li>Debian packages <a href="https://packages.matrix.org/">from Matrix.org</a>, or</li>
+<li>a PostgreSQL database</li>
+</ul>
+<p>are not affected.</p>
+<h2 id="rust-requirement-when-building-from-source"><a class="header" href="#rust-requirement-when-building-from-source">Rust requirement when building from source.</a></h2>
+<p>Building from a source checkout of Synapse now requires a recent Rust compiler
+(currently Rust 1.58.1, but see also the
+<a href="https://matrix-org.github.io/synapse/latest/deprecation_policy.html">Platform Dependency Policy</a>).</p>
+<p>Installations using</p>
+<ul>
+<li>Docker images <a href="https://hub.docker.com/r/matrixdotorg/synapse">from <code>matrixdotorg</code></a>,</li>
+<li>Debian packages <a href="https://packages.matrix.org/">from Matrix.org</a>, or</li>
+<li>PyPI wheels via <code>pip install matrix-synapse</code> (on supported platforms and architectures)</li>
+</ul>
+<p>will not be affected.</p>
+<h1 id="upgrading-to-v1670"><a class="header" href="#upgrading-to-v1670">Upgrading to v1.67.0</a></h1>
+<h2 id="direct-tcp-replication-is-no-longer-supported-migrate-to-redis"><a class="header" href="#direct-tcp-replication-is-no-longer-supported-migrate-to-redis">Direct TCP replication is no longer supported: migrate to Redis</a></h2>
+<p>Redis support was added in v1.13.0 with it becoming the recommended method in
+v1.18.0. It replaced the old direct TCP connections (which was deprecated as of
+v1.18.0) to the main process. With Redis, rather than all the workers connecting
+to the main process, all the workers and the main process connect to Redis,
+which relays replication commands between processes. This can give a significant
+CPU saving on the main process and is a prerequisite for upcoming
+performance improvements.</p>
+<p>To migrate to Redis add the <a href="./workers.html#shared-configuration"><code>redis</code> config</a>,
+and remove the TCP <code>replication</code> listener from config of the master and
+<code>worker_replication_port</code> from worker config. Note that a HTTP listener with a
+<code>replication</code> resource is still required.</p>
+<h2 id="minimum-version-of-poetry-is-now-v120"><a class="header" href="#minimum-version-of-poetry-is-now-v120">Minimum version of Poetry is now v1.2.0</a></h2>
+<p>The minimum supported version of poetry is now 1.2. This should only affect
+those installing from a source checkout.</p>
+<h2 id="rust-requirement-in-the-next-release"><a class="header" href="#rust-requirement-in-the-next-release">Rust requirement in the next release</a></h2>
+<p>From the next major release (v1.68.0) installing Synapse from a source checkout
+will require a recent Rust compiler. Those using packages or
+<code>pip install matrix-synapse</code> will not be affected.</p>
+<p>The simplest way of installing Rust is via <a href="https://rustup.rs/">rustup.rs</a></p>
+<h2 id="sqlite-version-requirement-in-the-next-release"><a class="header" href="#sqlite-version-requirement-in-the-next-release">SQLite version requirement in the next release</a></h2>
+<p>From the next major release (v1.68.0) Synapse will require SQLite 3.27.0 or
+higher. Synapse v1.67.0 will be the last major release supporting SQLite
+versions 3.22 to 3.26.</p>
+<p>Those using Docker images or Debian packages from Matrix.org will not be
+affected. If you have installed from source, you should check the version of
+SQLite used by Python with:</p>
+<pre><code class="language-shell">python -c &quot;import sqlite3; print(sqlite3.sqlite_version)&quot;
+</code></pre>
+<p>If this is too old, refer to your distribution for advice on upgrading.</p>
 <h1 id="upgrading-to-v1660"><a class="header" href="#upgrading-to-v1660">Upgrading to v1.66.0</a></h1>
 <h2 id="delegation-of-email-validation-no-longer-supported"><a class="header" href="#delegation-of-email-validation-no-longer-supported">Delegation of email validation no longer supported</a></h2>
 <p>As of this version, Synapse no longer allows the tasks of verifying email address
