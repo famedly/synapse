@@ -576,7 +576,9 @@ class MatrixFederationHttpClient:
             # XXX: Would be much nicer to retry only at the transaction-layer
             # (once we have reliable transactions in place)
             if long_retries:
-                retries_left = MAX_LONG_RETRIES
+                retries_left = (
+                    self.hs.config.federation.federation_transaction_retry_count
+                )
             else:
                 retries_left = MAX_SHORT_RETRIES
 
@@ -723,8 +725,20 @@ class MatrixFederationHttpClient:
 
                     if retries_left and not timeout:
                         if long_retries:
-                            delay = 4 ** (MAX_LONG_RETRIES + 1 - retries_left)
-                            delay = min(delay, 60)
+                            delay = (
+                                self.hs.config.federation.federation_transaction_retry_minimum_interval_seconds
+                                * (
+                                    self.hs.config.federation.federation_transaction_retry_multiplier
+                                    ** (
+                                        self.hs.config.federation.federation_transaction_retry_count
+                                        - retries_left
+                                    )
+                                )
+                            )
+                            delay = min(
+                                delay,
+                                self.hs.config.federation.federation_transaction_retry_minimum_interval_seconds,
+                            )
                             delay *= random.uniform(0.8, 1.4)
                         else:
                             delay = 0.5 * 2 ** (MAX_SHORT_RETRIES - retries_left)

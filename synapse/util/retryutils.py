@@ -27,15 +27,6 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-# the initial backoff, after the first transaction fails
-MIN_RETRY_INTERVAL = 10 * 60 * 1000
-
-# how much we multiply the backoff by after each subsequent fail
-RETRY_MULTIPLIER = 5
-
-# a cap on the backoff. (Essentially none)
-MAX_RETRY_INTERVAL = 2**62
-
 
 class NotRetryingDestination(Exception):
     def __init__(self, retry_last_ts: int, retry_interval: int, destination: str):
@@ -220,13 +211,25 @@ class RetryDestinationLimiter:
             # We couldn't connect.
             if self.retry_interval:
                 self.retry_interval = int(
-                    self.retry_interval * RETRY_MULTIPLIER * random.uniform(0.8, 1.4)
+                    self.retry_interval
+                    * self.store.hs.config.federation.federation_destination_backoff_multiplier
+                    * random.uniform(0.8, 1.4)
                 )
 
-                if self.retry_interval >= MAX_RETRY_INTERVAL:
-                    self.retry_interval = MAX_RETRY_INTERVAL
+                if (
+                    self.retry_interval
+                    >= self.store.hs.config.federation.federation_destination_backoff_maximum_individual_interval_seconds
+                    * 1000
+                ):
+                    self.retry_interval = (
+                        self.store.hs.config.federation.federation_destination_backoff_maximum_individual_interval_seconds
+                        * 1000
+                    )
             else:
-                self.retry_interval = MIN_RETRY_INTERVAL
+                self.retry_interval = (
+                    self.store.hs.config.federation.federation_destination_backoff_minimum_interval_seconds
+                    * 1000
+                )
 
             logger.info(
                 "Connection to %s was unsuccessful (%s(%s)); backoff now %i",

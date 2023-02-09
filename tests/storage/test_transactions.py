@@ -17,7 +17,6 @@ from twisted.test.proto_helpers import MemoryReactor
 from synapse.server import HomeServer
 from synapse.storage.databases.main.transactions import DestinationRetryTimings
 from synapse.util import Clock
-from synapse.util.retryutils import MAX_RETRY_INTERVAL
 
 from tests.unittest import HomeserverTestCase
 
@@ -58,7 +57,7 @@ class TransactionStoreTestCase(HomeserverTestCase):
 
     def test_large_destination_retry(self) -> None:
         d = self.store.set_destination_retry_timings(
-            "example.com", MAX_RETRY_INTERVAL, MAX_RETRY_INTERVAL, MAX_RETRY_INTERVAL
+            "example.com", 2**62, 2**62, 2**62
         )
         self.get_success(d)
 
