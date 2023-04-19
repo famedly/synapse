@@ -139,7 +139,8 @@ RUN --mount=type=cache,target=/root/.cache/pip \
 RUN --mount=type=cache,target=/root/.cache/pip \
   pip install setuptools \
   && pip install --prefix="/install" --no-warn-script-location synapse-token-authenticator \
-  && pip install --prefix="/install" --no-warn-script-location synapse-s3-storage-provider
+  && pip install --prefix="/install" --no-warn-script-location synapse-s3-storage-provider \
+  && pip install --prefix="/install" --no-warn-script-location git+https://gitlab.com/famedly/company/backend/services/synapse-invite-policies.git@main
 
 # Copy over the rest of the synapse source code.
 COPY synapse /synapse/synapse/
