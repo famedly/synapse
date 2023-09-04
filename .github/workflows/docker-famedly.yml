@@ -1,0 +1,20 @@
+---
+name: Docker
+
+on:
+  push:
+    tags: [ 'v*.*.*_*' ]
+
+jobs:
+  docker:
+    uses: famedly/github-workflows/.github/workflows/docker.yml@f2adc29abbf3f353f00b1c3ea8ba072b6f440280
+    with:
+      push: ${{ github.event_name != 'pull_request' }} # Always build, don't publish on pull requests
+      registry_user: famedly-ci
+      registry: docker-oss.nexus.famedly.de
+      image_name: synapse
+      file: docker/Dockerfile
+      tags: |
+        type=match,group=1,pattern=(v\d+.\d+.\d+)_\d+
+        type=match,group=1,pattern=(v\d+.\d+.\d+_\d+)
+    secrets: inherit
