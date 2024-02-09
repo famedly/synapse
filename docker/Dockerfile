@@ -141,7 +141,7 @@ RUN --mount=type=cache,target=/root/.cache/pip \
   && pip install --prefix="/install" --no-warn-script-location synapse-token-authenticator \
   && pip install --prefix="/install" --no-warn-script-location synapse-s3-storage-provider \
   && pip install --prefix="/install" --no-warn-script-location synapse-auto-accept-invite \
-  && pip install --prefix="/install" --no-warn-script-location synapse-invite-checker \
+  && pip install --prefix="/install" --no-warn-script-location git+https://github.com/famedly/synapse-invite-checker.git@main \
   && pip install --prefix="/install" --no-warn-script-location git+https://github.com/famedly/synapse-invite-policies.git@main \
   && pip install --prefix="/install" --no-warn-script-location git+https://github.com/famedly/synapse-domain-rule-checker.git@main
 
