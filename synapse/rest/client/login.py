@@ -602,7 +602,19 @@ class RefreshTokenServlet(RestServlet):
         if self.refreshable_access_token_lifetime is not None:
             access_valid_until_ms = now + self.refreshable_access_token_lifetime
         refresh_valid_until_ms = None
-        if self.refresh_token_lifetime is not None:
+
+        custom_refresh_token_lifetime = refresh_submission.get(
+            "com.famedly.refresh_token_lifetime_ms"
+        )
+        if custom_refresh_token_lifetime is not None:
+            if not isinstance(custom_refresh_token_lifetime, int):
+                raise SynapseError(
+                    400,
+                    "Invalid param: com.famedly.refresh_token_lifetime_ms",
+                    Codes.INVALID_PARAM,
+                )
+            refresh_valid_until_ms = now + custom_refresh_token_lifetime
+        elif self.refresh_token_lifetime is not None:
             refresh_valid_until_ms = now + self.refresh_token_lifetime
 
         (
