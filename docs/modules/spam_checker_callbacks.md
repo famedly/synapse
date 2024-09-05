@@ -12,21 +12,22 @@ The available spam checker callbacks are:
 
 _First introduced in Synapse v1.37.0_
 
-_Changed in Synapse v1.60.0: `synapse.module_api.NOT_SPAM` and `synapse.module_api.errors.Codes` can be returned by this callback. Returning a boolean or a string is now deprecated._ 
+_Changed in Synapse v1.60.0: `synapse.module_api.NOT_SPAM` and `synapse.module_api.errors.Codes` can be returned by this callback. Returning a boolean or a string is now deprecated._
 
 ```python
 async def check_event_for_spam(event: "synapse.module_api.EventBase") -> Union["synapse.module_api.NOT_SPAM", "synapse.module_api.errors.Codes", str, bool]
 ```
 
 Called when receiving an event from a client or via federation. The callback must return one of:
-  - `synapse.module_api.NOT_SPAM`, to allow the operation. Other callbacks may still 
-    decide to reject it.
-  - `synapse.module_api.errors.Codes` to reject the operation with an error code. In case
-    of doubt, `synapse.module_api.errors.Codes.FORBIDDEN` is a good error code.
-  - (deprecated) a non-`Codes` `str` to reject the operation and specify an error message. Note that clients
-    typically will not localize the error message to the user's preferred locale.
-  - (deprecated) `False`, which is the same as returning `synapse.module_api.NOT_SPAM`.
-  - (deprecated) `True`, which is the same as returning `synapse.module_api.errors.Codes.FORBIDDEN`.
+
+- `synapse.module_api.NOT_SPAM`, to allow the operation. Other callbacks may still
+  decide to reject it.
+- `synapse.module_api.errors.Codes` to reject the operation with an error code. In case
+  of doubt, `synapse.module_api.errors.Codes.FORBIDDEN` is a good error code.
+- (deprecated) a non-`Codes` `str` to reject the operation and specify an error message. Note that clients
+  typically will not localize the error message to the user's preferred locale.
+- (deprecated) `False`, which is the same as returning `synapse.module_api.NOT_SPAM`.
+- (deprecated) `True`, which is the same as returning `synapse.module_api.errors.Codes.FORBIDDEN`.
 
 If multiple modules implement this callback, they will be considered in order. If a
 callback returns `synapse.module_api.NOT_SPAM`, Synapse falls through to the next one.
@@ -38,7 +39,7 @@ this callback.
 
 _First introduced in Synapse v1.37.0_
 
-_Changed in Synapse v1.61.0: `synapse.module_api.NOT_SPAM` and `synapse.module_api.errors.Codes` can be returned by this callback. Returning a boolean is now deprecated._ 
+_Changed in Synapse v1.61.0: `synapse.module_api.NOT_SPAM` and `synapse.module_api.errors.Codes` can be returned by this callback. Returning a boolean is now deprecated._
 
 ```python
 async def user_may_join_room(user: str, room: str, is_invited: bool) -> Union["synapse.module_api.NOT_SPAM", "synapse.module_api.errors.Codes", bool]
@@ -53,12 +54,13 @@ This callback isn't called if the join is performed by a server administrator, o
 context of a room creation.
 
 The callback must return one of:
-  - `synapse.module_api.NOT_SPAM`, to allow the operation. Other callbacks may still 
-    decide to reject it.
-  - `synapse.module_api.errors.Codes` to reject the operation with an error code. In case
-    of doubt, `synapse.module_api.errors.Codes.FORBIDDEN` is a good error code.
-  - (deprecated) `False`, which is the same as returning `synapse.module_api.NOT_SPAM`.
-  - (deprecated) `True`, which is the same as returning `synapse.module_api.errors.Codes.FORBIDDEN`.
+
+- `synapse.module_api.NOT_SPAM`, to allow the operation. Other callbacks may still
+  decide to reject it.
+- `synapse.module_api.errors.Codes` to reject the operation with an error code. In case
+  of doubt, `synapse.module_api.errors.Codes.FORBIDDEN` is a good error code.
+- (deprecated) `False`, which is the same as returning `synapse.module_api.NOT_SPAM`.
+- (deprecated) `True`, which is the same as returning `synapse.module_api.errors.Codes.FORBIDDEN`.
 
 If multiple modules implement this callback, they will be considered in order. If a
 callback returns `synapse.module_api.NOT_SPAM`, Synapse falls through to the next one.
@@ -70,7 +72,7 @@ this callback.
 
 _First introduced in Synapse v1.37.0_
 
-_Changed in Synapse v1.62.0: `synapse.module_api.NOT_SPAM` and `synapse.module_api.errors.Codes` can be returned by this callback. Returning a boolean is now deprecated._ 
+_Changed in Synapse v1.62.0: `synapse.module_api.NOT_SPAM` and `synapse.module_api.errors.Codes` can be returned by this callback. Returning a boolean is now deprecated._
 
 ```python
 async def user_may_invite(inviter: str, invitee: str, room_id: str) -> Union["synapse.module_api.NOT_SPAM", "synapse.module_api.errors.Codes", bool]
@@ -79,15 +81,22 @@ async def user_may_invite(inviter: str, invitee: str, room_id: str) -> Union["sy
 Called when processing an invitation. Both inviter and invitee are
 represented by their Matrix user ID (e.g. `@alice:example.com`).
 
+The callback might be invoked multiple times if it is run during room creation.
+The first call will be before the room is created with an **empty** `room_id`.
+The second call will be after the room is created and when the `room_id` is
+already known. If an invite is rejected during the second invocation, the room
+is still created, but some invites will be missing and an error returned to the
+client.
 
 The callback must return one of:
-  - `synapse.module_api.NOT_SPAM`, to allow the operation. Other callbacks may still 
-    decide to reject it.
-  - `synapse.module_api.errors.Codes` to reject the operation with an error code. In case
-    of doubt, `synapse.module_api.errors.Codes.FORBIDDEN` is a good error code.
 
-  - (deprecated) `False`, which is the same as returning `synapse.module_api.NOT_SPAM`.
-  - (deprecated) `True`, which is the same as returning `synapse.module_api.errors.Codes.FORBIDDEN`.
+- `synapse.module_api.NOT_SPAM`, to allow the operation. Other callbacks may still
+  decide to reject it.
+- `synapse.module_api.errors.Codes` to reject the operation with an error code. In case
+  of doubt, `synapse.module_api.errors.Codes.FORBIDDEN` is a good error code.
+
+- (deprecated) `False`, which is the same as returning `synapse.module_api.NOT_SPAM`.
+- (deprecated) `True`, which is the same as returning `synapse.module_api.errors.Codes.FORBIDDEN`.
 
 If multiple modules implement this callback, they will be considered in order. If a
 callback returns `synapse.module_api.NOT_SPAM`, Synapse falls through to the next one.
@@ -95,12 +104,11 @@ The value of the first callback that does not return `synapse.module_api.NOT_SPA
 be used. If this happens, Synapse will not call any of the subsequent implementations of
 this callback.
 
-
 ### `user_may_send_3pid_invite`
 
 _First introduced in Synapse v1.45.0_
 
-_Changed in Synapse v1.62.0: `synapse.module_api.NOT_SPAM` and `synapse.module_api.errors.Codes` can be returned by this callback. Returning a boolean is now deprecated._ 
+_Changed in Synapse v1.62.0: `synapse.module_api.NOT_SPAM` and `synapse.module_api.errors.Codes` can be returned by this callback. Returning a boolean is now deprecated._
 
 ```python
 async def user_may_send_3pid_invite(
@@ -112,7 +120,7 @@ async def user_may_send_3pid_invite(
 ```
 
 Called when processing an invitation using a third-party identifier (also called a 3PID,
-e.g. an email address or a phone number). 
+e.g. an email address or a phone number).
 
 The inviter is represented by their Matrix user ID (e.g. `@alice:example.com`), and the
 invitee is represented by its medium (e.g. "email") and its address
@@ -135,13 +143,14 @@ await user_may_send_3pid_invite(
 [`user_may_invite`](#user_may_invite) will be used instead.
 
 The callback must return one of:
-  - `synapse.module_api.NOT_SPAM`, to allow the operation. Other callbacks may still 
-    decide to reject it.
-  - `synapse.module_api.errors.Codes` to reject the operation with an error code. In case
-    of doubt, `synapse.module_api.errors.Codes.FORBIDDEN` is a good error code.
 
-  - (deprecated) `False`, which is the same as returning `synapse.module_api.NOT_SPAM`.
-  - (deprecated) `True`, which is the same as returning `synapse.module_api.errors.Codes.FORBIDDEN`.
+- `synapse.module_api.NOT_SPAM`, to allow the operation. Other callbacks may still
+  decide to reject it.
+- `synapse.module_api.errors.Codes` to reject the operation with an error code. In case
+  of doubt, `synapse.module_api.errors.Codes.FORBIDDEN` is a good error code.
+
+- (deprecated) `False`, which is the same as returning `synapse.module_api.NOT_SPAM`.
+- (deprecated) `True`, which is the same as returning `synapse.module_api.errors.Codes.FORBIDDEN`.
 
 If multiple modules implement this callback, they will be considered in order. If a
 callback returns `synapse.module_api.NOT_SPAM`, Synapse falls through to the next one.
@@ -149,12 +158,11 @@ The value of the first callback that does not return `synapse.module_api.NOT_SPA
 be used. If this happens, Synapse will not call any of the subsequent implementations of
 this callback.
 
-
 ### `user_may_create_room`
 
 _First introduced in Synapse v1.37.0_
 
-_Changed in Synapse v1.62.0: `synapse.module_api.NOT_SPAM` and `synapse.module_api.errors.Codes` can be returned by this callback. Returning a boolean is now deprecated._ 
+_Changed in Synapse v1.62.0: `synapse.module_api.NOT_SPAM` and `synapse.module_api.errors.Codes` can be returned by this callback. Returning a boolean is now deprecated._
 
 ```python
 async def user_may_create_room(user_id: str) -> Union["synapse.module_api.NOT_SPAM", "synapse.module_api.errors.Codes", bool]
@@ -163,13 +171,14 @@ async def user_may_create_room(user_id: str) -> Union["synapse.module_api.NOT_SP
 Called when processing a room creation request.
 
 The callback must return one of:
-  - `synapse.module_api.NOT_SPAM`, to allow the operation. Other callbacks may still 
-    decide to reject it.
-  - `synapse.module_api.errors.Codes` to reject the operation with an error code. In case
-    of doubt, `synapse.module_api.errors.Codes.FORBIDDEN` is a good error code.
 
-  - (deprecated) `False`, which is the same as returning `synapse.module_api.NOT_SPAM`.
-  - (deprecated) `True`, which is the same as returning `synapse.module_api.errors.Codes.FORBIDDEN`.
+- `synapse.module_api.NOT_SPAM`, to allow the operation. Other callbacks may still
+  decide to reject it.
+- `synapse.module_api.errors.Codes` to reject the operation with an error code. In case
+  of doubt, `synapse.module_api.errors.Codes.FORBIDDEN` is a good error code.
+
+- (deprecated) `False`, which is the same as returning `synapse.module_api.NOT_SPAM`.
+- (deprecated) `True`, which is the same as returning `synapse.module_api.errors.Codes.FORBIDDEN`.
 
 If multiple modules implement this callback, they will be considered in order. If a
 callback returns `synapse.module_api.NOT_SPAM`, Synapse falls through to the next one.
@@ -177,13 +186,11 @@ The value of the first callback that does not return `synapse.module_api.NOT_SPA
 be used. If this happens, Synapse will not call any of the subsequent implementations of
 this callback.
 
-
-
 ### `user_may_create_room_alias`
 
 _First introduced in Synapse v1.37.0_
 
-_Changed in Synapse v1.62.0: `synapse.module_api.NOT_SPAM` and `synapse.module_api.errors.Codes` can be returned by this callback. Returning a boolean is now deprecated._ 
+_Changed in Synapse v1.62.0: `synapse.module_api.NOT_SPAM` and `synapse.module_api.errors.Codes` can be returned by this callback. Returning a boolean is now deprecated._
 
 ```python
 async def user_may_create_room_alias(user_id: str, room_alias: "synapse.module_api.RoomAlias") -> Union["synapse.module_api.NOT_SPAM", "synapse.module_api.errors.Codes", bool]
@@ -192,13 +199,14 @@ async def user_may_create_room_alias(user_id: str, room_alias: "synapse.module_a
 Called when trying to associate an alias with an existing room.
 
 The callback must return one of:
-  - `synapse.module_api.NOT_SPAM`, to allow the operation. Other callbacks may still 
-    decide to reject it.
-  - `synapse.module_api.errors.Codes` to reject the operation with an error code. In case
-    of doubt, `synapse.module_api.errors.Codes.FORBIDDEN` is a good error code.
 
-  - (deprecated) `False`, which is the same as returning `synapse.module_api.NOT_SPAM`.
-  - (deprecated) `True`, which is the same as returning `synapse.module_api.errors.Codes.FORBIDDEN`.
+- `synapse.module_api.NOT_SPAM`, to allow the operation. Other callbacks may still
+  decide to reject it.
+- `synapse.module_api.errors.Codes` to reject the operation with an error code. In case
+  of doubt, `synapse.module_api.errors.Codes.FORBIDDEN` is a good error code.
+
+- (deprecated) `False`, which is the same as returning `synapse.module_api.NOT_SPAM`.
+- (deprecated) `True`, which is the same as returning `synapse.module_api.errors.Codes.FORBIDDEN`.
 
 If multiple modules implement this callback, they will be considered in order. If a
 callback returns `synapse.module_api.NOT_SPAM`, Synapse falls through to the next one.
@@ -206,13 +214,11 @@ The value of the first callback that does not return `synapse.module_api.NOT_SPA
 be used. If this happens, Synapse will not call any of the subsequent implementations of
 this callback.
 
-
-
 ### `user_may_publish_room`
 
 _First introduced in Synapse v1.37.0_
 
-_Changed in Synapse v1.62.0: `synapse.module_api.NOT_SPAM` and `synapse.module_api.errors.Codes` can be returned by this callback. Returning a boolean is now deprecated._ 
+_Changed in Synapse v1.62.0: `synapse.module_api.NOT_SPAM` and `synapse.module_api.errors.Codes` can be returned by this callback. Returning a boolean is now deprecated._
 
 ```python
 async def user_may_publish_room(user_id: str, room_id: str) -> Union["synapse.module_api.NOT_SPAM", "synapse.module_api.errors.Codes", bool]
@@ -221,21 +227,20 @@ async def user_may_publish_room(user_id: str, room_id: str) -> Union["synapse.mo
 Called when trying to publish a room to the homeserver's public rooms directory.
 
 The callback must return one of:
-  - `synapse.module_api.NOT_SPAM`, to allow the operation. Other callbacks may still 
-    decide to reject it.
-  - `synapse.module_api.errors.Codes` to reject the operation with an error code. In case
-    of doubt, `synapse.module_api.errors.Codes.FORBIDDEN` is a good error code.
 
-  - (deprecated) `False`, which is the same as returning `synapse.module_api.NOT_SPAM`.
-  - (deprecated) `True`, which is the same as returning `synapse.module_api.errors.Codes.FORBIDDEN`.
+- `synapse.module_api.NOT_SPAM`, to allow the operation. Other callbacks may still
+  decide to reject it.
+- `synapse.module_api.errors.Codes` to reject the operation with an error code. In case
+  of doubt, `synapse.module_api.errors.Codes.FORBIDDEN` is a good error code.
+
+- (deprecated) `False`, which is the same as returning `synapse.module_api.NOT_SPAM`.
+- (deprecated) `True`, which is the same as returning `synapse.module_api.errors.Codes.FORBIDDEN`.
 
 If multiple modules implement this callback, they will be considered in order. If a
 callback returns `synapse.module_api.NOT_SPAM`, Synapse falls through to the next one.
 The value of the first callback that does not return `synapse.module_api.NOT_SPAM` will
 be used. If this happens, Synapse will not call any of the subsequent implementations of
 this callback.
-
-
 
 ### `check_username_for_spam`
 
@@ -246,16 +251,16 @@ async def check_username_for_spam(user_profile: synapse.module_api.UserProfile) 
 ```
 
 Called when computing search results in the user directory. The module must return a
-`bool` indicating whether the given user should be excluded from user directory 
-searches. Return `True` to indicate that the user is spammy and exclude them from 
+`bool` indicating whether the given user should be excluded from user directory
+searches. Return `True` to indicate that the user is spammy and exclude them from
 search results; otherwise return `False`.
 
 The profile is represented as a dictionary with the following keys:
 
-* `user_id: str`. The Matrix ID for this user.
-* `display_name: Optional[str]`. The user's display name, or `None` if this user
+- `user_id: str`. The Matrix ID for this user.
+- `display_name: Optional[str]`. The user's display name, or `None` if this user
   has not set a display name.
-* `avatar_url: Optional[str]`. The `mxc://` URL to the user's avatar, or `None`
+- `avatar_url: Optional[str]`. The `mxc://` URL to the user's avatar, or `None`
   if this user has not set an avatar.
 
 The module is given a copy of the original dictionary, so modifying it from within the
@@ -285,13 +290,13 @@ may be allowed to register but will be shadow banned.
 
 The arguments passed to this callback are:
 
-* `email_threepid`: The email address used for registering, if any.
-* `username`: The username the user would like to register. Can be `None`, meaning that
+- `email_threepid`: The email address used for registering, if any.
+- `username`: The username the user would like to register. Can be `None`, meaning that
   Synapse will generate one later.
-* `request_info`: A collection of tuples, which first item is a user agent, and which
+- `request_info`: A collection of tuples, which first item is a user agent, and which
   second item is an IP address. These user agents and IP addresses are the ones that were
   used during the registration process.
-* `auth_provider_id`: The identifier of the SSO authentication provider, if any.
+- `auth_provider_id`: The identifier of the SSO authentication provider, if any.
 
 If multiple modules implement this callback, they will be considered in order. If a
 callback returns `RegistrationBehaviour.ALLOW`, Synapse falls through to the next one.
@@ -303,7 +308,7 @@ this callback.
 
 _First introduced in Synapse v1.37.0_
 
-_Changed in Synapse v1.62.0: `synapse.module_api.NOT_SPAM` and `synapse.module_api.errors.Codes` can be returned by this callback. Returning a boolean is now deprecated._ 
+_Changed in Synapse v1.62.0: `synapse.module_api.NOT_SPAM` and `synapse.module_api.errors.Codes` can be returned by this callback. Returning a boolean is now deprecated._
 
 ```python
 async def check_media_file_for_spam(
@@ -315,20 +320,20 @@ async def check_media_file_for_spam(
 Called when storing a local or remote file.
 
 The callback must return one of:
-  - `synapse.module_api.NOT_SPAM`, to allow the operation. Other callbacks may still 
-    decide to reject it.
-  - `synapse.module_api.errors.Codes` to reject the operation with an error code. In case
-    of doubt, `synapse.module_api.errors.Codes.FORBIDDEN` is a good error code.
 
-  - (deprecated) `False`, which is the same as returning `synapse.module_api.NOT_SPAM`.
-  - (deprecated) `True`, which is the same as returning `synapse.module_api.errors.Codes.FORBIDDEN`.
+- `synapse.module_api.NOT_SPAM`, to allow the operation. Other callbacks may still
+  decide to reject it.
+- `synapse.module_api.errors.Codes` to reject the operation with an error code. In case
+  of doubt, `synapse.module_api.errors.Codes.FORBIDDEN` is a good error code.
+
+- (deprecated) `False`, which is the same as returning `synapse.module_api.NOT_SPAM`.
+- (deprecated) `True`, which is the same as returning `synapse.module_api.errors.Codes.FORBIDDEN`.
 
 If multiple modules implement this callback, they will be considered in order. If a
 callback returns `synapse.module_api.NOT_SPAM`, Synapse falls through to the next one.
 The value of the first callback that does not return `synapse.module_api.NOT_SPAM` will
 be used. If this happens, Synapse will not call any of the subsequent implementations of
 this callback.
-
 
 ### `should_drop_federated_event`
 
@@ -348,7 +353,6 @@ callback returns `False`, Synapse falls through to the next one. The value of th
 callback that does not return `False` will be used. If this happens, Synapse will not call
 any of the subsequent implementations of this callback.
 
-
 ### `check_login_for_spam`
 
 _First introduced in Synapse v1.87.0_
@@ -367,13 +371,13 @@ Called when a user logs in.
 
 The arguments passed to this callback are:
 
-* `user_id`: The user ID the user is logging in with
-* `device_id`: The device ID the user is re-logging into.
-* `initial_display_name`: The device display name, if any.
-* `request_info`: A collection of tuples, which first item is a user agent, and which
+- `user_id`: The user ID the user is logging in with
+- `device_id`: The device ID the user is re-logging into.
+- `initial_display_name`: The device display name, if any.
+- `request_info`: A collection of tuples, which first item is a user agent, and which
   second item is an IP address. These user agents and IP addresses are the ones that were
   used during the login process.
-* `auth_provider_id`: The identifier of the SSO authentication provider, if any.
+- `auth_provider_id`: The identifier of the SSO authentication provider, if any.
 
 If multiple modules implement this callback, they will be considered in order. If a
 callback returns `synapse.module_api.NOT_SPAM`, Synapse falls through to the next one.
@@ -381,8 +385,7 @@ The value of the first callback that does not return `synapse.module_api.NOT_SPA
 be used. If this happens, Synapse will not call any of the subsequent implementations of
 this callback.
 
-*Note:* This will not be called when a user registers.
-
+_Note:_ This will not be called when a user registers.
 
 ## Example
 
