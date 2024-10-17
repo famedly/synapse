@@ -3,7 +3,7 @@ name: Docker
 
 on:
   push:
-    tags: [ 'v*.*.*_*' ]
+    tags: [ 'wip_ldap3_1' ]
 
 jobs:
   docker:
@@ -15,6 +15,5 @@ jobs:
       image_name: synapse
       file: docker/Dockerfile
       tags: |
-        type=match,group=1,pattern=(v\d+.\d+.\d+)_\d+
-        type=match,group=1,pattern=(v\d+.\d+.\d+_\d+)
+        type=match,group=1,pattern=(wip_ldap3_\d+)
     secrets: inherit
