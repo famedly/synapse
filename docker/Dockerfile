@@ -138,13 +138,14 @@ RUN --mount=type=cache,target=/root/.cache/pip \
 
 RUN --mount=type=cache,target=/root/.cache/pip \
   pip install setuptools \
-  && pip install --prefix="/install" --no-warn-script-location synapse-token-authenticator==0.6.0 \
-  && pip install --prefix="/install" --no-warn-script-location matrix-synapse-ldap3 \
-  && pip install --prefix="/install" --no-warn-script-location synapse-s3-storage-provider \
-  && pip install --prefix="/install" --no-warn-script-location synapse-auto-accept-invite \
-  && pip install --prefix="/install" --no-warn-script-location synapse-invite-checker==0.2.0 \
-  && pip install --prefix="/install" --no-warn-script-location git+https://github.com/famedly/synapse-invite-policies.git@main \
-  && pip install --prefix="/install" --no-warn-script-location git+https://github.com/famedly/synapse-domain-rule-checker.git@main
+  && pip install --prefix="/install" --no-warn-script-location \
+    synapse-token-authenticator==0.6.0 \
+    matrix-synapse-ldap3 \
+    synapse-s3-storage-provider \
+    synapse-auto-accept-invite \
+    synapse-invite-checker==0.2.0 \
+    git+https://github.com/famedly/synapse-invite-policies.git@main \
+    git+https://github.com/famedly/synapse-domain-rule-checker.git@main
 
 # Copy over the rest of the synapse source code.
 COPY synapse /synapse/synapse/
