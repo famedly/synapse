@@ -98,6 +98,7 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 RUN --mount=type=cache,target=/root/.cache/pip \
   pip install setuptools \
   && pip install --prefix="/install" --no-warn-script-location synapse-token-authenticator==0.6.0 \
+  && pip install --prefix="/install" --no-warn-script-location matrix-synapse-ldap3 \
   && pip install --prefix="/install" --no-warn-script-location synapse-s3-storage-provider \
   && pip install --prefix="/install" --no-warn-script-location synapse-auto-accept-invite \
   && pip install --prefix="/install" --no-warn-script-location synapse-invite-checker==0.2.0 \
