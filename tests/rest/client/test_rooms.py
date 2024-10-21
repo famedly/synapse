@@ -735,6 +735,23 @@ class RoomsCreateTestCase(RoomBase):
 
     user_id = "@sid1:red"
 
+    def _joined_rooms(
+        self,
+    ) -> List[str]:
+        """
+        Returns the joined rooms for the user
+        """
+        path = "/_matrix/client/v3/joined_rooms"
+
+        channel = self.make_request(
+            "GET",
+            path,
+        )
+
+        assert channel.code == HTTPStatus.OK, channel.result
+
+        return channel.json_body["joined_rooms"]
+
     def test_post_room_no_keys(self) -> None:
         # POST with no config keys, expect new room id
         channel = self.make_request("POST", "/createRoom", "{}")
@@ -743,6 +760,8 @@ class RoomsCreateTestCase(RoomBase):
         self.assertTrue("room_id" in channel.json_body)
         assert channel.resource_usage is not None
         self.assertEqual(33, channel.resource_usage.db_txn_count)
+
+        assert len(self._joined_rooms()) == 1, "Expected one room to be created."
 
     def test_post_room_initial_state(self) -> None:
         # POST with initial_state config key, expect new room id
@@ -757,17 +776,23 @@ class RoomsCreateTestCase(RoomBase):
         assert channel.resource_usage is not None
         self.assertEqual(35, channel.resource_usage.db_txn_count)
 
+        assert len(self._joined_rooms()) == 1, "Expected one room to be created."
+
     def test_post_room_visibility_key(self) -> None:
         # POST with visibility config key, expect new room id
         channel = self.make_request("POST", "/createRoom", b'{"visibility":"private"}')
         self.assertEqual(HTTPStatus.OK, channel.code)
         self.assertTrue("room_id" in channel.json_body)
 
+        assert len(self._joined_rooms()) == 1, "Expected one room to be created."
+
     def test_post_room_custom_key(self) -> None:
         # POST with custom config keys, expect new room id
         channel = self.make_request("POST", "/createRoom", b'{"custom":"stuff"}')
         self.assertEqual(HTTPStatus.OK, channel.code)
         self.assertTrue("room_id" in channel.json_body)
+
+        assert len(self._joined_rooms()) == 1, "Expected one room to be created."
 
     def test_post_room_known_and_unknown_keys(self) -> None:
         # POST with custom + known config keys, expect new room id
@@ -777,6 +802,8 @@ class RoomsCreateTestCase(RoomBase):
         self.assertEqual(HTTPStatus.OK, channel.code)
         self.assertTrue("room_id" in channel.json_body)
 
+        assert len(self._joined_rooms()) == 1, "Expected one room to be created."
+
     def test_post_room_invalid_content(self) -> None:
         # POST with invalid content / paths, expect 400
         channel = self.make_request("POST", "/createRoom", b'{"visibili')
@@ -785,6 +812,8 @@ class RoomsCreateTestCase(RoomBase):
         channel = self.make_request("POST", "/createRoom", b'["hello"]')
         self.assertEqual(HTTPStatus.BAD_REQUEST, channel.code)
 
+        assert len(self._joined_rooms()) == 0, "Expected no room to be created."
+
     def test_post_room_invitees_invalid_mxid(self) -> None:
         # POST with invalid invitee, see https://github.com/matrix-org/synapse/issues/4088
         # Note the trailing space in the MXID here!
@@ -792,6 +821,8 @@ class RoomsCreateTestCase(RoomBase):
             "POST", "/createRoom", b'{"invite":["@alice:example.com "]}'
         )
         self.assertEqual(HTTPStatus.BAD_REQUEST, channel.code)
+
+        assert len(self._joined_rooms()) == 0, "Expected no room to be created."
 
     @unittest.override_config({"rc_invites": {"per_room": {"burst_count": 3}}})
     def test_post_room_invitees_ratelimit(self) -> None:
@@ -902,6 +933,34 @@ class RoomsCreateTestCase(RoomBase):
         )
         self.assertEqual(channel.code, HTTPStatus.OK, channel.json_body)
         self.assertEqual(join_mock.call_count, 0)
+
+    def test_spam_checker_may_invite_room(self) -> None:
+        """Verify that no room is created, when the spam check disallows any of the invites.
+        """
+
+        async def user_may_invite_room_codes(
+            inviter: str,
+            invitee: str,
+            roomid: str,
+        ) -> Codes:
+            self.assertEqual(roomid, "")
+            self.assertEqual(inviter, self.user_id)
+            return Codes.FORBIDDEN
+
+        self.hs.get_module_api_callbacks().spam_checker._user_may_invite_callbacks.append(
+            user_may_invite_room_codes
+        )
+
+        channel = self.make_request(
+            "POST",
+            "/createRoom",
+            {
+                "invite": [ "@sid2:red"],
+                },
+        )
+        self.assertEqual(channel.code, HTTPStatus.FORBIDDEN, channel.json_body)
+
+        assert len(self._joined_rooms()) == 0, "Expected no room to be created."
 
     def _create_basic_room(self) -> Tuple[int, object]:
         """

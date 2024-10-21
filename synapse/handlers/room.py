@@ -873,6 +873,36 @@ class RoomCreationHandler:
             except LimitExceededError:
                 raise SynapseError(400, "Cannot invite so many users at once")
 
+        # Verify invites ahead of time. This is to prevent a partial room
+        # creation in case the spam checker API rejects an invite. We don't
+        # want a user do see a partial room in that case.
+        # Currently 3pid invites are not validated ahead of time since that
+        # invite depends on a server lookup.
+        for invitee in invite_list:
+            if not is_requester_admin:
+                block_invite_result = None
+                if self.config.server.block_non_admin_invites:
+                    logger.info(
+                        "Blocking invite: user is not admin and non-admin "
+                        "invites disabled"
+                    )
+                    block_invite_result = (Codes.FORBIDDEN, {})
+                else:
+                    spam_check = await self._spam_checker_module_callbacks.user_may_invite(
+                        requester.user.to_string(), invitee, "" # intentionally blank, since no room exists yet
+                    )
+                    if spam_check != self._spam_checker_module_callbacks.NOT_SPAM:
+                        logger.info("Blocking invite due to spam checker")
+                        block_invite_result = spam_check
+
+                if block_invite_result is not None:
+                    raise SynapseError(
+                        403,
+                        "Invites have been disabled on this server",
+                        errcode=block_invite_result[0],
+                        additional_fields=block_invite_result[1],
+                    )
+
         await self.event_creation_handler.assert_accepted_privacy_policy(requester)
 
         power_level_content_override = config.get("power_level_content_override")
