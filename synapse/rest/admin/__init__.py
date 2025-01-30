@@ -76,6 +76,7 @@ from synapse.rest.admin.rooms import (
     DeleteRoomStatusByRoomIdRestServlet,
     ForwardExtremitiesRestServlet,
     JoinRoomAliasServlet,
+    LeaveAllFederatedRoomsRestServlet,
     ListRoomRestServlet,
     MakeRoomAdminRestServlet,
     RoomEventContextServlet,
@@ -280,6 +281,7 @@ def register_servlets(hs: "HomeServer", http_server: HttpServer) -> None:
         return
 
     register_servlets_for_client_rest_resource(hs, http_server)
+    LeaveAllFederatedRoomsRestServlet(hs).register(http_server)
     BlockRoomRestServlet(hs).register(http_server)
     ListRoomRestServlet(hs).register(http_server)
     RoomStateRestServlet(hs).register(http_server)
