@@ -397,6 +397,17 @@ class RoomWorkerStore(CacheInvalidationWorkerStore):
 
         return await self.db_pool.runInteraction("get_rooms", f)
 
+    async def get_all_room_ids(self) -> List[str]:
+        """Retrieve all room IDS."""
+
+        def f(txn: LoggingTransaction) -> List[str]:
+            sql = "SELECT room_id FROM rooms"
+            txn.execute(sql)
+            result = [room_id for (room_id,) in txn.fetchall()]
+            return result
+
+        return await self.db_pool.runInteraction("get_rooms", f)
+
     async def get_largest_public_rooms(
         self,
         network_tuple: Optional[ThirdPartyInstanceID],
