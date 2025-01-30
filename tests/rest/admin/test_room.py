@@ -39,7 +39,7 @@ from synapse.handlers.pagination import (
 )
 from synapse.rest.client import directory, events, knock, login, room, sync
 from synapse.server import HomeServer
-from synapse.types import UserID
+from synapse.types import JsonDict, UserID
 from synapse.util import Clock
 from synapse.util.task_scheduler import TaskScheduler
 
@@ -3068,6 +3068,172 @@ class BlockRoomTestCase(unittest.HomeserverTestCase):
         """Block a room in database"""
         self.get_success(self._store.block_room(room_id, self.other_user))
         self._is_blocked(room_id, expect=True)
+
+
+class LeaveAllFederatedRoomsTestCase(unittest.HomeserverTestCase):
+    servlets = [
+        synapse.rest.admin.register_servlets,
+        room.register_servlets,
+        login.register_servlets,
+    ]
+
+    def make_homeserver(self, reactor: MemoryReactor, clock: Clock) -> HomeServer:
+        self.federation_transport_client = Mock(spec=["send_transaction"])
+        self.federation_transport_client.send_transaction = AsyncMock()
+        hs = self.setup_test_homeserver(
+            federation_transport_client=self.federation_transport_client,
+        )
+        return hs
+
+    def default_config(self) -> JsonDict:
+        config = super().default_config()
+        config["federation_sender_instances"] = None
+        return config
+
+    def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
+        self._store = hs.get_datastores().main
+
+        self.admin_user = self.register_user("admin", "pass", admin=True)
+        self.admin_user_tok = self.login("admin", "pass")
+
+        self.local_user_1 = self.register_user("user_1", "pass")
+        self.local_user_1_tok = self.login("user_1", "pass")
+
+        self.local_user_2 = self.register_user("user_2", "pass")
+        self.local_user_2_tok = self.login("user_2", "pass")
+
+        self.remote_user_1 = "@remote_1:example.com"
+        self.remote_user_2 = "@remote_2:other-server.org"
+
+        self.url = "/_synapse/admin/v1/rooms/defederate_server"
+
+    def test_requester_is_not_admin(self) -> None:
+        """If the user is not a server admin, an error 403 is returned."""
+        _ = self.helper.create_room_as(self.local_user_1, tok=self.local_user_1_tok)
+
+        channel = self.make_request(
+            "POST",
+            self.url,
+            content={},
+            access_token=self.local_user_1_tok,
+        )
+
+        self.assertEqual(403, channel.code, msg=channel.json_body)
+        self.assertEqual(Codes.FORBIDDEN, channel.json_body["errcode"])
+
+    def test_local_room_is_bypassed(self) -> None:
+        """If the room only has local users, it is skipped"""
+
+        room_id = self.helper.create_room_as(
+            self.local_user_1, tok=self.local_user_1_tok
+        )
+
+        self.helper.join(room_id, user=self.local_user_2, tok=self.local_user_2_tok)
+
+        # Both users should be in the room
+        local_room_users = self.get_success_or_raise(
+            self._store.get_users_in_room(room_id)
+        )
+        self.assertEqual(len(local_room_users), 2)
+        self.assertIn(self.local_user_1, local_room_users)
+        self.assertIn(self.local_user_2, local_room_users)
+
+        channel = self.make_request(
+            "POST",
+            self.url,
+            content={},
+            access_token=self.admin_user_tok,
+        )
+        self.assertEqual(200, channel.code, msg=channel.json_body)
+
+        # Both users are still there
+        local_room_users = self.get_success_or_raise(
+            self._store.get_users_in_room(room_id)
+        )
+        self.assertEqual(len(local_room_users), 2)
+        self.assertIn(self.local_user_1, local_room_users)
+        self.assertIn(self.local_user_2, local_room_users)
+
+    def test_federated_room_is_left(self) -> None:
+        """If the room has remote users, it has local membership set to 'leave'"""
+        mock_send_transaction = self.federation_transport_client.send_transaction
+        mock_send_transaction.return_value = {}
+
+        room_id = self.helper.create_room_as(
+            self.local_user_1, tok=self.local_user_1_tok
+        )
+
+        # Add the remote user to the room, this does trigger some things but is not a
+        # true send_join. No room state or events have been sent to the remote server.
+        self.inject_room_member(room_id, self.remote_user_1, Membership.JOIN)
+
+        # The local user registers as joined
+        local_membership_type, _ = self.get_success_or_raise(
+            self._store.get_local_current_membership_for_user_in_room(
+                self.local_user_1,
+                room_id,
+            )
+        )
+        self.assertEqual(local_membership_type, Membership.JOIN)
+
+        # Should be two users in the room, one local and one remote
+        all_room_users = self.get_success_or_raise(
+            self._store.get_users_in_room(room_id)
+        )
+        self.assertEqual(len(all_room_users), 2)
+        self.assertIn(self.local_user_1, all_room_users)
+        self.assertIn(self.remote_user_1, all_room_users)
+
+        # reset the mock, or the device list updates to the remote server register
+        mock_send_transaction.reset_mock()
+
+        channel = self.make_request(
+            "POST",
+            self.url,
+            content={},
+            access_token=self.admin_user_tok,
+        )
+        self.assertEqual(200, channel.code, msg=channel.json_body)
+
+        # Make sure it was sent out to remote server
+        mock_send_transaction.assert_called_once()
+
+        all_room_users = self.get_success_or_raise(
+            self._store.get_users_in_room(room_id)
+        )
+        # The local server no longer thinks it is in the room
+        self.assertEqual(len(all_room_users), 0)
+        self.assertNotIn(self.local_user_1, all_room_users)
+        self.assertNotIn(self.remote_user_1, all_room_users)
+
+        # Since the current state tables will no longer be reliable, check this one.
+        # It specifically needs to be a LEAVE
+        room_ids = self.get_success_or_raise(
+            self._store.db_pool.simple_select_onecol(
+                table="room_memberships",
+                keyvalues={
+                    "membership": Membership.LEAVE,
+                    "user_id": self.local_user_1,
+                },
+                retcol="room_id",
+                desc="get_rooms_user_has_been_in",
+            )
+        )
+        self.assertIn(room_id, room_ids)
+
+        room_ids = self.get_success_or_raise(
+            self._store.db_pool.simple_select_onecol(
+                table="room_memberships",
+                keyvalues={
+                    "membership": Membership.LEAVE,
+                    "user_id": self.remote_user_1,
+                },
+                retcol="room_id",
+                desc="get_rooms_user_has_been_in",
+            )
+        )
+        # Here we can see that a leave event for the remote user was not processed
+        self.assertNotIn(room_id, room_ids)
 
 
 PURGE_TABLES = [
