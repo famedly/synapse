@@ -1001,3 +1001,99 @@ class RoomTimestampToEventRestServlet(RestServlet):
             "event_id": event_id,
             "origin_server_ts": origin_server_ts,
         }
+
+
+class LeaveAllFederatedRoomsRestServlet(RestServlet):
+    """
+    Unilaterally set all local users to `leave` in all federated rooms.
+    Useful when de-provisioning a server from the federation. Will not change
+    local-only rooms
+    """
+
+    PATTERNS = admin_patterns("/rooms/defederate_server$")
+
+    def __init__(self, hs: "HomeServer"):
+        self._deactivate_account_handler = hs.get_deactivate_account_handler()
+        self.auth = hs.get_auth()
+        self.is_mine = hs.is_mine
+        self.is_mine_server_name = hs.is_mine_server_name
+        self.store = hs.get_datastores().main
+        self.room_member_handler = hs.get_room_member_handler()
+        self._replication = hs.get_replication_data_handler()
+        self.events_shard_config = hs.config.worker.events_shard_config
+
+    async def on_POST(self, request: SynapseRequest) -> Tuple[int, JsonDict]:
+        requester = await self.auth.get_user_by_req(request)
+        requester_userid = requester.user
+
+        if not self.is_mine(requester_userid):
+            raise SynapseError(
+                HTTPStatus.BAD_REQUEST,
+                "Can only leave all federated rooms with a local user",
+            )
+
+        await assert_user_is_admin(self.auth, requester)
+
+        # collect all rooms on this server
+        all_room_ids = await self.store.get_all_room_ids()
+        target_room_ids = set()
+        for room_id in all_room_ids:
+            # if there is a remote host, this is a federated room
+            set_of_hosts_in_this_room = await self.store.get_current_hosts_in_room(
+                room_id
+            )
+            if any(
+                host
+                for host in set_of_hosts_in_this_room
+                if not self.is_mine_server_name(host)
+            ):
+                target_room_ids.add(room_id)
+
+        for room_id in target_room_ids:
+            local_users_w_memberships = (
+                await self.store.get_local_users_related_to_room(room_id)
+            )
+
+            for target_user_id, membership in local_users_w_memberships:
+                if membership not in (
+                    Membership.JOIN,
+                    Membership.INVITE,
+                    Membership.KNOCK,
+                ):
+                    continue
+
+                logger.info(
+                    "Removing reference of %r from %r...", target_user_id, room_id
+                )
+
+                try:
+                    # Kick users from room using a puppet
+                    target_requester = create_requester(
+                        target_user_id,
+                        authenticated_entity=requester_userid.to_string(),
+                    )
+                    _, stream_id = await self.room_member_handler.update_membership(
+                        requester=target_requester,
+                        target=target_requester.user,
+                        room_id=room_id,
+                        action=Membership.LEAVE,
+                        content={},
+                        ratelimit=False,
+                        require_consent=False,
+                    )
+
+                    # Wait for leave to come in over replication to not swamp a reactor
+                    # await self._replication.wait_for_stream_position(
+                    #     self.events_shard_config.get_instance(room_id),
+                    #     "events",
+                    #     stream_id,
+                    # )
+
+                except Exception:
+                    logger.exception(
+                        "Failed to kick %r from federated room %r",
+                        target_user_id,
+                        room_id,
+                    )
+
+        return HTTPStatus.OK, {}
