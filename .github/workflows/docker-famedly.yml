@@ -3,11 +3,11 @@ name: Docker
 
 on:
   push:
-    tags: [ 'v*.*.*_*' ]
+    tags: ["v*.*.*_*"]
 
 jobs:
   docker:
-    uses: famedly/github-workflows/.github/workflows/docker.yml@6da23b565deec84c38ad29b0499479b86d597ce4
+    uses: famedly/github-workflows/.github/workflows/docker.yml@main
     with:
       push: ${{ github.event_name != 'pull_request' }} # Always build, don't publish on pull requests
       registry_user: famedly-ci
