@@ -3235,6 +3235,66 @@ class LeaveAllFederatedRoomsTestCase(unittest.HomeserverTestCase):
         # Here we can see that a leave event for the remote user was not processed
         self.assertNotIn(room_id, room_ids)
 
+    def test_federated_room_with_two_remotes_is_left(self) -> None:
+        """If the room has remote users, it has local membership set to 'leave'"""
+        mock_send_transaction = self.federation_transport_client.send_transaction
+        mock_send_transaction.return_value = {}
+
+        room_id = self.helper.create_room_as(
+            self.local_user_1, tok=self.local_user_1_tok
+        )
+
+        # Add the remote users to the room, this does trigger some things but is not a
+        # true send_join. No room state or events have been sent to the remote servers.
+        self.inject_room_member(room_id, self.remote_user_1, Membership.JOIN)
+        self.inject_room_member(room_id, self.remote_user_2, Membership.JOIN)
+
+        # The local user registers as joined
+        local_membership_type, _ = self.get_success_or_raise(
+            self._store.get_local_current_membership_for_user_in_room(
+                self.local_user_1,
+                room_id,
+            )
+        )
+        self.assertEqual(local_membership_type, Membership.JOIN)
+
+        # Should be two users in the room, one local and one remote
+        all_room_users = self.get_success_or_raise(
+            self._store.get_users_in_room(room_id)
+        )
+        self.assertEqual(len(all_room_users), 3)
+        self.assertIn(self.local_user_1, all_room_users)
+        self.assertIn(self.remote_user_1, all_room_users)
+        self.assertIn(self.remote_user_2, all_room_users)
+
+        # reset the mock, or the 2 presence updates to the remote server register, one
+        # for each server. Also pump the reactor by 5 seconds, or the second takes it's
+        # sweet time
+        self.pump(5)
+        mock_send_transaction.reset_mock()
+
+        channel = self.make_request(
+            "POST",
+            self.url,
+            content={},
+            access_token=self.admin_user_tok,
+        )
+        self.assertEqual(200, channel.code, msg=channel.json_body)
+
+        # Make sure it was sent out to the remote servers
+        self.assertEquals(
+            mock_send_transaction.call_count, 2, mock_send_transaction.mock_calls
+        )
+
+        all_room_users = self.get_success_or_raise(
+            self._store.get_users_in_room(room_id)
+        )
+        # The local server no longer thinks it is in the room
+        self.assertEqual(len(all_room_users), 0)
+        self.assertNotIn(self.local_user_1, all_room_users)
+        self.assertNotIn(self.remote_user_1, all_room_users)
+        self.assertNotIn(self.remote_user_2, all_room_users)
+
 
 PURGE_TABLES = [
     "current_state_events",
