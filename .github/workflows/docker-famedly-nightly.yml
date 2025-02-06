@@ -1,0 +1,21 @@
+---
+name: Docker-nightly
+
+on:
+  push:
+    tags:
+      - "*"
+      - "!v*"
+
+jobs:
+  docker:
+    uses: famedly/github-workflows/.github/workflows/docker.yml@main
+    with:
+      push: ${{ github.event_name != 'pull_request' }} # Always build, don't publish on pull requests
+      registry_user: famedly-ci
+      registry: docker-nightly.nexus.famedly.de
+      image_name: synapse
+      file: docker/Dockerfile
+      tags: |
+        type=ref,event=tag
+    secrets: inherit

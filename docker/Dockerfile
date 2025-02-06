@@ -139,7 +139,7 @@ RUN --mount=type=cache,target=/root/.cache/pip \
 RUN --mount=type=cache,target=/root/.cache/pip \
   pip install setuptools \
   && pip install --prefix="/install" --no-warn-script-location \
-    synapse-token-authenticator==0.8.1 \
+    git+https://github.com/famedly/synapse-token-authenticator.git@mzaniolo/validate_external_id \
     matrix-synapse-ldap3 \
     synapse-s3-storage-provider \
     synapse-auto-accept-invite \
