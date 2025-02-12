@@ -588,6 +588,9 @@ class RefreshTokenServlet(RestServlet):
             hs.config.registration.refreshable_access_token_lifetime
         )
         self.refresh_token_lifetime = hs.config.registration.refresh_token_lifetime
+        self.famedly_maximum_refresh_token_lifetime = (
+            hs.config.registration.famedly_maximum_refresh_token_lifetime
+        )
 
     async def on_POST(self, request: SynapseRequest) -> Tuple[int, JsonDict]:
         refresh_submission = parse_json_object_from_request(request)
@@ -613,7 +616,10 @@ class RefreshTokenServlet(RestServlet):
                     "Invalid param: com.famedly.refresh_token_lifetime_ms",
                     Codes.INVALID_PARAM,
                 )
-            refresh_valid_until_ms = now + custom_refresh_token_lifetime
+            refresh_valid_until_ms = now + min(
+                custom_refresh_token_lifetime,
+                self.famedly_maximum_refresh_token_lifetime,
+            )
         elif self.refresh_token_lifetime is not None:
             refresh_valid_until_ms = now + self.refresh_token_lifetime
 
