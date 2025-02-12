@@ -229,6 +229,14 @@ class RegistrationConfig(Config):
                     " exceeds `session_lifetime`!"
                 )
 
+        max_refresh_token_lifetime = config.get(
+            "famedly_maximum_refresh_token_lifetime", "160d"
+        )
+
+        if max_refresh_token_lifetime is not None:
+            max_refresh_token_lifetime = self.parse_duration(max_refresh_token_lifetime)
+        self.famedly_maximum_refresh_token_lifetime: int = max_refresh_token_lifetime
+
         # The fallback template used for authenticating using a registration token
         self.registration_token_template = self.read_template("registration_token.html")
 
