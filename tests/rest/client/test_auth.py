@@ -993,6 +993,79 @@ class RefreshAuthTests(unittest.HomeserverTestCase):
 
     @override_config(
         {
+            "refreshable_access_token_lifetime": "1m",
+            "refresh_token_lifetime": "2m",
+            "famedly_maximum_refresh_token_lifetime": "10m",
+        }
+    )
+    def test_custom_refresh_token_expiry_maximum(self) -> None:
+        """
+        The client might override the refresh token lifetime using the custom com.famedly.refresh_token_lifetime_ms parameter. Ensure we clamp to the maximum.
+        """
+
+        def use_custom_refresh_token(refresh_token: str) -> FakeChannel:
+            """
+            Helper that makes a request to use a refresh token with a custom lifetime (30 minutes).
+            """
+            return self.make_request(
+                "POST",
+                "/_matrix/client/v3/refresh",
+                {
+                    "refresh_token": refresh_token,
+                    "com.famedly.refresh_token_lifetime_ms": 30 * 60 * 1000,
+                },
+            )
+
+        body = {
+            "type": "m.login.password",
+            "user": "test",
+            "password": self.user_pass,
+            "refresh_token": True,
+        }
+        login_response = self.make_request(
+            "POST",
+            "/_matrix/client/r0/login",
+            body,
+        )
+        self.assertEqual(login_response.code, HTTPStatus.OK, login_response.result)
+        refresh_token1 = login_response.json_body["refresh_token"]
+
+        # refresh immediately to set custom expiry time
+        refresh_response = use_custom_refresh_token(refresh_token1)
+        self.assertEqual(refresh_response.code, HTTPStatus.OK, refresh_response.result)
+        self.assertIn(
+            "refresh_token",
+            refresh_response.json_body,
+            "No new refresh token returned after refresh.",
+        )
+        refresh_token2 = refresh_response.json_body["refresh_token"]
+
+        # Advance 179 seconds in the future (just shy of 3 minutes)
+        self.reactor.advance(179.0)
+
+        # Refresh our session. The refresh token should still JUST be valid right now.
+        # By doing so, we get a new access token and a new refresh token.
+        refresh_response = use_custom_refresh_token(refresh_token2)
+        self.assertEqual(refresh_response.code, HTTPStatus.OK, refresh_response.result)
+        self.assertIn(
+            "refresh_token",
+            refresh_response.json_body,
+            "No new refresh token returned after refresh.",
+        )
+        refresh_token3 = refresh_response.json_body["refresh_token"]
+
+        # Advance 610 seconds in the future (just a bit more than 10 minutes)
+        self.reactor.advance(610.0)
+
+        # Try to refresh our session, but instead notice that the refresh token is
+        # not valid (it just expired).
+        refresh_response = use_custom_refresh_token(refresh_token3)
+        self.assertEqual(
+            refresh_response.code, HTTPStatus.FORBIDDEN, refresh_response.result
+        )
+
+    @override_config(
+        {
             "refreshable_access_token_lifetime": "2m",
             "refresh_token_lifetime": "2m",
             "session_lifetime": "3m",
