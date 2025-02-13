@@ -24,6 +24,7 @@ from typing import TYPE_CHECKING, Any, Awaitable, Callable, List, Optional, Tupl
 from twisted.internet.defer import CancelledError
 
 from synapse.api.errors import ModuleFailedException, SynapseError
+from synapse.api.room_versions import RoomVersion
 from synapse.events import EventBase
 from synapse.events.snapshot import UnpersistedEventContextBase
 from synapse.storage.roommember import ProfileInfo
@@ -54,6 +55,7 @@ ON_USER_DEACTIVATION_STATUS_CHANGED_CALLBACK = Callable[[str, bool, bool], Await
 ON_THREEPID_BIND_CALLBACK = Callable[[str, str, str], Awaitable]
 ON_ADD_USER_THIRD_PARTY_IDENTIFIER_CALLBACK = Callable[[str, str, str], Awaitable]
 ON_REMOVE_USER_THIRD_PARTY_IDENTIFIER_CALLBACK = Callable[[str, str, str], Awaitable]
+ON_UPGRADE_ROOM_CALLBACK = Callable[[Requester, RoomVersion], Awaitable]
 
 
 def load_legacy_third_party_event_rules(hs: "HomeServer") -> None:
@@ -185,6 +187,7 @@ class ThirdPartyEventRulesModuleApiCallbacks:
         self._on_remove_user_third_party_identifier_callbacks: List[
             ON_REMOVE_USER_THIRD_PARTY_IDENTIFIER_CALLBACK
         ] = []
+        self._on_upgrade_room_callbacks: List[ON_UPGRADE_ROOM_CALLBACK] = []
 
     def register_third_party_rules_callbacks(
         self,
@@ -210,6 +213,7 @@ class ThirdPartyEventRulesModuleApiCallbacks:
         on_remove_user_third_party_identifier: Optional[
             ON_REMOVE_USER_THIRD_PARTY_IDENTIFIER_CALLBACK
         ] = None,
+        on_upgrade_room: Optional[ON_UPGRADE_ROOM_CALLBACK] = None,
     ) -> None:
         """Register callbacks from modules for each hook."""
         if check_event_allowed is not None:
@@ -256,6 +260,8 @@ class ThirdPartyEventRulesModuleApiCallbacks:
             self._on_remove_user_third_party_identifier_callbacks.append(
                 on_remove_user_third_party_identifier
             )
+        if on_upgrade_room is not None:
+            self._on_upgrade_room_callbacks.append(on_upgrade_room)
 
     async def check_event_allowed(
         self,
@@ -597,3 +603,29 @@ class ThirdPartyEventRulesModuleApiCallbacks:
                 logger.exception(
                     "Failed to run module API callback %s: %s", callback, e
                 )
+
+    async def on_upgrade_room(
+        self, requester: Requester, room_version: RoomVersion
+    ) -> None:
+        """Intercept requests to upgrade a room to maybe deny it (via an exception).
+
+        Args:
+            requester
+            room_version: The RoomVersion requested for the upgrade.
+        """
+        for callback in self._on_upgrade_room_callbacks:
+            try:
+                await callback(requester, room_version)
+            except Exception as e:
+                logger.exception(
+                    "Failed to run module API callback %s: %s", callback, e
+                )
+                # Don't silence the errors raised by this callback since we expect it to
+                # raise an exception to deny the upgrade of the room; instead make sure
+                # it's a SynapseError we can send to clients.
+                if not isinstance(e, SynapseError):
+                    e = SynapseError(
+                        403, "Room upgrade forbidden with these parameters"
+                    )
+
+                raise e
