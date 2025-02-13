@@ -220,6 +220,8 @@ class RoomCreationHandler:
         if old_room is None:
             raise NotFoundError("Unknown room id %s" % (old_room_id,))
 
+        await self._third_party_event_rules.on_upgrade_room(requester, new_version)
+
         new_room_id = self._generate_room_id()
 
         # Try several times, it could fail with PartialStateConflictError
