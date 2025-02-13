@@ -19,13 +19,14 @@
 #
 #
 import threading
-from typing import TYPE_CHECKING, Any, Dict, Optional, Tuple, Union
+from http import HTTPStatus
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple, Union
 from unittest.mock import AsyncMock, Mock
 
 from twisted.test.proto_helpers import MemoryReactor
 
 from synapse.api.constants import EventTypes, LoginType, Membership
-from synapse.api.errors import SynapseError
+from synapse.api.errors import Codes, SynapseError
 from synapse.api.room_versions import RoomVersion
 from synapse.config.homeserver import HomeServerConfig
 from synapse.events import EventBase
@@ -33,13 +34,14 @@ from synapse.module_api.callbacks.third_party_event_rules_callbacks import (
     load_legacy_third_party_event_rules,
 )
 from synapse.rest import admin
-from synapse.rest.client import account, login, profile, room
+from synapse.rest.client import account, login, profile, room, room_upgrade_rest_servlet
 from synapse.server import HomeServer
 from synapse.types import JsonDict, Requester, StateMap
 from synapse.util import Clock
 from synapse.util.frozenutils import unfreeze
 
 from tests import unittest
+from tests.server import make_request
 
 if TYPE_CHECKING:
     from synapse.module_api import ModuleApi
@@ -93,11 +95,33 @@ class LegacyChangeEvents(LegacyThirdPartyRulesTestModule):
         return d
 
 
+class OnUpgradeRoomModule:
+    def __init__(self, config: Dict, module_api: "ModuleApi") -> None:
+        self.allowed_room_versions: List[str] = []
+        if allowed_room_ver_from_config := config.get("allowed_room_versions"):
+            self.allowed_room_versions = allowed_room_ver_from_config
+
+        module_api.register_third_party_rules_callbacks(
+            on_upgrade_room=self.on_upgrade_room
+        )
+
+    async def on_upgrade_room(
+        self, requester: Requester, room_version: RoomVersion
+    ) -> None:
+        if room_version.identifier not in self.allowed_room_versions:
+            raise SynapseError(
+                400,
+                "You can not upgrade room to that version",
+                Codes.UNSUPPORTED_ROOM_VERSION,
+            )
+
+
 class ThirdPartyRulesTestCase(unittest.FederatingHomeserverTestCase):
     servlets = [
         admin.register_servlets,
         login.register_servlets,
         room.register_servlets,
+        room_upgrade_rest_servlet.register_servlets,
         profile.register_servlets,
         account.register_servlets,
     ]
@@ -425,6 +449,66 @@ class ThirdPartyRulesTestCase(unittest.FederatingHomeserverTestCase):
         correctly.
         """
         self.helper.create_room_as(self.user_id, tok=self.tok, expect_code=403)
+
+    @unittest.override_config(
+        {
+            "third_party_event_rules": {
+                "module": __name__ + ".OnUpgradeRoomModule",
+                "config": {
+                    "allowed_room_versions": ["9", "10"],
+                },
+            }
+        }
+    )
+    def test_on_upgrade_room(self) -> None:
+        """Tests that the on_upgrade_room callbacks works correctly."""
+
+        def upgrade_room_to_version(
+            _room_id: str,
+            room_version: str,
+            tok: Optional[str] = None,
+            expect_code: int = HTTPStatus.OK,
+        ) -> Optional[str]:
+            """
+            Upgrade a room.
+
+            Args:
+                _room_id
+                room_version: The room version to upgrade the room to.
+                tok: The access token to use in the request.
+                expect_code: The expected HTTP response code.
+            Returns:
+                The ID of the newly created room, or None if the request failed.
+            """
+            path = f"/_matrix/client/r0/rooms/{_room_id}/upgrade"
+            content = {"new_version": room_version}
+
+            channel = make_request(
+                self.reactor,
+                self.site,
+                "POST",
+                path,
+                content,
+                access_token=tok,
+            )
+
+            assert channel.code == expect_code, channel.result
+
+            if expect_code == HTTPStatus.OK:
+                return channel.json_body["replacement_room"]
+            else:
+                return None
+
+        # Room in configured list
+        room_id_1 = self.helper.create_room_as(
+            self.user_id, room_version="9", tok=self.tok
+        )
+        upgrade_room_to_version(room_id_1, "10", tok=self.tok, expect_code=200)
+        # Room not in configured list
+        room_id_2 = self.helper.create_room_as(
+            self.user_id, room_version="10", tok=self.tok
+        )
+        upgrade_room_to_version(room_id_2, "11", tok=self.tok, expect_code=400)
 
     def test_sent_event_end_up_in_room_state(self) -> None:
         """Tests that a state event sent by a module while processing another state event
