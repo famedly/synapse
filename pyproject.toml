@@ -363,6 +363,9 @@ towncrier = ">=18.6.0rc1"
 tomli = ">=1.2.3"
 
 
+[tool.poetry.group.dev.dependencies]
+coverage = "^7.6.12"
+
 [build-system]
 # The upper bounds here are defensive, intended to prevent situations like
 # https://github.com/matrix-org/synapse/issues/13849 and
