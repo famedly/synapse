@@ -220,7 +220,18 @@ class RoomCreationHandler:
         if old_room is None:
             raise NotFoundError("Unknown room id %s" % (old_room_id,))
 
-        await self._third_party_event_rules.on_upgrade_room(requester, new_version)
+        if (
+            self._server_notices_mxid is not None
+            and user_id == self._server_notices_mxid
+        ):
+            # allow the server notices mxid to create rooms
+            is_requester_admin = True
+        else:
+            is_requester_admin = await self.auth.is_server_admin(requester)
+
+        await self._third_party_event_rules.on_upgrade_room(
+            requester, new_version, is_requester_admin=is_requester_admin
+        )
 
         new_room_id = self._generate_room_id()
 
