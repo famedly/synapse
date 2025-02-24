@@ -55,7 +55,7 @@ ON_USER_DEACTIVATION_STATUS_CHANGED_CALLBACK = Callable[[str, bool, bool], Await
 ON_THREEPID_BIND_CALLBACK = Callable[[str, str, str], Awaitable]
 ON_ADD_USER_THIRD_PARTY_IDENTIFIER_CALLBACK = Callable[[str, str, str], Awaitable]
 ON_REMOVE_USER_THIRD_PARTY_IDENTIFIER_CALLBACK = Callable[[str, str, str], Awaitable]
-ON_UPGRADE_ROOM_CALLBACK = Callable[[Requester, RoomVersion], Awaitable]
+ON_UPGRADE_ROOM_CALLBACK = Callable[[Requester, RoomVersion, bool], Awaitable]
 
 
 def load_legacy_third_party_event_rules(hs: "HomeServer") -> None:
@@ -605,17 +605,18 @@ class ThirdPartyEventRulesModuleApiCallbacks:
                 )
 
     async def on_upgrade_room(
-        self, requester: Requester, room_version: RoomVersion
+        self, requester: Requester, room_version: RoomVersion, is_requester_admin: bool
     ) -> None:
         """Intercept requests to upgrade a room to maybe deny it (via an exception).
 
         Args:
             requester
             room_version: The RoomVersion requested for the upgrade.
+            is_requester_admin: If the requester is an admin
         """
         for callback in self._on_upgrade_room_callbacks:
             try:
-                await callback(requester, room_version)
+                await callback(requester, room_version, is_requester_admin)
             except Exception as e:
                 logger.exception(
                     "Failed to run module API callback %s: %s", callback, e

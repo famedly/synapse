@@ -106,9 +106,12 @@ class OnUpgradeRoomModule:
         )
 
     async def on_upgrade_room(
-        self, requester: Requester, room_version: RoomVersion
+        self, requester: Requester, room_version: RoomVersion, is_requester_admin: bool
     ) -> None:
-        if room_version.identifier not in self.allowed_room_versions:
+        if (
+            not is_requester_admin
+            and room_version.identifier not in self.allowed_room_versions
+        ):
             raise SynapseError(
                 400,
                 "You can not upgrade room to that version",
@@ -509,6 +512,15 @@ class ThirdPartyRulesTestCase(unittest.FederatingHomeserverTestCase):
             self.user_id, room_version="10", tok=self.tok
         )
         upgrade_room_to_version(room_id_2, "11", tok=self.tok, expect_code=400)
+
+        # Room not in configured list as admin
+        admin_user_id = self.register_user("admin_kermit", "monkey", admin=True)
+
+        admin_tok = self.login("admin_kermit", "monkey")
+        room_id_3 = self.helper.create_room_as(
+            admin_user_id, room_version="9", tok=admin_tok
+        )
+        upgrade_room_to_version(room_id_3, "11", tok=admin_tok, expect_code=200)
 
     def test_sent_event_end_up_in_room_state(self) -> None:
         """Tests that a state event sent by a module while processing another state event
