@@ -251,6 +251,10 @@ Pympler = { version = "*", optional = true }
 parameterized = { version = ">=0.7.4", optional = true }
 idna = { version = ">=2.5", optional = true }
 pyicu = { version = ">=2.10.2", optional = true }
+opentelemetry-api = { version = "^1.31.0", optional = true }
+opentelemetry-sdk = { version = "^1.31.0", optional = true }
+opentelemetry-opentracing-shim = { version = "^0.52b0", optional = true }
+opentelemetry-exporter-otlp = { version = "^1.31.0", optional = true }
 
 [tool.poetry.extras]
 # NB: Packages that should be part of `pip install matrix-synapse[all]` need to be specified
@@ -265,7 +269,8 @@ oidc = ["authlib"]
 systemd = ["systemd-python"]
 url-preview = ["lxml"]
 sentry = ["sentry-sdk"]
-opentracing = ["jaeger-client", "opentracing"]
+opentracing-otlp = ["opentracing", "opentelemetry-api", "opentelemetry-sdk", "opentelemetry-opentracing-shim", "opentelemetry-exporter-otlp"]
+opentracing-jaeger = ["opentracing", "jaeger-client"]
 jwt = ["authlib"]
 # hiredis is not a *strict* dependency, but it makes things much faster.
 # (if it is not installed, we fall back to slow code.)
