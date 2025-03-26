@@ -87,3 +87,21 @@ class PeriodicallyFlushingMemoryHandler(MemoryHandler):
     def close(self) -> None:
         self._active = False
         super().close()
+
+
+try:
+    from opentelemetry._logs import set_logger_provider
+    from opentelemetry.exporter.otlp.proto.http._log_exporter import OTLPLogExporter
+    from opentelemetry.sdk._logs import LoggerProvider, LoggingHandler
+    from opentelemetry.sdk._logs.export import BatchLogRecordProcessor
+    from opentelemetry.sdk.resources import Resource
+except ImportError as imp:
+    class OtlpHandler:
+        def __init__(self) -> None:
+            raise imp
+else:
+    class OtlpHandler(LoggingHandler):
+        def __init__(self, level=logging.NOTSET, logger_provider=None) -> None:
+            logger_provider = LoggerProvider(resource=Resource(attributes={"service.name": "synapse"}))
+            logger_provider.add_log_record_processor(BatchLogRecordProcessor(OTLPLogExporter()))
+            super().__init__(level, logger_provider)
