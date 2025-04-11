@@ -37,6 +37,10 @@ class TracerConfig(Config):
 
         self.opentracer_enabled = opentracing_config.get("enabled", False)
 
+        self.backend = opentracing_config.get("backend", "jaeger")
+        if self.backend not in ["jaeger", "otlp"]:
+            raise ConfigError("Invalid backend", ("opentracing", "backend"))
+
         self.jaeger_config = opentracing_config.get(
             "jaeger_config",
             {"sampler": {"type": "const", "param": 1}, "logging": False},
@@ -47,7 +51,7 @@ class TracerConfig(Config):
         if not self.opentracer_enabled:
             return
 
-        check_requirements("opentracing")
+        check_requirements(f"opentracing-{self.backend}")
 
         # The tracer is enabled so sanitize the config
 

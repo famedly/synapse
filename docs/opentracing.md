@@ -6,7 +6,8 @@ OpenTracing is a semi-standard being adopted by a number of distributed
 tracing platforms. It is a common api for facilitating vendor-agnostic
 tracing instrumentation. That is, we can use the OpenTracing api and
 select one of a number of tracer implementations to do the heavy lifting
-in the background. Our current selected implementation is Jaeger.
+in the background. Our current implementations are Jaeger (default) and
+OpenTelemetry.
 
 OpenTracing is a tool which gives an insight into the causal
 relationship of work done in and between servers. The servers each track
@@ -72,6 +73,14 @@ opentracing:
   homeserver_whitelist:
     - "mytrustedhomeserver.org"
     - "*.myotherhomeservers.com"
+```
+
+To use OpenTelemetry instead of Jaeger as the `backend`:
+
+```yaml
+opentracing:
+  enabled: true
+  backend: otlp
 ```
 
 ## Homeserver whitelisting

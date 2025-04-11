@@ -452,9 +452,22 @@ def init_tracer(hs: "HomeServer") -> None:
         opentracing = None  # type: ignore[assignment]
         return
 
-    if opentracing is None or JaegerConfig is None:
+    if opentracing is None:
         raise ConfigError(
             "The server has been configured to use opentracing but opentracing is not "
+            "installed."
+        )
+
+    if hs.config.tracing.backend == "jeager":
+        init_tracer_jaeger(hs)
+    elif hs.config.tracing.backend == "otlp":
+        init_tracer_otlp(hs)
+
+
+def init_tracer_jaeger(hs: "HomeServer") -> None:
+    if JaegerConfig is None:
+        raise ConfigError(
+            "The server has been configured to use jaeger but jaeger is not "
             "installed."
         )
 
@@ -496,6 +509,22 @@ def init_tracer(hs: "HomeServer") -> None:
         opentracing.set_global_tracer(tracer)
     else:
         config.initialize_tracer()
+
+
+def init_tracer_otlp(hs: "HomeServer") -> None:
+    assert opentracing is not None
+
+    from opentelemetry import trace
+    from opentelemetry.sdk.trace import TracerProvider
+    from opentelemetry.sdk.trace.export import BatchSpanProcessor
+    from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
+    from opentelemetry.sdk.resources import Resource
+    from opentelemetry.shim.opentracing_shim import create_tracer
+
+    tracer_provider = TracerProvider(resource=Resource(attributes={"service.name": "synapse"}))
+    tracer_provider.add_span_processor(BatchSpanProcessor(OTLPSpanExporter()))
+    trace.set_tracer_provider(tracer_provider)
+    opentracing.tracer = create_tracer(trace.get_tracer_provider())
 
 
 # Whitelisting

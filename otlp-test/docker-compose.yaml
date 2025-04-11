@@ -1,0 +1,32 @@
+services:
+
+  init:
+    image: famedly/synapse
+    user: root
+    command: migrate_config
+    volumes:
+      - ./synapse-data:/data
+    environment:
+      - SYNAPSE_SERVER_NAME=example.com
+      - SYNAPSE_REPORT_STATS=no
+      - SYNAPSE_NO_TLS=1
+      - OTLP_BACKEND=1
+
+  synapse:
+    image: famedly/synapse
+    user: root
+    volumes:
+      - ./synapse-data:/data
+    environment:
+       - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318
+    depends_on:
+      - init
+      - otel-collector
+
+  otel-collector:
+    image: otel/opentelemetry-collector:0.86.0
+    user: "0"
+    command: [ "--config=/etc/otel-collector.yaml" ]
+    volumes:
+      - ./otel-collector.yaml:/etc/otel-collector.yaml
+      - ./out:/etc/out
