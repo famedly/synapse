@@ -96,17 +96,11 @@ try:
     from opentelemetry.sdk._logs import LoggerProvider, LoggingHandler
     from opentelemetry.sdk._logs.export import BatchLogRecordProcessor
     from opentelemetry.sdk.resources import Resource
-except ImportError as e:
-    OTLP_IMPORT_EXC = e
 
-    class OtlpHandler:
-        def __init__(self) -> None:
-            check_requirements("opentelemetry-log-handler")
-            raise OTLP_IMPORT_EXC
-else:
+    USE_REAL_OTLP = True
 
-    class OtlpHandler(LoggingHandler):
-        def __init__(self, level=logging.NOTSET, logger_provider=None) -> None:
+    class RealOtlpHandler(LoggingHandler):
+        def __init__(self, level: int = logging.NOTSET) -> None:
             self.logger_provider = LoggerProvider(
                 resource=Resource(attributes={"service.name": "synapse"})
             )
@@ -114,3 +108,15 @@ else:
                 BatchLogRecordProcessor(OTLPLogExporter())
             )
             super().__init__(level, self.logger_provider)
+except ImportError as e:
+    OTLP_IMPORT_EXC = e
+
+    USE_REAL_OTLP = False
+
+    class StubOtlpHandler:
+        def __init__(self) -> None:
+            check_requirements("opentelemetry-log-handler")
+            raise OTLP_IMPORT_EXC
+
+
+OtlpHandler = RealOtlpHandler if USE_REAL_OTLP else StubOtlpHandler
