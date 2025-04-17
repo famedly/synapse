@@ -359,7 +359,7 @@ jobs:
 
       - run: cargo test
 
-   otlp:
+  otlp:
     if: ${{ !failure() && !cancelled() }}
     runs-on: ubuntu-latest
 
