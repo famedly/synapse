@@ -366,8 +366,6 @@ jobs:
     steps:
       - name: Run actions/checkout@v4 for synapse
         uses: actions/checkout@v4
-        with:
-          path: synapse
       - run: |
           set -e
           DOCKER_BUILDKIT=1 docker build -t famedly/synapse -f docker/Dockerfile .
