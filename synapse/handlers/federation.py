@@ -210,7 +210,7 @@ class FederationHandler:
     @tag_args
     async def maybe_backfill(
         self, room_id: str, current_depth: int, limit: int, record_time: bool = True
-    ) -> bool:
+    ) -> None:
         """Checks the database to see if we should backfill before paginating,
         and if so do.
 
@@ -224,8 +224,6 @@ class FederationHandler:
                 should back paginate.
             record_time: Whether to record the time it takes to backfill.
 
-        Returns:
-            True if we actually tried to backfill something, otherwise False.
         """
         # Starting the processing time here so we can include the room backfill
         # linearizer lock queue in the timing
@@ -251,7 +249,7 @@ class FederationHandler:
         limit: int,
         *,
         processing_start_time: Optional[int],
-    ) -> bool:
+    ) -> None:
         """
         Checks whether the `current_depth` is at or approaching any backfill
         points in the room and if so, will backfill. We only care about
@@ -325,7 +323,7 @@ class FederationHandler:
                 limit=1,
             )
             if not have_later_backfill_points:
-                return False
+                return None
 
             logger.debug(
                 "_maybe_backfill_inner: all backfill points are *after* current depth. Trying again with later backfill points."
@@ -345,15 +343,15 @@ class FederationHandler:
             )
             # We return `False` because we're backfilling in the background and there is
             # no new events immediately for the caller to know about yet.
-            return False
+            return None
 
         # Even after recursing with `MAX_DEPTH`, we didn't find any
         # backward extremities to backfill from.
         if not sorted_backfill_points:
             logger.debug(
-                "_maybe_backfill_inner: Not backfilling as no backward extremeties found."
+                "_maybe_backfill_inner: Not backfilling as no backward extremities found."
             )
-            return False
+            return None
 
         # If we're approaching an extremity we trigger a backfill, otherwise we
         # no-op.
@@ -372,7 +370,7 @@ class FederationHandler:
                 current_depth,
                 limit,
             )
-            return False
+            return None
 
         # For performance's sake, we only want to paginate from a particular extremity
         # if we can actually see the events we'll get. Otherwise, we'd just spend a lot
@@ -440,7 +438,7 @@ class FederationHandler:
             logger.debug(
                 "_maybe_backfill_inner: found no extremities which would be visible"
             )
-            return False
+            return None
 
         logger.debug(
             "_maybe_backfill_inner: extremities_to_request %s", extremities_to_request
@@ -463,7 +461,7 @@ class FederationHandler:
             )
         )
 
-        async def try_backfill(domains: StrCollection) -> bool:
+        async def try_backfill(domains: StrCollection) -> None:
             # TODO: Should we try multiple of these at a time?
 
             # Number of contacted remote homeservers that have denied our backfill
@@ -486,7 +484,7 @@ class FederationHandler:
                     # If this succeeded then we probably already have the
                     # appropriate stuff.
                     # TODO: We can probably do something more intelligent here.
-                    return True
+                    return None
                 except NotRetryingDestination as e:
                     logger.info("_maybe_backfill_inner: %s", e)
                     continue
@@ -510,7 +508,7 @@ class FederationHandler:
                         )
                         denied_count += 1
                         if denied_count >= max_denied_count:
-                            return False
+                            return None
                         continue
 
                     logger.info("Failed to backfill from %s because %s", dom, e)
@@ -526,7 +524,7 @@ class FederationHandler:
                         )
                         denied_count += 1
                         if denied_count >= max_denied_count:
-                            return False
+                            return None
                         continue
 
                     logger.info("Failed to backfill from %s because %s", dom, e)
@@ -538,7 +536,7 @@ class FederationHandler:
                     logger.exception("Failed to backfill from %s because %s", dom, e)
                     continue
 
-            return False
+            return None
 
         # If we have the `processing_start_time`, then we can make an
         # observation. We wouldn't have the `processing_start_time` in the case
@@ -550,14 +548,9 @@ class FederationHandler:
                 (processing_end_time - processing_start_time) / 1000
             )
 
-        success = await try_backfill(likely_domains)
-        if success:
-            return True
-
         # TODO: we could also try servers which were previously in the room, but
         #   are no longer.
-
-        return False
+        return await try_backfill(likely_domains)
 
     async def send_invite(self, target_host: str, event: EventBase) -> EventBase:
         """Sends the invite to the remote server for signing.
