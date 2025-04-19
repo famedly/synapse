@@ -612,8 +612,13 @@ class LoggingContextFilter(logging.Filter):
 
             record.ip_address = request.ip_address
             record.site_tag = request.site_tag
-            record.requester = request.requester
-            record.authenticated_entity = request.authenticated_entity
+
+            if request.requester is not None:
+                record.requester = request.requester
+
+            if request.authenticated_entity is not None:
+                record.authenticated_entity = request.authenticated_entity
+
             record.method = request.method
             record.url = request.url
             record.protocol = request.protocol
