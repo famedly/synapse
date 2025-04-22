@@ -10,6 +10,7 @@ services:
       - SYNAPSE_SERVER_NAME=example.com
       - SYNAPSE_REPORT_STATS=no
       - SYNAPSE_NO_TLS=1
+      - SYNAPSE_LOG_LEVEL=DEBUG
       - OTLP_BACKEND=1
 
   synapse:
@@ -19,6 +20,13 @@ services:
       - ./synapse-data:/data
     environment:
        - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318
+    healthcheck:
+      test: curl --fail http://localhost:8008/health
+      interval: 50s
+      timeout: 5s
+      retries: 3
+      start_period: 50s
+      start_interval: 1s
     depends_on:
       - init
       - otel-collector

@@ -92,20 +92,31 @@ class PeriodicallyFlushingMemoryHandler(MemoryHandler):
 
 
 try:
-    from opentelemetry._logs import set_logger_provider
     from opentelemetry.exporter.otlp.proto.http._log_exporter import OTLPLogExporter
     from opentelemetry.sdk._logs import LoggerProvider, LoggingHandler
     from opentelemetry.sdk._logs.export import BatchLogRecordProcessor
     from opentelemetry.sdk.resources import Resource
+
+    USE_REAL_OTLP = True
+
+    class RealOtlpHandler(LoggingHandler):
+        def __init__(self, level: int = logging.NOTSET) -> None:
+            self.logger_provider = LoggerProvider(
+                resource=Resource(attributes={"service.name": "synapse"})
+            )
+            self.logger_provider.add_log_record_processor(
+                BatchLogRecordProcessor(OTLPLogExporter())
+            )
+            super().__init__(level, self.logger_provider)
 except ImportError as e:
     OTLP_IMPORT_EXC = e
-    class OtlpHandler:
+
+    USE_REAL_OTLP = False
+
+    class StubOtlpHandler:
         def __init__(self) -> None:
             check_requirements("opentelemetry-log-handler")
             raise OTLP_IMPORT_EXC
-else:
-    class OtlpHandler(LoggingHandler):
-        def __init__(self, level=logging.NOTSET, logger_provider=None) -> None:
-            self.logger_provider = LoggerProvider(resource=Resource(attributes={"service.name": "synapse"}))
-            self.logger_provider.add_log_record_processor(BatchLogRecordProcessor(OTLPLogExporter()))
-            super().__init__(level, self.logger_provider)
+
+
+OtlpHandler = RealOtlpHandler if USE_REAL_OTLP else StubOtlpHandler

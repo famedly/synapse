@@ -251,17 +251,17 @@ Pympler = { version = "*", optional = true }
 parameterized = { version = ">=0.7.4", optional = true }
 idna = { version = ">=2.5", optional = true }
 pyicu = { version = ">=2.10.2", optional = true }
-opentelemetry-api = { git = "https://github.com/open-telemetry/opentelemetry-python", rev = "34b3ac68cccd63ba44c05a568be94218cd6ed198", subdirectory = "opentelemetry-api", optional = true }
-opentelemetry-sdk = { git = "https://github.com/open-telemetry/opentelemetry-python", rev = "34b3ac68cccd63ba44c05a568be94218cd6ed198", subdirectory = "opentelemetry-sdk", optional = true }
+opentelemetry-api = { git = "https://github.com/open-telemetry/opentelemetry-python", rev = "742171e50c70f4a4540a01d2c6c3cbcf4882d810", subdirectory = "opentelemetry-api", optional = true }
+opentelemetry-sdk = { git = "https://github.com/open-telemetry/opentelemetry-python", rev = "742171e50c70f4a4540a01d2c6c3cbcf4882d810", subdirectory = "opentelemetry-sdk", optional = true }
 opentelemetry-opentracing-shim = { version = "^0.52b0", optional = true }
-opentelemetry-exporter-otlp = { git = "https://github.com/open-telemetry/opentelemetry-python", rev = "34b3ac68cccd63ba44c05a568be94218cd6ed198", subdirectory = "exporter/opentelemetry-exporter-otlp", optional = true }
+opentelemetry-exporter-otlp = { git = "https://github.com/open-telemetry/opentelemetry-python", rev = "742171e50c70f4a4540a01d2c6c3cbcf4882d810", subdirectory = "exporter/opentelemetry-exporter-otlp", optional = true }
 
 # The lines below and also the corresponding extra dependencies can be removed as soon as we switch to a released version of opentelemetry-python (1.32.0):
-opentelemetry-exporter-otlp-proto-grpc = { git = "https://github.com/open-telemetry/opentelemetry-python", rev = "34b3ac68cccd63ba44c05a568be94218cd6ed198", subdirectory = "exporter/opentelemetry-exporter-otlp-proto-grpc", optional = true }
-opentelemetry-exporter-otlp-proto-http = { git = "https://github.com/open-telemetry/opentelemetry-python", rev = "34b3ac68cccd63ba44c05a568be94218cd6ed198", subdirectory = "exporter/opentelemetry-exporter-otlp-proto-http", optional = true }
-opentelemetry-exporter-otlp-proto-common = { git = "https://github.com/open-telemetry/opentelemetry-python", rev = "34b3ac68cccd63ba44c05a568be94218cd6ed198", subdirectory = "exporter/opentelemetry-exporter-otlp-proto-common", optional = true }
-opentelemetry-proto = { git = "https://github.com/open-telemetry/opentelemetry-python", rev = "34b3ac68cccd63ba44c05a568be94218cd6ed198", subdirectory = "opentelemetry-proto", optional = true }
-opentelemetry-semantic-conventions = { git = "https://github.com/open-telemetry/opentelemetry-python", rev = "34b3ac68cccd63ba44c05a568be94218cd6ed198", subdirectory = "opentelemetry-semantic-conventions", optional = true }
+opentelemetry-exporter-otlp-proto-grpc = { git = "https://github.com/open-telemetry/opentelemetry-python", rev = "742171e50c70f4a4540a01d2c6c3cbcf4882d810", subdirectory = "exporter/opentelemetry-exporter-otlp-proto-grpc", optional = true }
+opentelemetry-exporter-otlp-proto-http = { git = "https://github.com/open-telemetry/opentelemetry-python", rev = "742171e50c70f4a4540a01d2c6c3cbcf4882d810", subdirectory = "exporter/opentelemetry-exporter-otlp-proto-http", optional = true }
+opentelemetry-exporter-otlp-proto-common = { git = "https://github.com/open-telemetry/opentelemetry-python", rev = "742171e50c70f4a4540a01d2c6c3cbcf4882d810", subdirectory = "exporter/opentelemetry-exporter-otlp-proto-common", optional = true }
+opentelemetry-proto = { git = "https://github.com/open-telemetry/opentelemetry-python", rev = "742171e50c70f4a4540a01d2c6c3cbcf4882d810", subdirectory = "opentelemetry-proto", optional = true }
+opentelemetry-semantic-conventions = { git = "https://github.com/open-telemetry/opentelemetry-python", rev = "742171e50c70f4a4540a01d2c6c3cbcf4882d810", subdirectory = "opentelemetry-semantic-conventions", optional = true }
 
 [tool.poetry.extras]
 # NB: Packages that should be part of `pip install matrix-synapse[all]` need to be specified

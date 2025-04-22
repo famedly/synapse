@@ -359,22 +359,23 @@ jobs:
 
       - run: cargo test
 
-   otlp:
+  otlp:
     if: ${{ !failure() && !cancelled() }}
     runs-on: ubuntu-latest
 
     steps:
       - name: Run actions/checkout@v4 for synapse
         uses: actions/checkout@v4
-        with:
-          path: synapse
       - run: |
           set -e
-          DOCKER_BUILDKIT=1 sudo docker build -t famedly/synapse -f docker/Dockerfile .
+          DOCKER_BUILDKIT=1 docker build -t famedly/synapse -f docker/Dockerfile .
           cd otlp-test
           success() { [ -s out/traces.json ] && [ -s out/logs.json ]; }
-          (until success; do sleep 1; done && sudo docker compose down >/dev/null 2>&1) &
-          sudo timeout 30 docker compose up && success
+          (until success; do sleep 1; done && docker compose down >/dev/null 2>&1) &
+          timeout 30 docker compose up
+          ! sudo grep -q '"ERROR"' out/logs.json  # ensure no errors occurred
+          success  # ensure both traces and logs are present
+          sudo grep -q 'Main loop terminated.' out/logs.json  # ensure log is complete (to the end)
 
   # a job which marks all the other jobs as complete, thus allowing PRs to be merged.
   tests-done:
