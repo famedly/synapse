@@ -4,6 +4,12 @@ name: Docker
 on:
   push:
     tags: ["v*.*.*_*"]
+  workflow_dispatch:
+    inputs:
+      tags:
+        description: "Synapse version tag to build"
+        required: true
+        type: string
 
 jobs:
   docker:
