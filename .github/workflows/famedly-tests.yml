@@ -1,7 +1,13 @@
 name: Tests
 
+# By separating push and pull_request by 'branches', they won't both run if there is a
+# push to a pull request. In other words, any change on any branch is considered a 'push',
+# so a change to a pull request was triggering both. Also run tests when a tag is pushed.
 on:
   push:
+    branches: ["master", "release-*"]
+    tags:
+      - '**'
   pull_request:
   merge_group:
   workflow_dispatch:
