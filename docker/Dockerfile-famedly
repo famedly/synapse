@@ -1,0 +1,39 @@
+# syntax=docker/dockerfile:1
+
+# Synapse Token Authenticator
+ARG STA_VERSION=0.11.0
+# Synapse Invite Checker
+ARG SIC_VERSION=0.4.3
+
+ARG SYNAPSE_VERSION=latest
+ARG FROM=famedly/synapse:$SYNAPSE_VERSION
+
+FROM $FROM
+
+# Install Famedly required addons
+ARG STA_VERSION
+ARG SIC_VERSION
+
+RUN --mount=type=cache,target=/root/.cache/pip \
+  pip install setuptools \
+  && pip install --no-warn-script-location \
+    synapse-token-authenticator==${STA_VERSION} \
+    matrix-synapse-ldap3 \
+    synapse-s3-storage-provider \
+    synapse-auto-accept-invite \
+    synapse-invite-checker==${SIC_VERSION} \
+    git+https://github.com/famedly/synapse-invite-policies.git@main \
+    git+https://github.com/famedly/synapse-domain-rule-checker.git@main
+
+
+COPY --from=builder /install /usr/local
+
+# Largely, keep these the same as in the main Dockerfile, except we don't really use
+# port 8009(and I don't think they do either)
+
+EXPOSE 8008/tcp 8448/tcp
+
+ENTRYPOINT ["/start.py"]
+
+HEALTHCHECK --start-period=5s --interval=15s --timeout=5s \
+  CMD curl -fSs http://localhost:8008/health || exit 1
