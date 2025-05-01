@@ -60,8 +60,8 @@ jobs:
         uses: docker/metadata-action@master
         with:
           images: |
-            docker.io/matrixdotorg/synapse
-            ghcr.io/element-hq/synapse
+            docker.io/famedly/synapse
+            ghcr.io/famedly/synapse
           flavor: |
             latest=false
           tags: |
