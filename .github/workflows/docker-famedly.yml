@@ -1,19 +1,76 @@
----
+# Copyright (C) 2025 Famedly
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU Affero General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU Affero General Public License for more details.
+#
+# You should have received a copy of the GNU Affero General Public License
+# along with this program. If not, see <http://www.gnu.org/licenses/>.
+
+
+# Build the Community Edition of Synapse, then build the Famedly Edition on top. Push
+# both to their respective registries.
+
 name: Docker
 
 on:
   push:
     tags: ["v*.*.*_*"]
+  workflow_dispatch:
+    inputs:
+      tags:
+        description: "Tag to test with, should match expected 'vX.Y.Z_0' format(for now)"
+        type: string
+        required: true
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
-  docker:
-    uses: famedly/github-workflows/.github/workflows/docker.yml@main
+  community-build:
+    # Since this will upload to ghcr.io, all we need is the github token. That is
+    # automatically passed into the workflow. This workflow is pinned to this branch so
+    # the support for including a namespace for the docker image name does not break
+    # digest merging for multiple architectures.
+    uses: famedly/github-workflows/.github/workflows/docker.yml@jason/docker-namespace
+    with:
+      push: ${{ github.event_name != 'pull_request' }} # Always build, don't publish on pull requests
+      registry: ghcr.io
+      image_name: famedly/synapse
+      file: docker/Dockerfile
+      # tag our new base image. If given a git tag of(as an example): "v1.234.5_6", this will
+      # break down into a docker tag of "v1.234.5" and "latest". Since the trailing suffix is/was
+      # used to differentiate new builds of Synapse typically with updated modules, it is
+      # not needed here. "latest" comes from the 'auto' functionality of flavors used
+      # when the tag is based on(in this case) a pattern and requires no explicit enablement.
+      tags: |
+        type=match,group=1,pattern=(v\d+.\d+.\d+)_\d+
+
+  production-build:
+    if: ${{ !cancelled() && !failure() }} # Allow for stopping the build job
+    needs:
+      - community-build
+    uses: famedly/github-workflows/.github/workflows/docker.yml@jason/docker-namespace
     with:
       push: ${{ github.event_name != 'pull_request' }} # Always build, don't publish on pull requests
       registry_user: famedly-ci
       registry: docker-oss.nexus.famedly.de
       image_name: synapse
-      file: docker/Dockerfile
+      file: docker/Dockerfile-famedly
+      build_args: "SYNAPSE_VERSION=latest"
+      # tag the production image used for famedly deployments.
+      # This will create 3 tags on a given image. If(for example like above) we provide
+      # a git tag of "v1.234.5_6", it will be broken into 3 docker tags:
+      # "v1.234.5"
+      # "v1.234.5_6"
+      # "latest"
       tags: |
         type=match,group=1,pattern=(v\d+.\d+.\d+)_\d+
         type=match,group=1,pattern=(v\d+.\d+.\d+_\d+)
