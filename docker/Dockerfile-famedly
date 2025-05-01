@@ -1,0 +1,33 @@
+# syntax=docker/dockerfile:1
+
+# Synapse Token Authenticator
+ARG STA_VERSION=0.11.0
+# Synapse Invite Checker
+ARG SIC_VERSION=0.4.5
+
+ARG SYNAPSE_VERSION=latest
+
+FROM ghcr.io/famedly/synapse:$SYNAPSE_VERSION
+
+# Install Famedly required addons
+ARG STA_VERSION
+ARG SIC_VERSION
+
+# To avoid having to install git, pip install directly from the source repository using
+# it's auto generated zip file for the two non-pypa modules below.
+RUN --mount=type=cache,target=/root/.cache/pip \
+  pip install setuptools \
+  && pip install --no-warn-script-location \
+    synapse-token-authenticator==${STA_VERSION} \
+    matrix-synapse-ldap3 \
+    synapse-s3-storage-provider \
+    synapse-invite-checker==${SIC_VERSION} \
+    https://github.com/famedly/synapse-invite-policies/archive/refs/heads/main.zip \
+    https://github.com/famedly/synapse-domain-rule-checker/archive/refs/heads/main.zip
+
+EXPOSE 8008/tcp 8009/tcp 8448/tcp
+
+ENTRYPOINT ["/start.py"]
+
+HEALTHCHECK --start-period=5s --interval=15s --timeout=5s \
+  CMD curl -fSs http://localhost:8008/health || exit 1

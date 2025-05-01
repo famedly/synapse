@@ -93,18 +93,6 @@ COPY --from=requirements /synapse/requirements.txt /synapse/
 RUN --mount=type=cache,target=/root/.cache/uv \
   uv pip install --prefix="/install" --no-deps -r /synapse/requirements.txt
 
-# Install famedly required addons
-
-RUN --mount=type=cache,target=/root/.cache/pip \
-  pip install setuptools \
-  && pip install --prefix="/install" --no-warn-script-location \
-    synapse-token-authenticator==0.11.0 \
-    matrix-synapse-ldap3 \
-    synapse-s3-storage-provider \
-    synapse-invite-checker==0.4.5 \
-    git+https://github.com/famedly/synapse-invite-policies.git@main \
-    git+https://github.com/famedly/synapse-domain-rule-checker.git@main
-
 # Copy over the rest of the synapse source code.
 COPY synapse /synapse/synapse/
 COPY rust /synapse/rust/
@@ -191,8 +179,8 @@ FROM docker.io/library/python:${PYTHON_VERSION}-slim-${DEBIAN_VERSION}
 ARG TARGETARCH
 
 LABEL org.opencontainers.image.url='https://matrix.org/docs/projects/server/synapse'
-LABEL org.opencontainers.image.documentation='https://github.com/element-hq/synapse/blob/master/docker/README.md'
-LABEL org.opencontainers.image.source='https://github.com/element-hq/synapse.git'
+LABEL org.opencontainers.image.documentation='https://github.com/famedly/synapse/blob/master/docker/README.md'
+LABEL org.opencontainers.image.source='https://github.com/famedly/synapse.git'
 LABEL org.opencontainers.image.licenses='AGPL-3.0-or-later'
 
 COPY --from=runtime-deps /install-${TARGETARCH} /
