@@ -1,24 +1,20 @@
 #!/usr/bin/env python
 #
-# This file is licensed under the Affero General Public License (AGPL) version 3.
-#
-# Copyright 2020 The Matrix.org Foundation C.I.C.
-# Copyright (C) 2023 New Vector, Ltd
+# Copyright (C) 2020,2023 Famedly
 #
 # This program is free software: you can redistribute it and/or modify
-# it under the terms of the GNU Affero General Public License as
-# published by the Free Software Foundation, either version 3 of the
-# License, or (at your option) any later version.
+# it under the terms of the GNU Affero General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
 #
-# See the GNU Affero General Public License for more details:
-# <https://www.gnu.org/licenses/agpl-3.0.html>.
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU Affero General Public License for more details.
 #
-# Originally licensed under the Apache License, Version 2.0:
-# <http://www.apache.org/licenses/LICENSE-2.0>.
-#
-# [This file includes modifications made by New Vector Limited]
-#
-#
+# You should have received a copy of the GNU Affero General Public License
+# along with this program. If not, see <http://www.gnu.org/licenses/>.
+
 
 """An interactive script for doing a release. See `cli()` below."""
 
@@ -68,9 +64,6 @@ def cli() -> None:
 
             pip install -e .[dev]
 
-      - A checkout of the sytest repository at ../sytest
-      - A checkout of the complement repository at ../complement
-
     Then to use:
 
         ./scripts-dev/release.py prepare
@@ -111,18 +104,14 @@ def _prepare() -> None:
 
     # Make sure we're in a git repo.
     synapse_repo = get_repo_and_check_clean_checkout()
-    sytest_repo = get_repo_and_check_clean_checkout("../sytest", "sytest")
-    complement_repo = get_repo_and_check_clean_checkout("../complement", "complement")
 
     click.secho("Updating Synapse and Sytest git repos...")
     synapse_repo.remote().fetch()
-    sytest_repo.remote().fetch()
-    complement_repo.remote().fetch()
 
     # Get the current version and AST from root Synapse module.
     current_version = get_package_version()
 
-    # Figure out what sort of release we're doing and calcuate the new version.
+    # Figure out what sort of release we're doing and calculate the new version.
     rc = click.confirm("RC", default=True)
     if current_version.pre:
         # If the current version is an RC we don't need to bump any of the
@@ -140,6 +129,7 @@ def _prepare() -> None:
                 current_version.minor,
                 current_version.micro,
             )
+        release_type = None
     else:
         # If this is a new release cycle then we need to know if it's a minor
         # or a patch version bump.
@@ -210,42 +200,21 @@ def _prepare() -> None:
             "Which branch should the release be based on?", default=default
         )
 
-        for repo_name, repo in {
-            "synapse": synapse_repo,
-            "sytest": sytest_repo,
-            "complement": complement_repo,
-        }.items():
-            # Special case for Complement: `develop` maps to `main`
-            if repo_name == "complement" and branch_name == "develop":
-                branch_name = "main"
+        base_branch = find_ref(synapse_repo, branch_name)
+        if not base_branch:
+            print(f"Could not find base branch {branch_name} for Synapse!")
+            click.get_current_context().abort()
 
-            base_branch = find_ref(repo, branch_name)
-            if not base_branch:
-                print(f"Could not find base branch {branch_name} for {repo_name}!")
-                click.get_current_context().abort()
+        # Check out the base branch and ensure it's up to date
+        synapse_repo.head.set_reference(
+            base_branch, "check out the base branch for Synapse"
+        )
+        synapse_repo.head.reset(index=True, working_tree=True)
+        if not base_branch.is_remote():
+            update_branch(synapse_repo)
 
-            # Check out the base branch and ensure it's up to date
-            repo.head.set_reference(
-                base_branch, f"check out the base branch for {repo_name}"
-            )
-            repo.head.reset(index=True, working_tree=True)
-            if not base_branch.is_remote():
-                update_branch(repo)
-
-            # Create the new release branch
-            repo.create_head(release_branch_name, commit=base_branch)
-
-        # Special-case SyTest: we don't actually prepare any files so we may
-        # as well push it now (and only when we create a release branch;
-        # not on subsequent RCs or full releases).
-        if click.confirm("Push new SyTest branch?", default=True):
-            sytest_repo.git.push("-u", sytest_repo.remote().name, release_branch_name)
-
-        # Same for Complement
-        if click.confirm("Push new Complement branch?", default=True):
-            complement_repo.git.push(
-                "-u", complement_repo.remote().name, release_branch_name
-            )
+        # Create the new release branch
+        synapse_repo.create_head(release_branch_name, commit=base_branch)
 
     # Switch to the release branch and ensure it's up to date.
     synapse_repo.git.checkout(release_branch_name)
@@ -392,7 +361,7 @@ def _tag(gh_token: Optional[str]) -> None:
 
     # Create a new draft release
     gh = Github(gh_token)
-    gh_repo = gh.get_repo("element-hq/synapse")
+    gh_repo = gh.get_repo("famedly/synapse")
     release = gh_repo.create_git_release(
         tag=tag_name,
         name=tag_name,
@@ -405,7 +374,7 @@ def _tag(gh_token: Optional[str]) -> None:
     print("Launching the release page and the actions page.")
     click.launch(release.html_url)
     click.launch(
-        f"https://github.com/element-hq/synapse/actions?query=branch%3A{tag_name}"
+        f"https://github.com/famedly/synapse/actions?query=branch%3A{tag_name}"
     )
 
     click.echo("Wait for release assets to be built")
@@ -436,7 +405,7 @@ def _publish(gh_token: str) -> None:
 
     # Publish the draft release
     gh = Github(gh_token)
-    gh_repo = gh.get_repo("element-hq/synapse")
+    gh_repo = gh.get_repo("famedly/synapse")
     for release in gh_repo.get_releases():
         if release.title == tag_name:
             break
@@ -482,7 +451,7 @@ def _upload(gh_token: Optional[str]) -> None:
 
     # Query all the assets corresponding to this release.
     gh = Github(gh_token)
-    gh_repo = gh.get_repo("element-hq/synapse")
+    gh_repo = gh.get_repo("famedly/synapse")
     gh_release = gh_repo.get_release(tag_name)
 
     all_assets = set(gh_release.get_assets())
@@ -574,7 +543,7 @@ def _wait_for_actions(gh_token: Optional[str]) -> None:
 
     # Authentication is optional on this endpoint,
     # but use a token if we have one to reduce the chance of being rate-limited.
-    url = f"https://api.github.com/repos/element-hq/synapse/actions/runs?branch={tag_name}"
+    url = f"https://api.github.com/repos/famedly/synapse/actions/runs?branch={tag_name}"
     headers = {"Accept": "application/vnd.github+json"}
     if gh_token is not None:
         headers["authorization"] = f"token {gh_token}"
@@ -659,25 +628,11 @@ def _merge_back() -> None:
             _merge_into(synapse_repo, branch_name, "develop")
     else:
         # Full release
-        sytest_repo = get_repo_and_check_clean_checkout("../sytest", "sytest")
-        complement_repo = get_repo_and_check_clean_checkout(
-            "../complement", "complement"
-        )
-
         if click.confirm(f"Merge {branch_name} → master?", default=True):
             _merge_into(synapse_repo, branch_name, "master")
 
         if click.confirm("Merge master → develop?", default=True):
             _merge_into(synapse_repo, "master", "develop")
-
-        if click.confirm(f"On SyTest, merge {branch_name} → master?", default=True):
-            _merge_into(sytest_repo, branch_name, "master")
-
-        if click.confirm("On SyTest, merge master → develop?", default=True):
-            _merge_into(sytest_repo, "master", "develop")
-
-        if click.confirm(f"On Complement, merge {branch_name} → main?", default=True):
-            _merge_into(complement_repo, branch_name, "main")
 
 
 @cli.command()
@@ -731,7 +686,7 @@ def full(gh_token: str) -> None:
 
     click.echo("1. If this is a security release, read the security wiki page.")
     click.echo("2. Check for any release blockers before proceeding.")
-    click.echo("    https://github.com/element-hq/synapse/labels/X-Release-Blocker")
+    click.echo("    https://github.com/famedly/synapse/labels/X-Release-Blocker")
     click.echo(
         "3. Check for any other special release notes, including announcements to add to the changelog or special deployment instructions."
     )
