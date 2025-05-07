@@ -1,19 +1,46 @@
----
+# Build the Community Edition of Synapse, then build the Famedly Edition on top. Push
+# both to their respective registries.
+
+# TODO:
+#  create a matrix with the last usable mod-packs
+#  work out tag wrangling for all that
+#  have 'on.pull_request' handling? This may have money attached if the runners/storage
+#    aren't free. Perhaps just do the test building on amd64?
+#  Will need to update the PAT to include packages:read|write scopes
+
 name: Docker
 
 on:
   push:
     tags: ["v*.*.*_*"]
 
+permissions:
+  contents: read
+  packages: write
+
 jobs:
-  docker:
+  community-build:
+    secrets: inherit
+    uses: famedly/github-workflows/.github/workflows/docker.yml@main
+    with:
+      push: ${{ github.event_name != 'pull_request' }} # Always build, don't publish on pull requests
+      registry: ghcr.io
+      image_name: synapse
+      file: docker/Dockerfile
+      tags: |
+        type=match,group=1,pattern=(v\d+.\d+.\d+)_\d+
+        type=match,group=1,pattern=(v\d+.\d+.\d+_\d+)
+
+  production-build:
+    if: ${{ !cancelled() && !failure() }} # Allow for stopping the build job
     uses: famedly/github-workflows/.github/workflows/docker.yml@main
     with:
       push: ${{ github.event_name != 'pull_request' }} # Always build, don't publish on pull requests
       registry_user: famedly-ci
       registry: docker-oss.nexus.famedly.de
       image_name: synapse
-      file: docker/Dockerfile
+      file: docker/Dockerfile-famedly
+      build_args: "[FROM=ghcr.io/famedly/synapse]"
       tags: |
         type=match,group=1,pattern=(v\d+.\d+.\d+)_\d+
         type=match,group=1,pattern=(v\d+.\d+.\d+_\d+)
