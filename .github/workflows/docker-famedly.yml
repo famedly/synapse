@@ -30,6 +30,10 @@ on:
     tags: ["v*.*.*_*"]
     branches: ["jason/*"]
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   community-build:
     # Since this will upload to ghcr.io, all we need is the github token. That is
@@ -38,7 +42,7 @@ jobs:
     with:
       push: ${{ github.event_name != 'pull_request' }} # Always build, don't publish on pull requests
       registry: ghcr.io
-      image_name: synapse
+      image_name: famedly/synapse
       file: docker/Dockerfile
       tags: |
         type=match,group=1,pattern=(v\d+.\d+.\d+)_\d+
