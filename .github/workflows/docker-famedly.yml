@@ -28,6 +28,7 @@ name: Docker
 on:
   push:
     tags: ["v*.*.*_*"]
+    branches: ["jason/*"]
 
 permissions:
   contents: read
