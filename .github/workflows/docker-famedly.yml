@@ -31,13 +31,13 @@ on:
     tags: ["v*.*.*_*"]
     branches: ["jason/*"]
 
-permissions:
-  contents: read
-  packages: write
+#permissions:
+#  contents: read
+#  packages: write
 
 jobs:
   community-build:
-    secrets: inherit
+#    secrets: inherit
     uses: famedly/github-workflows/.github/workflows/docker.yml@main
     with:
       push: ${{ github.event_name != 'pull_request' }} # Always build, don't publish on pull requests
