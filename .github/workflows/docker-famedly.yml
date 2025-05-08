@@ -30,13 +30,10 @@ on:
     tags: ["v*.*.*_*"]
     branches: ["jason/*"]
 
-permissions:
-  contents: read
-  packages: write
-
 jobs:
   community-build:
-    secrets: inherit
+    # Since this will upload to ghcr.io, all we need is the github token. That is
+    # automatically passed into the workflow.
     uses: famedly/github-workflows/.github/workflows/docker.yml@main
     with:
       push: ${{ github.event_name != 'pull_request' }} # Always build, don't publish on pull requests
