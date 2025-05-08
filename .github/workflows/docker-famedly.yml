@@ -1,3 +1,19 @@
+# Copyright (C) 2025 Famedly
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU Affero General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU Affero General Public License for more details.
+#
+# You should have received a copy of the GNU Affero General Public License
+# along with this program. If not, see <http://www.gnu.org/licenses/>.
+
+
 # Build the Community Edition of Synapse, then build the Famedly Edition on top. Push
 # both to their respective registries.
 
@@ -30,8 +46,26 @@ jobs:
         type=match,group=1,pattern=(v\d+.\d+.\d+)_\d+
         type=match,group=1,pattern=(v\d+.\d+.\d+_\d+)
 
+#  calculate_mod_build:
+#    if: ${{ !cancelled() && !failure() }} # Allow for stopping the build job
+#    runs-on: ubuntu-latest
+#    steps:
+#      - uses: actions/checkout@v4
+#      - uses: actions/setup-python@v5
+#        with:
+#          python-version: "3.x"
+#      - id: get-matrix
+#        run: .ci/scripts/calculate_builds.py
+#    outputs:
+#      build_matrix: ${{ steps.get-matrix.outputs.build_matrix }}
+
   production-build:
     if: ${{ !cancelled() && !failure() }} # Allow for stopping the build job
+#    needs:
+#      - calculate_mod_build
+#    strategy:
+#      matrix:
+#        job:  ${{ fromJson(needs.calculate_mod_build.outputs.build_matrix) }}
     uses: famedly/github-workflows/.github/workflows/docker.yml@main
     with:
       push: ${{ github.event_name != 'pull_request' }} # Always build, don't publish on pull requests
