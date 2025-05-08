@@ -62,7 +62,8 @@ jobs:
 
   production-build:
     if: ${{ !cancelled() && !failure() }} # Allow for stopping the build job
-#    needs:
+    needs:
+      - community-build
 #      - calculate_mod_build
 #    strategy:
 #      matrix:
