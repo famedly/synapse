@@ -434,6 +434,9 @@ class ExperimentalConfig(Config):
             "msc3984_appservice_key_query", False
         )
 
+        # MSC3706 (Lazy-loading room state on join[faster joins/partial-state]
+        self.msc3706_enabled: bool = experimental.get("msc3706_enabled", True)
+
         # MSC3720 (Account status endpoint)
         self.msc3720_enabled: bool = experimental.get("msc3720_enabled", False)
 

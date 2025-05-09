@@ -736,7 +736,10 @@ class FederationServer(FederationBase):
 
         state_event_ids: Collection[str]
         servers_in_room: Optional[Collection[str]]
-        if caller_supports_partial_state:
+        if (
+            self.hs.config.experimental.msc3706_enabled
+            and caller_supports_partial_state
+        ):
             summary = await self.store.get_room_summary(room_id)
             state_event_ids = _get_event_ids_for_partial_state_join(
                 event, prev_state_ids, summary
@@ -754,7 +757,10 @@ class FederationServer(FederationBase):
 
         # if the caller has opted in, we can omit any auth_chain events which are
         # already in state_event_ids
-        if caller_supports_partial_state:
+        if (
+            self.hs.config.experimental.msc3706_enabled
+            and caller_supports_partial_state
+        ):
             auth_chain_event_ids.difference_update(state_event_ids)
 
         auth_chain_events = await self.store.get_events_as_list(auth_chain_event_ids)
@@ -764,11 +770,16 @@ class FederationServer(FederationBase):
         # accurate as possible.
         time_now = self._clock.time_msec()
         event_json = event.get_pdu_json(time_now)
+        should_support_partial_state = (
+            caller_supports_partial_state
+            if self.hs.config.experimental.msc3706_enabled
+            else False
+        )
         resp = {
             "event": event_json,
             "state": serialize_and_filter_pdus(state_events, time_now),
             "auth_chain": serialize_and_filter_pdus(auth_chain_events, time_now),
-            "members_omitted": caller_supports_partial_state,
+            "members_omitted": should_support_partial_state,
         }
 
         if servers_in_room is not None:
