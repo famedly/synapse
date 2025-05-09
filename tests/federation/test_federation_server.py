@@ -457,6 +457,66 @@ class SendJoinFederationTests(unittest.FederatingHomeserverTestCase):
         )
         self.assertEqual(r[("m.room.member", joining_user)].membership, "join")
 
+    @override_config({"experimental_features": {"msc3706_enabled": False}})
+    def test_send_join_partial_state_disabled(self) -> None:
+        """send_join should ignore partial_state request if disabled"""
+        # Largely, this test is a mash up between test_send_join() and
+        # test_send_join_partial_state() above. The difference being that this uses the
+        # omit_members parameter on the request, but expects the full auth chain in the
+        # response(which is something that is not included for partial_state). This
+        # should signify that the partial state did not take place
+        joining_user = "@misspiggy:" + self.OTHER_SERVER_NAME
+        join_result = self._make_join(joining_user)
+
+        join_event_dict = join_result["event"]
+        self.add_hashes_and_signatures_from_other_server(
+            join_event_dict,
+            KNOWN_ROOM_VERSIONS[DEFAULT_ROOM_VERSION],
+        )
+        channel = self.make_signed_federation_request(
+            "PUT",
+            f"/_matrix/federation/v2/send_join/{self._room_id}/x?omit_members=true",
+            content=join_event_dict,
+        )
+        self.assertEqual(channel.code, HTTPStatus.OK, channel.json_body)
+
+        # we should get complete room state back
+        returned_state = [
+            (ev["type"], ev["state_key"]) for ev in channel.json_body["state"]
+        ]
+        self.assertCountEqual(
+            returned_state,
+            [
+                ("m.room.create", ""),
+                ("m.room.power_levels", ""),
+                ("m.room.join_rules", ""),
+                ("m.room.history_visibility", ""),
+                ("m.room.member", "@kermit:test"),
+                ("m.room.member", "@fozzie:test"),
+                # nb: *not* the joining user
+            ],
+        )
+
+        # also check the auth chain
+        returned_auth_chain_events = [
+            (ev["type"], ev["state_key"]) for ev in channel.json_body["auth_chain"]
+        ]
+        self.assertCountEqual(
+            returned_auth_chain_events,
+            [
+                ("m.room.create", ""),
+                ("m.room.member", "@kermit:test"),
+                ("m.room.power_levels", ""),
+                ("m.room.join_rules", ""),
+            ],
+        )
+
+        # the room should show that the new user is a member
+        r = self.get_success(
+            self._storage_controllers.state.get_current_state(self._room_id)
+        )
+        self.assertEqual(r[("m.room.member", joining_user)].membership, "join")
+
     @override_config({"rc_joins_per_room": {"per_second": 0, "burst_count": 3}})
     def test_make_join_respects_room_join_rate_limit(self) -> None:
         # In the test setup, two users join the room. Since the rate limiter burst

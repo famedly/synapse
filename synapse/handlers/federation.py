@@ -670,7 +670,8 @@ class FederationHandler:
                     # There's a race where we leave the room, then perform a full join
                     # anyway. This should end up being fast anyway, since we would
                     # already have the full room state and auth chain persisted.
-                    partial_state=not is_host_joined or already_partial_state_room,
+                    partial_state=self.config.experimental.msc3706_enabled
+                    and (not is_host_joined or already_partial_state_room),
                 )
 
                 event = ret.event
