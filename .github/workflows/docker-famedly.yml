@@ -52,9 +52,13 @@ jobs:
       registry: ghcr.io
       image_name: famedly/synapse
       file: docker/Dockerfile
+      # tag our new base image. If given a git tag of(as an example): "v1.234.5_6", this will
+      # break down into a docker tag of "v1.234.5" and "latest". Since the trailing suffix is/was
+      # used to differentiate new builds of Synapse typically with updated modules, it is
+      # not needed here. "latest" comes from the 'auto' functionality of flavors used
+      # when the tag is based on(in this case) a pattern and requires no explicit enablement.
       tags: |
         type=match,group=1,pattern=(v\d+.\d+.\d+)_\d+
-        type=match,group=1,pattern=(v\d+.\d+.\d+_\d+)
 
 #  calculate_mod_build:
 #    if: ${{ !cancelled() && !failure() }} # Allow for stopping the build job
@@ -86,6 +90,12 @@ jobs:
       image_name: synapse
       file: docker/Dockerfile-famedly
       build_args: "[FROM=ghcr.io/famedly/synapse:latest]"
+      # tag the production image used for famedly deployments.
+      # This will create 3 tags on a given image. If(for example like above) we provide
+      # a git tag of "v1.234.5_6", it will be broken into 3 docker tags:
+      # "latest"
+      # "v1.234.5"
+      # "v1.234.5_6"
       tags: |
         type=match,group=1,pattern=(v\d+.\d+.\d+)_\d+
         type=match,group=1,pattern=(v\d+.\d+.\d+_\d+)
