@@ -22,6 +22,8 @@
 #  work out tag wrangling for all that
 #  have 'on.pull_request' handling? This may have money attached if the runners/storage
 #    aren't free. Perhaps just do the test building on amd64?
+#  figure out why the push action is pushing when the value should be falsey(only push
+#    when not a pull request)
 
 name: Docker
 
@@ -38,7 +40,7 @@ jobs:
   community-build:
     # Since this will upload to ghcr.io, all we need is the github token. That is
     # automatically passed into the workflow.
-    uses: famedly/github-workflows/.github/workflows/docker.yml@main
+    uses: famedly/github-workflows/.github/workflows/docker.yml@jason/docker-namespace
     with:
       push: ${{ github.event_name != 'pull_request' }} # Always build, don't publish on pull requests
       registry: ghcr.io
@@ -69,14 +71,15 @@ jobs:
 #    strategy:
 #      matrix:
 #        job:  ${{ fromJson(needs.calculate_mod_build.outputs.build_matrix) }}
-    uses: famedly/github-workflows/.github/workflows/docker.yml@main
+    uses: famedly/github-workflows/.github/workflows/docker.yml@jason/docker-namespace
     with:
-      push: ${{ github.event_name != 'pull_request' }} # Always build, don't publish on pull requests
+      push: false
+#      push: ${{ github.event_name != 'pull_request' }} # Always build, don't publish on pull requests
       registry_user: famedly-ci
       registry: docker-oss.nexus.famedly.de
       image_name: synapse
       file: docker/Dockerfile-famedly
-      build_args: "[FROM=ghcr.io/famedly/synapse]"
+      build_args: "[FROM=ghcr.io/famedly/synapse:latest]"
       tags: |
         type=match,group=1,pattern=(v\d+.\d+.\d+)_\d+
         type=match,group=1,pattern=(v\d+.\d+.\d+_\d+)
