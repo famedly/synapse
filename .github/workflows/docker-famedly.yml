@@ -30,7 +30,6 @@ name: Docker
 on:
   push:
     tags: ["v*.*.*_*"]
-    branches: ["jason/*"]
   workflow_dispatch:
     inputs:
       tags:
