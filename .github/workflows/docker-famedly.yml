@@ -92,7 +92,7 @@ jobs:
       registry: docker-oss.nexus.famedly.de
       image_name: synapse
       file: docker/Dockerfile-famedly
-      build_args: "[FROM=ghcr.io/famedly/synapse:latest]"
+      build_args: "FROM=ghcr.io/famedly/synapse:latest"
       # tag the production image used for famedly deployments.
       # This will create 3 tags on a given image. If(for example like above) we provide
       # a git tag of "v1.234.5_6", it will be broken into 3 docker tags:
