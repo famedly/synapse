@@ -33,7 +33,7 @@ on:
   workflow_dispatch:
     inputs:
       tags:
-        description: "Tags to test with, should match expected 'vX.Y.Z_0' format(for now)"
+        description: "Tag to test with, should match expected 'vX.Y.Z_0' format(for now)"
         type: string
         required: true
 
@@ -47,6 +47,10 @@ jobs:
     # automatically passed into the workflow.
     uses: famedly/github-workflows/.github/workflows/docker.yml@jason/docker-namespace
     with:
+      # Need to decide on the conditions for this. The entire flow is gated behind needing
+      # tags, but could be on the default branch or another branch or a pull request. The
+      # existing "github.event_name != 'pull_request'" will on gate the push on when the
+      # pull request is first opened and not otherwise
       push: ${{ github.event_name != 'pull_request' }} # Always build, don't publish on pull requests
       registry: ghcr.io
       image_name: famedly/synapse
