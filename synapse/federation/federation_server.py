@@ -718,9 +718,13 @@ class FederationServer(FederationBase):
         room_id: str,
         caller_supports_partial_state: bool = False,
     ) -> Dict[str, Any]:
+        send_partial_state_response = (
+            caller_supports_partial_state
+            and self.hs.config.experimental.msc3706_enabled
+        )
         set_tag(
             SynapseTags.SEND_JOIN_RESPONSE_IS_PARTIAL_STATE,
-            caller_supports_partial_state,
+            send_partial_state_response,
         )
         await self._room_member_handler._join_rate_per_room_limiter.ratelimit(
             requester=None,
@@ -736,7 +740,7 @@ class FederationServer(FederationBase):
 
         state_event_ids: Collection[str]
         servers_in_room: Optional[Collection[str]]
-        if caller_supports_partial_state:
+        if send_partial_state_response:
             summary = await self.store.get_room_summary(room_id)
             state_event_ids = _get_event_ids_for_partial_state_join(
                 event, prev_state_ids, summary
@@ -754,7 +758,7 @@ class FederationServer(FederationBase):
 
         # if the caller has opted in, we can omit any auth_chain events which are
         # already in state_event_ids
-        if caller_supports_partial_state:
+        if send_partial_state_response:
             auth_chain_event_ids.difference_update(state_event_ids)
 
         auth_chain_events = await self.store.get_events_as_list(auth_chain_event_ids)
@@ -764,11 +768,11 @@ class FederationServer(FederationBase):
         # accurate as possible.
         time_now = self._clock.time_msec()
         event_json = event.get_pdu_json(time_now)
-        resp = {
+        resp: JsonDict = {
             "event": event_json,
             "state": serialize_and_filter_pdus(state_events, time_now),
             "auth_chain": serialize_and_filter_pdus(auth_chain_events, time_now),
-            "members_omitted": caller_supports_partial_state,
+            "members_omitted": send_partial_state_response,
         }
 
         if servers_in_room is not None:
