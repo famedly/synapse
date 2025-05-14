@@ -252,6 +252,8 @@ class TransportLayerClient:
 
         path = _create_v1_path("/send/%s", transaction.transaction_id)
 
+        headers: Dict[bytes, List[bytes]] = {b"Accept": [b"application/json"]}
+
         return await self.client.put_json(
             transaction.destination,
             path=path,
@@ -262,6 +264,7 @@ class TransportLayerClient:
             # Sending a transaction should always succeed, if it doesn't
             # then something is wrong and we should backoff.
             backoff_on_all_error_codes=True,
+            headers=headers,
         )
 
     async def make_query(
