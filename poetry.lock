@@ -1707,79 +1707,66 @@ nicer-shell = ["ipython"]
 
 [[package]]
 name = "opentelemetry-api"
-version = "1.33.0.dev0"
+version = "1.33.0"
 description = "OpenTelemetry Python API"
 optional = true
 python-versions = ">=3.8"
 groups = ["main"]
 markers = "extra == \"opentracing-otlp\" or extra == \"opentelemetry-log-handler\" or extra == \"all\""
-files = []
-develop = false
+files = [
+    {file = "opentelemetry_api-1.33.0-py3-none-any.whl", hash = "sha256:158df154f628e6615b65fdf6e59f99afabea7213e72c5809dd4adf06c0d997cd"},
+    {file = "opentelemetry_api-1.33.0.tar.gz", hash = "sha256:cc4380fd2e6da7dcb52a828ea81844ed1f4f2eb638ca3c816775109d93d58ced"},
+]
 
 [package.dependencies]
 deprecated = ">=1.2.6"
 importlib-metadata = ">=6.0,<8.7.0"
 
-[package.source]
-type = "git"
-url = "https://github.com/open-telemetry/opentelemetry-python"
-reference = "742171e50c70f4a4540a01d2c6c3cbcf4882d810"
-resolved_reference = "742171e50c70f4a4540a01d2c6c3cbcf4882d810"
-subdirectory = "opentelemetry-api"
-
 [[package]]
 name = "opentelemetry-exporter-otlp"
-version = "1.33.0.dev0"
+version = "1.33.0"
 description = "OpenTelemetry Collector Exporters"
 optional = true
 python-versions = ">=3.8"
 groups = ["main"]
 markers = "extra == \"opentracing-otlp\" or extra == \"opentelemetry-log-handler\" or extra == \"all\""
-files = []
-develop = false
+files = [
+    {file = "opentelemetry_exporter_otlp-1.33.0-py3-none-any.whl", hash = "sha256:92e81bae19ac8a619c0d91aec1bb96628b82b2ab1b4159a1a571f9ae01ba9c31"},
+    {file = "opentelemetry_exporter_otlp-1.33.0.tar.gz", hash = "sha256:ac5c39626bacce8cf8f73e39912a9ded359b4e62097f69f35ca2a7ea9a7b9ff9"},
+]
 
 [package.dependencies]
-opentelemetry-exporter-otlp-proto-grpc = "1.33.0.dev"
-opentelemetry-exporter-otlp-proto-http = "1.33.0.dev"
-
-[package.source]
-type = "git"
-url = "https://github.com/open-telemetry/opentelemetry-python"
-reference = "742171e50c70f4a4540a01d2c6c3cbcf4882d810"
-resolved_reference = "742171e50c70f4a4540a01d2c6c3cbcf4882d810"
-subdirectory = "exporter/opentelemetry-exporter-otlp"
+opentelemetry-exporter-otlp-proto-grpc = "1.33.0"
+opentelemetry-exporter-otlp-proto-http = "1.33.0"
 
 [[package]]
 name = "opentelemetry-exporter-otlp-proto-common"
-version = "1.33.0.dev0"
+version = "1.33.0"
 description = "OpenTelemetry Protobuf encoding"
 optional = true
 python-versions = ">=3.8"
 groups = ["main"]
 markers = "extra == \"opentracing-otlp\" or extra == \"opentelemetry-log-handler\" or extra == \"all\""
-files = []
-develop = false
+files = [
+    {file = "opentelemetry_exporter_otlp_proto_common-1.33.0-py3-none-any.whl", hash = "sha256:5c282fc752e4ebdf484c6af2f22d0af2048a5685400d59524e8a3dbcee315014"},
+    {file = "opentelemetry_exporter_otlp_proto_common-1.33.0.tar.gz", hash = "sha256:2f43679dab68ce7708db18cb145b59a7e9184d46608ef037c9c22f47c5beb320"},
+]
 
 [package.dependencies]
-opentelemetry-proto = "1.33.0.dev"
-
-[package.source]
-type = "git"
-url = "https://github.com/open-telemetry/opentelemetry-python"
-reference = "742171e50c70f4a4540a01d2c6c3cbcf4882d810"
-resolved_reference = "742171e50c70f4a4540a01d2c6c3cbcf4882d810"
-subdirectory = "exporter/opentelemetry-exporter-otlp-proto-common"
+opentelemetry-proto = "1.33.0"
 
 [[package]]
 name = "opentelemetry-exporter-otlp-proto-grpc"
-version = "1.33.0.dev0"
+version = "1.33.0"
 description = "OpenTelemetry Collector Protobuf over gRPC Exporter"
 optional = true
 python-versions = ">=3.8"
 groups = ["main"]
 markers = "extra == \"opentracing-otlp\" or extra == \"opentelemetry-log-handler\" or extra == \"all\""
-files = []
-develop = false
+files = [
+    {file = "opentelemetry_exporter_otlp_proto_grpc-1.33.0-py3-none-any.whl", hash = "sha256:04b11348a40f4c21958d704083445f9bbd32155e046ba9157133fa1bf864d2f2"},
+    {file = "opentelemetry_exporter_otlp_proto_grpc-1.33.0.tar.gz", hash = "sha256:99a2ec88f05ffa36897402820a73178cbc37dc3f9ebe2dbde6209be3303446f4"},
+]
 
 [package.dependencies]
 deprecated = ">=1.2.6"
@@ -1789,55 +1776,43 @@ grpcio = [
     {version = ">=1.66.2,<2.0.0", markers = "python_version >= \"3.13\""},
 ]
 opentelemetry-api = ">=1.15,<2.0"
-opentelemetry-exporter-otlp-proto-common = "1.33.0.dev"
-opentelemetry-proto = "1.33.0.dev"
-opentelemetry-sdk = "==1.33.*"
-
-[package.source]
-type = "git"
-url = "https://github.com/open-telemetry/opentelemetry-python"
-reference = "742171e50c70f4a4540a01d2c6c3cbcf4882d810"
-resolved_reference = "742171e50c70f4a4540a01d2c6c3cbcf4882d810"
-subdirectory = "exporter/opentelemetry-exporter-otlp-proto-grpc"
+opentelemetry-exporter-otlp-proto-common = "1.33.0"
+opentelemetry-proto = "1.33.0"
+opentelemetry-sdk = ">=1.33.0,<1.34.0"
 
 [[package]]
 name = "opentelemetry-exporter-otlp-proto-http"
-version = "1.33.0.dev0"
+version = "1.33.0"
 description = "OpenTelemetry Collector Protobuf over HTTP Exporter"
 optional = true
 python-versions = ">=3.8"
 groups = ["main"]
 markers = "extra == \"opentracing-otlp\" or extra == \"opentelemetry-log-handler\" or extra == \"all\""
-files = []
-develop = false
+files = [
+    {file = "opentelemetry_exporter_otlp_proto_http-1.33.0-py3-none-any.whl", hash = "sha256:5babd7498845c12c2d503d8c185ce345cb35e91805d4e3e5ac32a3abd8f75d64"},
+    {file = "opentelemetry_exporter_otlp_proto_http-1.33.0.tar.gz", hash = "sha256:bf0cf7568432621b903223e5b72aa9f8fe425fcc748e54d0b21ebe99885c12ee"},
+]
 
 [package.dependencies]
 deprecated = ">=1.2.6"
 googleapis-common-protos = ">=1.52,<2.0"
 opentelemetry-api = ">=1.15,<2.0"
-opentelemetry-exporter-otlp-proto-common = "1.33.0.dev"
-opentelemetry-proto = "1.33.0.dev"
-opentelemetry-sdk = "==1.33.*"
+opentelemetry-exporter-otlp-proto-common = "1.33.0"
+opentelemetry-proto = "1.33.0"
+opentelemetry-sdk = ">=1.33.0,<1.34.0"
 requests = ">=2.7,<3.0"
-
-[package.source]
-type = "git"
-url = "https://github.com/open-telemetry/opentelemetry-python"
-reference = "742171e50c70f4a4540a01d2c6c3cbcf4882d810"
-resolved_reference = "742171e50c70f4a4540a01d2c6c3cbcf4882d810"
-subdirectory = "exporter/opentelemetry-exporter-otlp-proto-http"
 
 [[package]]
 name = "opentelemetry-opentracing-shim"
-version = "0.52b1"
+version = "0.54b0"
 description = "OpenTracing Shim for OpenTelemetry"
 optional = true
 python-versions = ">=3.8"
 groups = ["main"]
 markers = "extra == \"opentracing-otlp\" or extra == \"all\""
 files = [
-    {file = "opentelemetry_opentracing_shim-0.52b1-py3-none-any.whl", hash = "sha256:60b20676dee90697c34da95cd04bd18f79f3a360268703de29e91da23b967baf"},
-    {file = "opentelemetry_opentracing_shim-0.52b1.tar.gz", hash = "sha256:bf983fd738c44b816d7921c97b24cd8a0d4d482acb572d27f6b17cce7e27c7a6"},
+    {file = "opentelemetry_opentracing_shim-0.54b0-py3-none-any.whl", hash = "sha256:bf21b38620d26c9ebc0b2bf002d804fae138e3d4587d5cbd121aa81784e8e3bd"},
+    {file = "opentelemetry_opentracing_shim-0.54b0.tar.gz", hash = "sha256:e3b1fbb4c488b141e2e7c572f54583aacb3bf285bf581fe1bf7be739fb7504cb"},
 ]
 
 [package.dependencies]
@@ -1847,69 +1822,54 @@ opentracing = ">=2.0,<3.0"
 
 [[package]]
 name = "opentelemetry-proto"
-version = "1.33.0.dev0"
+version = "1.33.0"
 description = "OpenTelemetry Python Proto"
 optional = true
 python-versions = ">=3.8"
 groups = ["main"]
 markers = "extra == \"opentracing-otlp\" or extra == \"opentelemetry-log-handler\" or extra == \"all\""
-files = []
-develop = false
+files = [
+    {file = "opentelemetry_proto-1.33.0-py3-none-any.whl", hash = "sha256:84a1d7daacac4aa0f24a5b1190a3e0619011dbff56f945fc2b6fc0a18f48b942"},
+    {file = "opentelemetry_proto-1.33.0.tar.gz", hash = "sha256:ec5aa35486c990207ead2512a8d616d1b324928562c91dbc7e0cb9aa48c60b7b"},
+]
 
 [package.dependencies]
 protobuf = ">=5.0,<6.0"
 
-[package.source]
-type = "git"
-url = "https://github.com/open-telemetry/opentelemetry-python"
-reference = "742171e50c70f4a4540a01d2c6c3cbcf4882d810"
-resolved_reference = "742171e50c70f4a4540a01d2c6c3cbcf4882d810"
-subdirectory = "opentelemetry-proto"
-
 [[package]]
 name = "opentelemetry-sdk"
-version = "1.33.0.dev0"
+version = "1.33.0"
 description = "OpenTelemetry Python SDK"
 optional = true
 python-versions = ">=3.8"
 groups = ["main"]
 markers = "extra == \"opentracing-otlp\" or extra == \"opentelemetry-log-handler\" or extra == \"all\""
-files = []
-develop = false
+files = [
+    {file = "opentelemetry_sdk-1.33.0-py3-none-any.whl", hash = "sha256:bed376b6d37fbf00688bb65edfee817dd01d48b8559212831437529a6066049a"},
+    {file = "opentelemetry_sdk-1.33.0.tar.gz", hash = "sha256:a7fc56d1e07b218fcc316b24d21b59d3f1967b2ca22c217b05da3a26b797cc68"},
+]
 
 [package.dependencies]
-opentelemetry-api = "1.33.0.dev"
-opentelemetry-semantic-conventions = "0.54b0.dev"
+opentelemetry-api = "1.33.0"
+opentelemetry-semantic-conventions = "0.54b0"
 typing-extensions = ">=3.7.4"
-
-[package.source]
-type = "git"
-url = "https://github.com/open-telemetry/opentelemetry-python"
-reference = "742171e50c70f4a4540a01d2c6c3cbcf4882d810"
-resolved_reference = "742171e50c70f4a4540a01d2c6c3cbcf4882d810"
-subdirectory = "opentelemetry-sdk"
 
 [[package]]
 name = "opentelemetry-semantic-conventions"
-version = "0.54b0.dev0"
+version = "0.54b0"
 description = "OpenTelemetry Semantic Conventions"
 optional = true
 python-versions = ">=3.8"
 groups = ["main"]
 markers = "extra == \"opentracing-otlp\" or extra == \"opentelemetry-log-handler\" or extra == \"all\""
-files = []
-develop = false
+files = [
+    {file = "opentelemetry_semantic_conventions-0.54b0-py3-none-any.whl", hash = "sha256:fad7c1cf8908fd449eb5cf9fbbeefb301acf4bc995101f85277899cec125d823"},
+    {file = "opentelemetry_semantic_conventions-0.54b0.tar.gz", hash = "sha256:467b739977bdcb079af1af69f73632535cdb51099d5e3c5709a35d10fe02a9c9"},
+]
 
 [package.dependencies]
 deprecated = ">=1.2.6"
-opentelemetry-api = "1.33.0.dev"
-
-[package.source]
-type = "git"
-url = "https://github.com/open-telemetry/opentelemetry-python"
-reference = "742171e50c70f4a4540a01d2c6c3cbcf4882d810"
-resolved_reference = "742171e50c70f4a4540a01d2c6c3cbcf4882d810"
-subdirectory = "opentelemetry-semantic-conventions"
+opentelemetry-api = "1.33.0"
 
 [[package]]
 name = "opentracing"
@@ -3735,14 +3695,14 @@ docs = ["Sphinx", "repoze.sphinx.autointerface"]
 test = ["zope.i18nmessageid", "zope.testing", "zope.testrunner"]
 
 [extras]
-all = ["Pympler", "authlib", "hiredis", "jaeger-client", "lxml", "matrix-synapse-ldap3", "opentelemetry-api", "opentelemetry-exporter-otlp", "opentelemetry-exporter-otlp-proto-common", "opentelemetry-exporter-otlp-proto-grpc", "opentelemetry-exporter-otlp-proto-http", "opentelemetry-opentracing-shim", "opentelemetry-proto", "opentelemetry-sdk", "opentelemetry-semantic-conventions", "opentracing", "psycopg2", "psycopg2cffi", "psycopg2cffi-compat", "pyicu", "pysaml2", "sentry-sdk", "txredisapi"]
+all = ["Pympler", "authlib", "hiredis", "jaeger-client", "lxml", "matrix-synapse-ldap3", "opentelemetry-api", "opentelemetry-exporter-otlp", "opentelemetry-opentracing-shim", "opentelemetry-sdk", "opentracing", "psycopg2", "psycopg2cffi", "psycopg2cffi-compat", "pyicu", "pysaml2", "sentry-sdk", "txredisapi"]
 cache-memory = ["Pympler"]
 jwt = ["authlib"]
 matrix-synapse-ldap3 = ["matrix-synapse-ldap3"]
 oidc = ["authlib"]
-opentelemetry-log-handler = ["opentelemetry-api", "opentelemetry-exporter-otlp", "opentelemetry-exporter-otlp-proto-common", "opentelemetry-exporter-otlp-proto-grpc", "opentelemetry-exporter-otlp-proto-http", "opentelemetry-proto", "opentelemetry-sdk", "opentelemetry-semantic-conventions"]
+opentelemetry-log-handler = ["opentelemetry-api", "opentelemetry-exporter-otlp", "opentelemetry-sdk"]
 opentracing-jaeger = ["jaeger-client", "opentracing"]
-opentracing-otlp = ["opentelemetry-api", "opentelemetry-exporter-otlp", "opentelemetry-exporter-otlp-proto-common", "opentelemetry-exporter-otlp-proto-grpc", "opentelemetry-exporter-otlp-proto-http", "opentelemetry-opentracing-shim", "opentelemetry-proto", "opentelemetry-sdk", "opentelemetry-semantic-conventions", "opentracing"]
+opentracing-otlp = ["opentelemetry-api", "opentelemetry-exporter-otlp", "opentelemetry-opentracing-shim", "opentelemetry-sdk", "opentracing"]
 postgres = ["psycopg2", "psycopg2cffi", "psycopg2cffi-compat"]
 redis = ["hiredis", "txredisapi"]
 saml2 = ["pysaml2"]
@@ -3755,4 +3715,4 @@ user-search = ["pyicu"]
 [metadata]
 lock-version = "2.0"
 python-versions = "^3.9.0"
-content-hash = "41edb614ba876855637e6a751863c321a224dc6eaf87d0d23d25acbcd1aa086c"
+content-hash = "269ac389d220c5b038685a15d913f35914b52caa6212ef773454fdf77cbcdf48"
