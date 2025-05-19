@@ -240,7 +240,7 @@ jobs:
         run: until pg_isready -h localhost; do sleep 1; done
       # coverage is already installed from the pyproject.toml file
       - run: poetry run pip install coverage-enable-subprocess
-      - run: poetry run coverage run -m twisted.trial -j4 tests
+      - run: poetry run coverage run -m twisted.trial -j6 tests
         env:
           SYNAPSE_POSTGRES: ${{ matrix.job.database == 'postgres' || '' }}
           SYNAPSE_POSTGRES_HOST: /var/run/postgresql
