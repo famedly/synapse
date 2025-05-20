@@ -206,7 +206,11 @@ jobs:
       matrix:
         job: ${{ fromJson(needs.calculate-test-jobs.outputs.trial_test_matrix) }}
     env:
+      # Both of these are used for the coverage system. TOP gives the directory that is
+      # the root of the source code, and COVERAGE_PROCESS_START points at the coverage
+      # settings file to use(which also enables multiprocess implicit mode for coverage.py)
       TOP: ${{ github.workspace }}
+      COVERAGE_PROCESS_START: ${{ github.workspace }}/.coveragerc
 
     steps:
       - uses: actions/checkout@v4
@@ -217,7 +221,7 @@ jobs:
         # 2. Expose the unix socket for postgres. This removes latency of using docker-proxy for connections.
         run: |
           docker run -d -p 5432:5432 \
-            --tmpfs /var/lib/postgres:rw,size=6144m \
+            --tmpfs /var/lib/postgresql/data:rw,size=6144m \
             --mount 'type=bind,src=/var/run/postgresql,dst=/var/run/postgresql' \
             -e POSTGRES_PASSWORD=postgres \
             -e POSTGRES_INITDB_ARGS="--lc-collate C --lc-ctype C --encoding UTF8" \
@@ -234,9 +238,9 @@ jobs:
         if: ${{ matrix.job.postgres-version }}
         timeout-minutes: 2
         run: until pg_isready -h localhost; do sleep 1; done
-      - run: python -m pip install --user coverage
-      - run: poetry run coverage run -m twisted.trial tests
-        # can't run parallel jobs as that breaks coverage
+      # coverage is already installed from the pyproject.toml file
+      - run: poetry run pip install coverage-enable-subprocess
+      - run: poetry run coverage run -m twisted.trial -j6 tests
         env:
           SYNAPSE_POSTGRES: ${{ matrix.job.database == 'postgres' || '' }}
           SYNAPSE_POSTGRES_HOST: /var/run/postgresql
