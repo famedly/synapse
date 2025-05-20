@@ -26,10 +26,7 @@ RUN --mount=type=cache,target=/root/.cache/pip \
     https://github.com/famedly/synapse-invite-policies/archive/refs/heads/main.zip \
     https://github.com/famedly/synapse-domain-rule-checker/archive/refs/heads/main.zip
 
-# Largely, keep these the same as in the main Dockerfile, except we don't really use
-# port 8009(and I don't think they do either)
-
-EXPOSE 8008/tcp 8448/tcp
+EXPOSE 8008/tcp 8009/tcp 8448/tcp
 
 ENTRYPOINT ["/start.py"]
 
