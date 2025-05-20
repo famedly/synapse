@@ -48,10 +48,16 @@ jobs:
       # tag our new base image. If given a git tag of(as an example): "v1.234.5_6", this will
       # break down into a docker tag of "v1.234.5" and "latest". Since the trailing suffix is/was
       # used to differentiate new builds of Synapse typically with updated modules, it is
-      # not needed here. "latest" comes from the 'auto' functionality of flavors used
+      # not needed here.
+      # Disable "latest" for now. It is enabled by default from the 'auto' functionality of flavors used
       # when the tag is based on(in this case) a pattern and requires no explicit enablement.
+      # Use the full sha ref here, then we can borrow the Github context to reference
+      # it for the production-build below
       tags: |
         type=match,group=1,pattern=(v\d+.\d+.\d+)_\d+
+        type=match,group=1,pattern=(v\d+.\d+.\d+_\d+)
+        type=sha,format=long
+      flavor: latest=false
 
   production-build:
     if: ${{ !cancelled() && !failure() }} # Allow for stopping the build job
@@ -64,7 +70,9 @@ jobs:
       registry: docker-oss.nexus.famedly.de
       image_name: synapse
       file: docker/Dockerfile-famedly
-      build_args: "SYNAPSE_VERSION=latest"
+      # Notice that there is a leading 'sha-' in front of the actual sha, as that is
+      # how the docker meta action produces that tag.
+      build_args: "SYNAPSE_VERSION=sha-${{ github.sha }}"
       # tag the production image used for famedly deployments.
       # This will create 3 tags on a given image. If(for example like above) we provide
       # a git tag of "v1.234.5_6", it will be broken into 3 docker tags:
@@ -74,4 +82,5 @@ jobs:
       tags: |
         type=match,group=1,pattern=(v\d+.\d+.\d+)_\d+
         type=match,group=1,pattern=(v\d+.\d+.\d+_\d+)
+      flavor: latest=false
     secrets: inherit
