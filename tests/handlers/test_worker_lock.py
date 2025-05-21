@@ -54,8 +54,11 @@ class WorkerLockTestCase(unittest.HomeserverTestCase):
     def test_lock_contention(self) -> None:
         """Test lock contention when a lot of locks wait on a single worker"""
 
-        # It takes around 0.5s on a 5+ years old laptop
-        with test_timeout(5):
+        # It takes around 0.5s on a 5+ years old laptop when tests are not heavily
+        # concurrent. The database load(even with sqlite in memory) seems to hit a wall
+        # after `nproc` * 4 number of jobs. Increasing the timeout allows all the
+        # database reads/writes to actually complete
+        with test_timeout(15):
             nb_locks = 500
             d = self._take_locks(nb_locks)
             self.assertEqual(self.get_success(d), nb_locks)

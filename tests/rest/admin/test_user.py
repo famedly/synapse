@@ -23,7 +23,6 @@ import hashlib
 import hmac
 import json
 import os
-import time
 import urllib.parse
 from binascii import unhexlify
 from http import HTTPStatus
@@ -5531,12 +5530,14 @@ class UserRedactionBackgroundTaskTestCase(BaseMultiWorkerStreamTestCase):
         id = channel.json_body.get("redact_id")
 
         timeout_s = 10
-        start_time = time.time()
+        start_time = self.clock.time()
         redact_result = ""
         while redact_result != "complete":
-            if start_time + timeout_s < time.time():
+            if start_time + timeout_s < self.clock.time():
                 self.fail("Timed out waiting for redactions.")
 
+            # It's a background task, give it a shot at actually finishing
+            self.pump()
             channel2 = self.make_request(
                 "GET",
                 f"/_synapse/admin/v1/user/redact_status/{id}",

@@ -240,7 +240,11 @@ jobs:
         run: until pg_isready -h localhost; do sleep 1; done
       # coverage is already installed from the pyproject.toml file
       - run: poetry run pip install coverage-enable-subprocess
-      - run: poetry run coverage run -m twisted.trial -j6 tests
+        # Normally, this Github runner has 2 cores(actually threads) available to it.
+        # Using only one trial test runner does not saturate the cpu. Rough experimentation in the past led to having 3
+        # of these runners per core as optimal, but now coverage is required and there may be the need
+        # to scale back a little. This should be 6 trial test runners/jobs
+      - run: poetry run coverage run -m twisted.trial -j$((`nproc` * 3 )) tests
         env:
           SYNAPSE_POSTGRES: ${{ matrix.job.database == 'postgres' || '' }}
           SYNAPSE_POSTGRES_HOST: /var/run/postgresql
