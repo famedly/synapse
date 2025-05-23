@@ -299,6 +299,8 @@ class ThirdPartyEventRulesModuleApiCallbacks:
         # the hashes and signatures.
         event.freeze()
 
+        ret: Tuple[bool, Optional[dict]] = (True, None)
+
         for callback in self._check_event_allowed_callbacks:
             try:
                 res, replacement_data = await delay_cancellation(
@@ -324,11 +326,17 @@ class ThirdPartyEventRulesModuleApiCallbacks:
             # Return if the event shouldn't be allowed or if the module came up with a
             # replacement dict for the event.
             if res is False:
-                return res, None
+                ret = (False, None)
+                break
             elif isinstance(replacement_data, dict):
-                return True, replacement_data
+                ret = (True, replacement_data)
+                break
 
-        return True, None
+        # We can unfreeze the event unconditionally here, since incoming events should never have been frozen.
+        # This is necessary, because other parts of the code expect unfrozen events currently.
+        event.unfreeze()
+
+        return ret
 
     async def on_create_room(
         self, requester: Requester, config: dict, is_requester_admin: bool
