@@ -102,7 +102,7 @@ RUN --mount=type=cache,target=/root/.cache/pip \
     matrix-synapse-ldap3 \
     synapse-s3-storage-provider \
     synapse-auto-accept-invite \
-    synapse-invite-checker==0.4.4 \
+    synapse-invite-checker==0.4.5 \
     git+https://github.com/famedly/synapse-invite-policies.git@main \
     git+https://github.com/famedly/synapse-domain-rule-checker.git@main
 
