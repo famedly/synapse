@@ -1437,6 +1437,30 @@ class RegistrationWorkerStore(CacheInvalidationWorkerStore):
             desc="update_access_token_last_validated",
         )
 
+    async def expire_access_token(self, access_token: str) -> None:
+        """Updates the valid_until_ms for the access token to be expired.
+
+        Args:
+            token_id: The ID of the access token to update.
+        Raises:
+            StoreError if there was a problem updating this.
+        """
+        now = self._clock.time_msec() - 100
+
+        def f(txn: LoggingTransaction) -> None:
+            self.db_pool.simple_update_one_txn(
+                txn,
+                "access_tokens",
+                {"token": access_token},
+                {"valid_until_ms": now},
+            )
+
+            self._invalidate_cache_and_stream(
+                txn, self.get_user_by_access_token, (access_token,)
+            )
+
+        await self.db_pool.runInteraction("expire_access_token", f)
+
     async def registration_token_is_valid(self, token: str) -> bool:
         """Checks if a token can be used to authenticate a registration.
 
@@ -1915,6 +1939,25 @@ class RegistrationWorkerStore(CacheInvalidationWorkerStore):
 
         await self.db_pool.runInteraction(
             "replace_refresh_token", _replace_refresh_token_txn
+        )
+
+    async def expire_refresh_tokens_for_device(
+        self, user_id: str, device_id: str
+    ) -> None:
+        """
+        Expires all refresh tokens for a specific user and device.
+
+        Args:
+            user_id: the ID of the user owning the refresh token
+            device_id: the id of the device owning the refresh token
+        """
+
+        now = self._clock.time_msec() - 100
+        await self.db_pool.simple_update(
+            "refresh_tokens",
+            {"user_id": user_id, "device_id": device_id},
+            {"expiry_ts": now},
+            "expire_refresh_tokens",
         )
 
     async def add_login_token_to_user(

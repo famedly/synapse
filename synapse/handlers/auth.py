@@ -1485,6 +1485,42 @@ class AuthHandler:
 
         raise AuthError(403, "Invalid login token", errcode=Codes.FORBIDDEN)
 
+    async def expire_access_token(self, access_token: str) -> None:
+        """Invalidate a single access token and associated refresh tokens, putting the user in the soft logout state.
+
+        Args:
+            access_token: access token to be deleted
+
+        """
+        token = await self.store.get_user_by_access_token(access_token)
+        if not token:
+            # At this point, the token should already have been fetched once by
+            # the caller, so this should not happen, unless of a race condition
+            # between two delete requests
+            raise SynapseError(HTTPStatus.UNAUTHORIZED, "Unrecognised access token")
+
+        await self.store.expire_access_token(access_token)
+
+        if token.device_id is not None:
+            await self.store.expire_refresh_tokens_for_device(
+                user_id=token.user_id, device_id=token.device_id
+            )
+
+        # see if any modules want to know about this
+        await self.password_auth_provider.on_logged_out(
+            user_id=token.user_id,
+            device_id=token.device_id,
+            access_token=access_token,
+        )
+
+        # delete pushers associated with this access token
+        # XXX(quenting): This is only needed until the 'set_device_id_for_pushers'
+        # background update completes.
+        if token.token_id is not None:
+            await self.hs.get_pusherpool().remove_pushers_by_access_tokens(
+                token.user_id, (token.token_id,)
+            )
+
     async def delete_access_token(self, access_token: str) -> None:
         """Invalidate a single access token
 

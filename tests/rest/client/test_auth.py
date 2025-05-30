@@ -1064,6 +1064,89 @@ class RefreshAuthTests(unittest.HomeserverTestCase):
             refresh_response.code, HTTPStatus.FORBIDDEN, refresh_response.result
         )
 
+    def test_explicit_soft_logout(self) -> None:
+        """
+        Doing an explicit soft logout should invalidate all tokens.
+        """
+
+        body = {
+            "type": "m.login.password",
+            "user": "test",
+            "password": self.user_pass,
+            "refresh_token": True,
+        }
+        login_response = self.make_request(
+            "POST",
+            "/_matrix/client/v3/login",
+            body,
+        )
+        self.assertEqual(login_response.code, HTTPStatus.OK, login_response.result)
+        refresh_token = login_response.json_body["refresh_token"]
+        access_token = login_response.json_body["access_token"]
+        device_id = login_response.json_body["device_id"]
+
+        # access token should be valid
+        whoami_response = self.make_request(
+            "GET",
+            "/_matrix/client/v3/account/whoami",
+            access_token=access_token,
+        )
+        self.assertEqual(whoami_response.code, HTTPStatus.OK, whoami_response.result)
+
+        # Do a soft logout
+        logout_response = self.make_request(
+            "POST",
+            "/_matrix/client/v3/logout",
+            {
+                "com.famedly.soft_logout": True,
+            },
+            access_token=access_token,
+        )
+        self.assertEqual(logout_response.code, HTTPStatus.OK, logout_response.result)
+
+        # Assert that we can't refresh the token anymore
+        refresh_response = self.use_refresh_token(refresh_token)
+        self.assertEqual(
+            refresh_response.code, HTTPStatus.FORBIDDEN, refresh_response.result
+        )
+
+        # access token should be invalid
+        whoami_response = self.make_request(
+            "GET",
+            "/_matrix/client/v3/account/whoami",
+            access_token=access_token,
+        )
+        self.assertEqual(
+            whoami_response.code, HTTPStatus.UNAUTHORIZED, whoami_response.result
+        )
+        self.assertEqual(
+            whoami_response.json_body["soft_logout"], True, whoami_response.result
+        )
+
+        # Log back into the existing session
+        body = {
+            "type": "m.login.password",
+            "user": "test",
+            "password": self.user_pass,
+            "refresh_token": True,
+            "device_id": device_id,
+        }
+        login_response = self.make_request(
+            "POST",
+            "/_matrix/client/v3/login",
+            body,
+        )
+        self.assertEqual(login_response.code, HTTPStatus.OK, login_response.result)
+        access_token = login_response.json_body["access_token"]
+
+        # access token should be valid again
+        whoami_response = self.make_request(
+            "GET",
+            "/_matrix/client/v3/account/whoami",
+            access_token=access_token,
+        )
+        self.assertEqual(whoami_response.code, HTTPStatus.OK, whoami_response.result)
+
     @override_config(
         {
             "refreshable_access_token_lifetime": "2m",

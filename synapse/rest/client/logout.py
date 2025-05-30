@@ -24,7 +24,7 @@ from typing import TYPE_CHECKING, Tuple
 
 from synapse.handlers.device import DeviceHandler
 from synapse.http.server import HttpServer
-from synapse.http.servlet import RestServlet
+from synapse.http.servlet import RestServlet, parse_json_object_from_request
 from synapse.http.site import SynapseRequest
 from synapse.rest.client._base import client_patterns
 from synapse.types import JsonDict
@@ -51,7 +51,13 @@ class LogoutRestServlet(RestServlet):
             request, allow_expired=True, allow_locked=True
         )
 
-        if requester.device_id is None:
+        body = parse_json_object_from_request(request, allow_empty_body=True)
+
+        if body.get("com.famedly.soft_logout", False):
+            access_token = self.auth.get_access_token_from_request(request)
+            # For soft_logout, just expire the tokens, don't delete them.
+            await self._auth_handler.expire_access_token(access_token)
+        elif requester.device_id is None:
             # The access token wasn't associated with a device.
             # Just delete the access token
             access_token = self.auth.get_access_token_from_request(request)
