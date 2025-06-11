@@ -2151,10 +2151,10 @@ class StreamWorkerStore(EventsWorkerStore, SQLBaseStore):
         sql = """
             %(select_keywords)s
                 event.event_id, event.instance_name,
-                event.topological_ordering, event.stream_ordering
+                event.topological_ordering, event.stream_ordering, event.type, event.state_key, event.outlier
             FROM events AS event
             %(join_clause)s
-            WHERE event.outlier = FALSE AND event.room_id = ? AND %(bounds)s
+            WHERE event.room_id = ? AND %(bounds)s
             ORDER BY event.topological_ordering %(order)s,
             event.stream_ordering %(order)s LIMIT ?
         """ % {
@@ -2168,11 +2168,15 @@ class StreamWorkerStore(EventsWorkerStore, SQLBaseStore):
         # Get all the rows and check if we hit the limit.
         fetched_rows = txn.fetchall()
         limited = len(fetched_rows) >= requested_limit
-
+        logger.info("JASON(pagination txn): number of rows: %d", len(fetched_rows))
+        logger.warn(
+            "JASON(pagination txn): fetched rows(depth, stream_ordering, outlier):\n %s",
+            "\n".join([str(f_row) for f_row in fetched_rows]),
+        )
         # Filter the result set.
         rows = [
             _EventDictReturn(event_id, topological_ordering, stream_ordering)
-            for event_id, instance_name, topological_ordering, stream_ordering in fetched_rows
+            for event_id, instance_name, topological_ordering, stream_ordering, _, _, outlier in fetched_rows
             if _filter_results(
                 lower_token=(
                     to_token if direction == Direction.BACKWARDS else from_token
@@ -2184,6 +2188,7 @@ class StreamWorkerStore(EventsWorkerStore, SQLBaseStore):
                 topological_ordering=topological_ordering,
                 stream_ordering=stream_ordering,
             )
+            and not outlier
         ]
 
         if len(rows) > limit:
@@ -2282,6 +2287,11 @@ class StreamWorkerStore(EventsWorkerStore, SQLBaseStore):
         events = await self.get_events_as_list(
             [r.event_id for r in rows], get_prev_content=True
         )
+        logger.info(
+            "JASON(pagination): number of events after filtering: %d", len(events)
+        )
+        logger.info("JASON(pagination): token at end: %r", token)
+        logger.info("JASON(pagination): was limited?: %r", limited)
 
         return events, token, limited
 
