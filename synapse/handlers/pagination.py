@@ -457,6 +457,11 @@ class PaginationHandler:
             # `/messages` should still works with live tokens when manually provided.
             assert from_token.room_key.topological is not None
 
+        logger.info(
+            "JASON(messages): calculate from_token for room '%s': %r",
+            room_id,
+            from_token,
+        )
         room_token = from_token.room_key
 
         (membership, member_event_id) = (None, None)
@@ -477,6 +482,11 @@ class PaginationHandler:
                 curr_topo = await self.store.get_current_topological_token(
                     room_id, room_token.stream
                 )
+            logger.info(
+                "JASON(messages): calculated topolog token for room'%s': %r",
+                room_id,
+                curr_topo,
+            )
 
         # If they have left the room then clamp the token to be before
         # they left the room, to save the effort of loading from the
@@ -520,6 +530,14 @@ class PaginationHandler:
             event_filter=event_filter,
         )
 
+        logger.warn(
+            "JASON(messages, b4 backfill): pulled events from pagination request: %d",
+            len(events),
+        )
+        logger.warn(
+            "JASON(messages, b4 backfill): next_key from pagination request: %r",
+            next_key,
+        )
         if pagin_config.direction == Direction.BACKWARDS:
             # We use a `Set` because there can be multiple events at a given depth
             # and we only care about looking at the unique continum of depths to
@@ -615,7 +633,7 @@ class PaginationHandler:
                 )
 
         next_token = from_token.copy_and_replace(StreamKeyType.ROOM, next_key)
-
+        logger.info("JASON(messages): calculated next_token: %r", next_token)
         # if no events are returned from pagination, that implies
         # we have reached the end of the available events.
         # In that case we do not return end, to tell the client
