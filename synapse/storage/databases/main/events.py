@@ -334,6 +334,16 @@ class PersistEventsStore:
                 # `stream_ordering` here that won't end up being used.
                 # `_update_outliers_txn()` will fix this discrepancy (always use the
                 # `stream_ordering` from the first time it was persisted).
+                logger.info(
+                    "JASON(stream ordering): before assignment: %r: %s",
+                    event.internal_metadata.stream_ordering,
+                    event.event_id,
+                )
+                logger.info(
+                    "JASON(stream ordering): after assignment: %r: %s",
+                    stream,
+                    event.event_id,
+                )
                 event.internal_metadata.stream_ordering = stream
                 event.internal_metadata.instance_name = self._instance_name
 
