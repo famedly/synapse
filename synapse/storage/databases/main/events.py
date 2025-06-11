@@ -377,6 +377,10 @@ class PersistEventsStore:
                 event_counter.labels(event.type, origin_type, origin_entity).inc()
 
             if new_forward_extremities:
+                logger.info(
+                    "JASON(cache check): Prefilling new forward extrems direct to cache(get_latest_event_ids_in_room): %r",
+                    new_forward_extremities,
+                )
                 self.store.get_latest_event_ids_in_room.prefill(
                     (room_id,), frozenset(new_forward_extremities)
                 )
@@ -932,6 +936,10 @@ class PersistEventsStore:
         # Once the txn completes, invalidate all of the relevant caches. Note that we do this
         # up here because it captures all the events_and_contexts before any are removed.
         for event, _ in events_and_contexts:
+            logger.info(
+                "JASON(cache check): queuing cache invalidate for event(after txn): %r",
+                event.event_id,
+            )
             self.store.invalidate_get_event_cache_after_txn(txn, event.event_id)
             if event.redacts:
                 self.store.invalidate_get_event_cache_after_txn(txn, event.redacts)
@@ -2757,6 +2765,10 @@ class PersistEventsStore:
                 self.store._get_event_cache.set_local(
                     (cache_entry.event.event_id,), cache_entry
                 )
+                logger.info(
+                    "JASON(cache check): direct prefill attempt(after txn, _get_event_cache): %s",
+                    cache_entry.event.event_id,
+                )
 
         # The order these are called here is not as important as knowing that after the
         # transaction is finished, the async_call_after will run before the call_after.
@@ -3342,6 +3354,10 @@ class PersistEventsStore:
         )
 
         for event_id, state_group_id in state_groups.items():
+            logger.info(
+                "JASON(cache check): queuing STATE prefill attempt(after txn, _get_state_group_for_event): %s",
+                event_id,
+            )
             txn.call_after(
                 self.store._get_state_group_for_event.prefill,
                 (event_id,),

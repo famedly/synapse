@@ -795,6 +795,11 @@ class EventsWorkerStore(SQLBaseStore):
         event_entry_map = self._get_events_from_local_cache(
             event_ids,
         )
+        logger.info(
+            "JASON(cache check): wanted: %d, found in event cache %d",
+            len(event_ids),
+            len(event_entry_map),
+        )
 
         missing_events_ids = {e for e in event_ids if e not in event_entry_map}
 
@@ -948,6 +953,10 @@ class EventsWorkerStore(SQLBaseStore):
             event_id: the event ID to invalidate
         """
 
+        logger.info(
+            "JASON(cache check): invalidating directly(after queuing) from caches and removing from ongoing event fetches: %s",
+            event_id,
+        )
         self._get_event_cache.invalidate_local((event_id,))
         self._event_ref.pop(event_id, None)
         self._current_event_fetches.pop(event_id, None)

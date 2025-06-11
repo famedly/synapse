@@ -22,6 +22,7 @@
 
 import abc
 import enum
+import logging
 import threading
 from typing import (
     Callable,
@@ -47,6 +48,7 @@ from synapse.util.async_helpers import ObservableDeferred
 from synapse.util.caches.lrucache import LruCache
 from synapse.util.caches.treecache import TreeCache, iterate_tree_cache_entry
 
+logger = logging.getLogger(__name__)
 cache_pending_metric = Gauge(
     "synapse_util_caches_cache_pending",
     "Number of lookups currently pending for this cache",
@@ -376,6 +378,9 @@ class DeferredCache(Generic[KT, VT]):
         self, key: KT, value: VT, callback: Optional[Callable[[], None]] = None
     ) -> None:
         callbacks = (callback,) if callback else ()
+        logger.info(
+            "JASON(cache check): direct prefilling deferred_cache with key: %r", key
+        )
         self.cache.set(key, value, callbacks=callbacks)
         self._pending_deferred_cache.pop(key, None)
 
