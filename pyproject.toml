@@ -251,17 +251,10 @@ Pympler = { version = "*", optional = true }
 parameterized = { version = ">=0.7.4", optional = true }
 idna = { version = ">=2.5", optional = true }
 pyicu = { version = ">=2.10.2", optional = true }
-opentelemetry-api = { git = "https://github.com/open-telemetry/opentelemetry-python", rev = "742171e50c70f4a4540a01d2c6c3cbcf4882d810", subdirectory = "opentelemetry-api", optional = true }
-opentelemetry-sdk = { git = "https://github.com/open-telemetry/opentelemetry-python", rev = "742171e50c70f4a4540a01d2c6c3cbcf4882d810", subdirectory = "opentelemetry-sdk", optional = true }
-opentelemetry-opentracing-shim = { version = "^0.52b0", optional = true }
-opentelemetry-exporter-otlp = { git = "https://github.com/open-telemetry/opentelemetry-python", rev = "742171e50c70f4a4540a01d2c6c3cbcf4882d810", subdirectory = "exporter/opentelemetry-exporter-otlp", optional = true }
-
-# The lines below and also the corresponding extra dependencies can be removed as soon as we switch to a released version of opentelemetry-python (1.32.0):
-opentelemetry-exporter-otlp-proto-grpc = { git = "https://github.com/open-telemetry/opentelemetry-python", rev = "742171e50c70f4a4540a01d2c6c3cbcf4882d810", subdirectory = "exporter/opentelemetry-exporter-otlp-proto-grpc", optional = true }
-opentelemetry-exporter-otlp-proto-http = { git = "https://github.com/open-telemetry/opentelemetry-python", rev = "742171e50c70f4a4540a01d2c6c3cbcf4882d810", subdirectory = "exporter/opentelemetry-exporter-otlp-proto-http", optional = true }
-opentelemetry-exporter-otlp-proto-common = { git = "https://github.com/open-telemetry/opentelemetry-python", rev = "742171e50c70f4a4540a01d2c6c3cbcf4882d810", subdirectory = "exporter/opentelemetry-exporter-otlp-proto-common", optional = true }
-opentelemetry-proto = { git = "https://github.com/open-telemetry/opentelemetry-python", rev = "742171e50c70f4a4540a01d2c6c3cbcf4882d810", subdirectory = "opentelemetry-proto", optional = true }
-opentelemetry-semantic-conventions = { git = "https://github.com/open-telemetry/opentelemetry-python", rev = "742171e50c70f4a4540a01d2c6c3cbcf4882d810", subdirectory = "opentelemetry-semantic-conventions", optional = true }
+opentelemetry-api = { version = "1.34.1", optional = true }
+opentelemetry-sdk = { version = "1.34.1", optional = true }
+opentelemetry-opentracing-shim = { version = "0.55b1", optional = true }
+opentelemetry-exporter-otlp = { version = "1.34.1", optional = true }
 
 [tool.poetry.extras]
 # NB: Packages that should be part of `pip install matrix-synapse[all]` need to be specified
@@ -276,8 +269,8 @@ oidc = ["authlib"]
 systemd = ["systemd-python"]
 url-preview = ["lxml"]
 sentry = ["sentry-sdk"]
-opentracing-otlp = ["opentracing", "opentelemetry-api", "opentelemetry-sdk", "opentelemetry-opentracing-shim", "opentelemetry-exporter-otlp", "opentelemetry-exporter-otlp-proto-grpc", "opentelemetry-exporter-otlp-proto-http", "opentelemetry-exporter-otlp-proto-common", "opentelemetry-proto", "opentelemetry-semantic-conventions"]
-opentelemetry-log-handler = ["opentelemetry-api", "opentelemetry-sdk", "opentelemetry-exporter-otlp", "opentelemetry-exporter-otlp-proto-grpc", "opentelemetry-exporter-otlp-proto-http", "opentelemetry-exporter-otlp-proto-common", "opentelemetry-proto", "opentelemetry-semantic-conventions"]
+opentracing-otlp = ["opentracing", "opentelemetry-api", "opentelemetry-sdk", "opentelemetry-opentracing-shim", "opentelemetry-exporter-otlp"]
+opentelemetry-log-handler = ["opentelemetry-api", "opentelemetry-sdk", "opentelemetry-exporter-otlp"]
 opentracing-jaeger = ["opentracing", "jaeger-client"]
 jwt = ["authlib"]
 # hiredis is not a *strict* dependency, but it makes things much faster.
@@ -324,7 +317,7 @@ all = [
     # improved user search
     "pyicu",
     # opentracing-otlp (superset of opentelemetry-log-handler)
-    "opentelemetry-api", "opentelemetry-sdk", "opentelemetry-opentracing-shim", "opentelemetry-exporter-otlp", "opentelemetry-exporter-otlp-proto-grpc", "opentelemetry-exporter-otlp-proto-http", "opentelemetry-exporter-otlp-proto-common", "opentelemetry-proto", "opentelemetry-semantic-conventions",
+    "opentelemetry-api", "opentelemetry-sdk", "opentelemetry-opentracing-shim", "opentelemetry-exporter-otlp",
     # omitted:
     #   - test: it's useful to have this separate from dev deps in the olddeps job
     #   - systemd: this is a system-based requirement
