@@ -46,7 +46,7 @@ jobs:
       tags: |
         type=match,group=1,pattern=(v\d+.\d+.\d+)_\d+
         type=match,group=1,pattern=(v\d+.\d+.\d+_\d+)
-        type=raw,value={{ inputs.tags }},enable=${{ github.event_name == 'workflow_dispatch'}}
+        type=raw,value=${{ inputs.tags }},enable=${{ github.event_name == 'workflow_dispatch'}}
         type=sha,format=long
       flavor: latest=false
 
@@ -68,6 +68,6 @@ jobs:
       # Allow for workflow_dispatch to create a docker image tagged with a custom tag.
       tags: |
         type=match,group=1,pattern=(v\d+.\d+.\d+_\d+)
-        type=raw,value={{ inputs.tags }},enable=${{ github.event_name == 'workflow_dispatch'}}
+        type=raw,value=${{ inputs.tags }},enable=${{ github.event_name == 'workflow_dispatch'}}
       flavor: latest=false
     secrets: inherit
