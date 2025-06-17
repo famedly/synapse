@@ -67,9 +67,10 @@ jobs:
         job:  ${{ fromJson(needs.calculate_mod_build.outputs.build_matrix) }}
     uses: famedly/github-workflows/.github/workflows/docker.yml@jason-docker-namespace
     with:
-      push: ${{ github.event_name != 'pull_request' }} # Always build, don't publish on pull requests
-      registry_user: famedly
-      registry:  registry.famedly.net/docker-oss
+      push: false
+#      push: ${{ github.event_name != 'pull_request' }} # Always build, don't publish on pull requests
+      registry_user: famedly-ci
+      registry: docker-oss.nexus.famedly.de
       image_name: synapse
       file: docker/Dockerfile-famedly
       # Notice that there is a leading 'sha-' in front of the actual sha, as that is
