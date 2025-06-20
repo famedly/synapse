@@ -336,6 +336,20 @@ class PersistEventsStore:
                 # `stream_ordering` from the first time it was persisted).
                 event.internal_metadata.stream_ordering = stream
                 event.internal_metadata.instance_name = self._instance_name
+                if (
+                    new_forward_extremities
+                    and event.internal_metadata.should_send_additional_context()
+                ):
+                    # It's a legit new join(because otherwise this may be a backwards
+                    # extremity and we don't care)...
+                    if event.event_id in new_forward_extremities:
+                        # ...if there are other forwards...
+                        forward_extremities_that_remain = (
+                            new_forward_extremities.difference(event.event_id)
+                        )
+                        if not forward_extremities_that_remain:
+                            # ...whoops, false positive. Don't actually need to send anything else
+                            event.internal_metadata.send_additional_context = False
 
             sliding_sync_table_changes = None
             if state_delta_for_room is not None:

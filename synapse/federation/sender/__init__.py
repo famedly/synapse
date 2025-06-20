@@ -132,6 +132,7 @@ EDUs).
 import abc
 import logging
 from collections import OrderedDict
+from itertools import chain
 from typing import (
     TYPE_CHECKING,
     Collection,
@@ -150,6 +151,7 @@ from prometheus_client import Counter
 from twisted.internet import defer
 
 import synapse.metrics
+from synapse.api.errors import StoreError
 from synapse.api.presence import UserPresenceState
 from synapse.events import EventBase
 from synapse.federation.sender.per_destination_queue import (
@@ -169,6 +171,7 @@ from synapse.metrics.background_process_metrics import (
     run_as_background_process,
     wrap_as_background_process,
 )
+from synapse.storage.databases.main.events_worker import EventCacheEntry
 from synapse.types import (
     JsonDict,
     ReadReceipt,
@@ -493,10 +496,64 @@ class FederationSender(AbstractFederationSender):
                 )
 
                 event_ids = event_to_received_ts.keys()
-                event_entries = await self.store.get_unredacted_events_from_cache_or_db(
-                    event_ids
-                )
+                event_entries: Dict[
+                    str, EventCacheEntry
+                ] = await self.store.get_unredacted_events_from_cache_or_db(event_ids)
 
+                # Do a quick check inside the events metadata, see if we need to gather
+                # more events to send(such as additional forward extremities during a
+                # join). If so, stick in this mapping of event_id -> event_cache_entry
+                _extra_event_entries: Dict[str, EventCacheEntry] = {}
+
+                # Pre-trigger the destinations set below, because if we need to send a
+                # forward extremity, it likely it only needs to go to the server that
+                # the join came from.
+                # Mapping of event_id -> set[remote server]
+                _special_destinations: Dict[str, set[str]] = {}
+                for event_cache_entry in event_entries.values():
+                    event_metadata = event_cache_entry.event.internal_metadata
+                    if (
+                        event_metadata.stream_ordering
+                        and event_metadata.should_send_additional_context()
+                    ):
+                        try:
+                            maybe_forward_extremities = set(
+                                await self.store._get_forward_extremeties_for_room(
+                                    event_cache_entry.event.room_id,
+                                    event_metadata.stream_ordering,
+                                )
+                            )
+                            # Strike out any of the event_ids we were already going to
+                            # send. TODO: maybe parse them anyway for the special destinations?
+                            maybe_forward_extremities.difference_update(event_ids)
+                            if maybe_forward_extremities:
+                                logger.debug(
+                                    "Found additional events that need to be sent: %r",
+                                    maybe_forward_extremities,
+                                )
+                                # Good, add first to the cached EventBases being sent out
+                                new_entries = await self.store.get_unredacted_events_from_cache_or_db(
+                                    maybe_forward_extremities
+                                )
+                                _extra_event_entries.update(new_entries)
+                                # Then update the event_id_to_received_ts dict so...
+                                # ...the timestamp can be updated? wtf?
+                                # for event_id, event_cache_entry in new_entries:
+                                #     event_to_received_ts.update({event_id: event_cache_entry.event.received_ts})
+                                for _event_entry in _extra_event_entries:
+                                    _special_destinations.setdefault(
+                                        _event_entry, set()
+                                    ).add(
+                                        get_domain_from_id(
+                                            event_cache_entry.event.sender
+                                        )
+                                    )
+                        except StoreError:
+                            logger.debug(
+                                "Skipping additional event context to send related to a join"
+                            )
+
+                event_entries.update(_extra_event_entries)
                 logger.debug(
                     "Handling %i -> %i: %i events to send (current id %i)",
                     last_token,
@@ -505,6 +562,8 @@ class FederationSender(AbstractFederationSender):
                     self._last_poked_id,
                 )
 
+                # This presents a problem. The _last_poked_id will be higher than the
+                # next_token here, so the loop may stop. Maybe not, this may be fine
                 if not event_entries and next_token >= self._last_poked_id:
                     logger.debug("All events processed")
                     break
@@ -563,6 +622,9 @@ class FederationSender(AbstractFederationSender):
                         )
                         return
 
+                    # destinations is going to be difficult too. State at the event will
+                    # not reflect that the newly-joined host is in the room. Thanks
+                    # stream ordering
                     destinations: Optional[Collection[str]] = None
                     if not event.prev_event_ids():
                         # If there are no prev event IDs then the state is empty
@@ -583,6 +645,14 @@ class FederationSender(AbstractFederationSender):
 
                         if partial_state_destinations is not None:
                             destinations = partial_state_destinations
+
+                    if destinations is None:
+                        destinations = _special_destinations.get(event.event_id, None)
+                        logger.debug(
+                            "Grabbing special destinations of %r for %s",
+                            destinations,
+                            event.event_id,
+                        )
 
                     if destinations is None:
                         # We check the external cache for the destinations, which is
@@ -647,11 +717,11 @@ class FederationSender(AbstractFederationSender):
                         await self._send_pdu(event, sharded_destinations)
 
                         now = self.clock.time_msec()
-                        ts = event_to_received_ts[event.event_id]
-                        assert ts is not None
-                        synapse.metrics.event_processing_lag_by_event.labels(
-                            "federation_sender"
-                        ).observe((now - ts) / 1000)
+                        ts = event_to_received_ts.get(event.event_id)
+                        if ts is not None:
+                            synapse.metrics.event_processing_lag_by_event.labels(
+                                "federation_sender"
+                            ).observe((now - ts) / 1000)
 
                 async def handle_room_events(events: List[EventBase]) -> None:
                     logger.debug(
@@ -663,7 +733,7 @@ class FederationSender(AbstractFederationSender):
 
                 events_by_room: Dict[str, List[EventBase]] = {}
 
-                for event_id in event_ids:
+                for event_id in chain(event_ids, _extra_event_entries.keys()):
                     # `event_entries` is unsorted, so we have to iterate over `event_ids`
                     # to ensure the events are in the right order
                     event_cache = event_entries.get(event_id)

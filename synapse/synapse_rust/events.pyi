@@ -39,6 +39,8 @@ class EventInternalMetadata:
     """The access token ID of the user who sent this event, if any."""
     device_id: str
     """The device ID of the user who sent this event, if any."""
+    send_additional_context: bool
+    """Check for additional forward extremities adjacent to a join that should be sent to the joining server"""
 
     def get_dict(self) -> JsonDict: ...
     def is_outlier(self) -> bool: ...
@@ -101,6 +103,11 @@ class EventInternalMetadata:
 
         This is used for efficiently checking whether an event has been
         marked as redacted without needing to make another database call.
+        """
+
+    def should_send_additional_context(self) -> bool:
+        """Whether this is a join and a look up should be done for additional
+        forward extremities.
         """
 
     def is_notifiable(self) -> bool:
