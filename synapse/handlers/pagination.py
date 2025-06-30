@@ -579,10 +579,20 @@ class PaginationHandler:
             ):
                 # Historical Note: There used to be a check here for if backfill was
                 # successful or not
+                logger.info("JASON: found big gap: %r", found_big_gap)
+                logger.info(
+                    "JASON: missing_to_many_events: %r", missing_too_many_events
+                )
+                logger.info(
+                    "JASON: not_enough_events_to_fill_response: %r",
+                    not_enough_events_to_fill_response,
+                )
+                logger.info("JAsON: curr_topo token: %r", curr_topo)
                 await self.hs.get_federation_handler().maybe_backfill(
                     room_id,
                     curr_topo,
                     limit=pagin_config.limit,
+                    skip_calculating_backwards_extremities=True,
                 )
 
                 # Regardless if we backfilled or not, another worker or even a

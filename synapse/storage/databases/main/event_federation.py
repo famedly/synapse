@@ -948,6 +948,7 @@ class EventFederationWorkerStore(SignatureWorkerStore, EventsWorkerStore, SQLBas
         room_id: str,
         current_depth: int,
         limit: int,
+        skip_calculating_backwards_extremities: bool = False,
     ) -> List[Tuple[str, int]]:
         """
         Get the backward extremities to backfill from in the room along with the
@@ -970,12 +971,16 @@ class EventFederationWorkerStore(SignatureWorkerStore, EventsWorkerStore, SQLBas
             room_id: Room where we want to find the oldest events
             current_depth: The depth at the user's current scrollback position
             limit: The max number of backfill points to return
+            skip_calculating_backwards_extremities:
 
         Returns:
             List of (event_id, depth) tuples. Sorted by depth, highest to lowest
             (descending) so the closest events to the `current_depth` are first
             in the list.
         """
+        logger.info(
+            "JASON: get_backfill_points_in_room: current_depth: %d", current_depth
+        )
 
         def get_backfill_points_in_room_txn(
             txn: LoggingTransaction, room_id: str
@@ -995,7 +1000,7 @@ class EventFederationWorkerStore(SignatureWorkerStore, EventsWorkerStore, SQLBas
             else:
                 raise RuntimeError("Unknown database engine")
 
-            sql = f"""
+            calculate_backwards_extremitiy_sql = f"""
                 SELECT backward_extrem.event_id, event.depth FROM events AS event
                 /**
                  * Get the edge connections from the event_edges table
@@ -1068,6 +1073,61 @@ class EventFederationWorkerStore(SignatureWorkerStore, EventsWorkerStore, SQLBas
                 LIMIT ?
             """
 
+            exact_depth_sql = f"""
+                SELECT event.event_id, event.depth FROM events AS event
+                /**
+                 * We use this info to make sure we don't retry to use a backfill point
+                 * if we've already attempted to backfill from it recently.
+                 */
+                LEFT JOIN event_failed_pull_attempts AS failed_backfill_attempt_info
+                ON
+                    failed_backfill_attempt_info.room_id = event.room_id
+                    AND failed_backfill_attempt_info.event_id = event.event_id
+                WHERE
+                    event.room_id = ?
+                    /**
+                     * We only want events that are older than or at
+                     * the same position of the given `current_depth` (where older
+                     * means less than the given depth) because we're looking backwards
+                     * from the `current_depth` when backfilling.
+                     *
+                     *                         current_depth (ignore events that come after this, ignore 2-4)
+                     *                         |
+                     *                         ▼
+                     * <oldest-in-time> [0]<--[1]<--[2]<--[3]<--[4] <newest-in-time>
+                     */
+                    AND event.depth = ? /* current_depth */
+                    /**
+                     * Exponential back-off (up to the upper bound) so we don't retry the
+                     * same backfill point over and over. ex. 2hr, 4hr, 8hr, 16hr, etc.
+                     *
+                     * We use `1 << n` as a power of 2 equivalent for compatibility
+                     * with older SQLites. The left shift equivalent only works with
+                     * powers of 2 because left shift is a binary operation (base-2).
+                     * Otherwise, we would use `power(2, n)` or the power operator, `2^n`.
+                     */
+                    AND (
+                        failed_backfill_attempt_info.event_id IS NULL
+                        OR ? /* current_time */ >= failed_backfill_attempt_info.last_attempt_ts + (
+                            (1 << {least_function}(failed_backfill_attempt_info.num_attempts, ? /* max doubling steps */))
+                            * ? /* step */
+                        )
+                    )
+                /**
+                 * Sort from highest (closest to the `current_depth`) to the lowest depth
+                 * because the closest are most relevant to backfill from first.
+                 * Then tie-break on alphabetical order of the event_ids so we get a
+                 * consistent ordering which is nice when asserting things in tests.
+                 */
+                ORDER BY event.depth DESC, event.event_id DESC
+                LIMIT ?
+            """
+
+            sql = (
+                calculate_backwards_extremitiy_sql
+                if not skip_calculating_backwards_extremities
+                else exact_depth_sql
+            )
             txn.execute(
                 sql,
                 (
@@ -1419,7 +1479,11 @@ class EventFederationWorkerStore(SignatureWorkerStore, EventsWorkerStore, SQLBas
         ]
 
     async def get_backfill_events(
-        self, room_id: str, seed_event_id_list: List[str], limit: int
+        self,
+        room_id: str,
+        seed_event_id_list: List[str],
+        limit: int,
+        include_adjacent_events: bool = True,
     ) -> List[EventBase]:
         """Get a list of Events for a given topic that occurred before (and
         including) the events in seed_event_id_list. Return a list of max size `limit`
@@ -1428,6 +1492,7 @@ class EventFederationWorkerStore(SignatureWorkerStore, EventsWorkerStore, SQLBas
             room_id
             seed_event_id_list
             limit
+            include_adjacent_events
         """
         event_ids = await self.db_pool.runInteraction(
             "get_backfill_events",
@@ -1436,6 +1501,23 @@ class EventFederationWorkerStore(SignatureWorkerStore, EventsWorkerStore, SQLBas
             seed_event_id_list,
             limit,
         )
+        if include_adjacent_events:
+            for seed_event_id in seed_event_id_list:
+                prev_event_list = await self.get_previous_edge_events(seed_event_id)
+                for prev_event_id in prev_event_list:
+                    leading_edge_event_ids = await self.get_successor_events(
+                        prev_event_id
+                    )
+                    logger.info(
+                        "JASON: get_backfill_events: leading_edge_event_ids %r",
+                        leading_edge_event_ids,
+                    )
+
+                    event_ids.update(leading_edge_event_ids)
+
+            # prev_event_ids = {await self.get_previous_edge_events(seed_event_id) for seed_event_id in seed_event_id_list}
+            # leading_edge_event_ids = {await self.get_successor_events(prev_event_id) for prev_event_id_list in prev_event_ids for prev_event_id in prev_event_id_list }
+
         events = await self.get_events_as_list(event_ids)
         return sorted(
             # type-ignore: mypy doesn't like negating the Optional[int] stream_ordering.
@@ -1522,6 +1604,7 @@ class EventFederationWorkerStore(SignatureWorkerStore, EventsWorkerStore, SQLBas
                 room_id,
                 connected_prev_event_backfill_results,
             )
+            # And lookup adjacent events to the seed events
             for (
                 connected_prev_event_backfill_item
             ) in connected_prev_event_backfill_results:
@@ -1738,6 +1821,21 @@ class EventFederationWorkerStore(SignatureWorkerStore, EventsWorkerStore, SQLBas
             keyvalues={"prev_event_id": event_id},
             retcol="event_id",
             desc="get_successor_events",
+        )
+
+    @trace
+    @tag_args
+    async def get_previous_edge_events(self, event_id: str) -> List[str]:
+        """Fetch all events that are previous events to the given event
+
+        Args:
+            event_id: The event to search for prev_event.
+        """
+        return await self.db_pool.simple_select_onecol(
+            table="event_edges",
+            keyvalues={"event_id": event_id},
+            retcol="prev_event_id",
+            desc="get_previous_edge_events",
         )
 
     @wrap_as_background_process("delete_old_forward_extrem_cache")

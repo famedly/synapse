@@ -209,7 +209,12 @@ class FederationHandler:
     @trace
     @tag_args
     async def maybe_backfill(
-        self, room_id: str, current_depth: int, limit: int, record_time: bool = True
+        self,
+        room_id: str,
+        current_depth: int,
+        limit: int,
+        record_time: bool = True,
+        skip_calculating_backwards_extremities: bool = False,
     ) -> None:
         """Checks the database to see if we should backfill before paginating,
         and if so do.
@@ -223,6 +228,8 @@ class FederationHandler:
                 return. This is used as part of the heuristic to decide if we
                 should back paginate.
             record_time: Whether to record the time it takes to backfill.
+            skip_calculating_backwards_extremities: Whether to use the backward
+                extremity calculations or just the exact depth
 
         """
         # Starting the processing time here so we can include the room backfill
@@ -238,6 +245,7 @@ class FederationHandler:
                     current_depth,
                     limit,
                     processing_start_time=processing_start_time,
+                    skip_calculating_backwards_extremities=skip_calculating_backwards_extremities,
                 )
 
     @trace
@@ -249,6 +257,7 @@ class FederationHandler:
         limit: int,
         *,
         processing_start_time: Optional[int],
+        skip_calculating_backwards_extremities: bool = False,
     ) -> None:
         """
         Checks whether the `current_depth` is at or approaching any backfill
@@ -262,11 +271,15 @@ class FederationHandler:
             limit: The max number of events to request from the remote federated server.
             processing_start_time: The time when `maybe_backfill` started processing.
                 Only used for timing. If `None`, no timing observation will be made.
+            skip_calculating_backwards_extremities:
 
         Returns:
             True if we actually tried to backfill something, otherwise False.
         """
-        backwards_extremities = [
+        # if skip_calculating_backwards_extremities is False, these 'points' will be
+        # backwards extremities. Otherwise, they are the exact events at the current
+        # depth that we know about
+        points_to_backfill_from = [
             _BackfillPoint(event_id, depth, _BackfillPointType.BACKWARDS_EXTREMITY)
             for event_id, depth in await self.store.get_backfill_points_in_room(
                 room_id=room_id,
@@ -279,13 +292,14 @@ class FederationHandler:
                 # our limit could be filtered out but seems like a good amount
                 # to try with at least.
                 limit=50,
+                skip_calculating_backwards_extremities=skip_calculating_backwards_extremities,
             )
         ]
 
         # we now have a list of potential places to backpaginate from. We prefer to
         # start with the most recent (ie, max depth), so let's sort the list.
         sorted_backfill_points: List[_BackfillPoint] = sorted(
-            backwards_extremities,
+            points_to_backfill_from,
             key=lambda e: -int(e.depth),
         )
 
@@ -394,6 +408,7 @@ class FederationHandler:
 
         extremities_to_request: List[str] = []
         for bp in sorted_backfill_points:
+            logger.info("JASON: backfill point target: %r", bp)
             if len(extremities_to_request) >= 5:
                 break
 
@@ -407,8 +422,15 @@ class FederationHandler:
             #   event but not anything before it. This would require looking at the
             #   state *before* the event, ignoring the special casing certain event
             #   types have.
-            event_ids_to_check = await self.store.get_successor_events(bp.event_id)
-
+            if skip_calculating_backwards_extremities:
+                event_ids_to_check = [bp.event_id]
+            else:
+                event_ids_to_check = await self.store.get_successor_events(bp.event_id)
+            logger.info(
+                "JASON: _maybe_backfill_inner: skip_backwards_extrem_check: %r, event_ids_to_check: %r",
+                skip_calculating_backwards_extremities,
+                event_ids_to_check,
+            )
             events_to_check = await self.store.get_events_as_list(
                 event_ids_to_check,
                 redact_behaviour=EventRedactBehaviour.as_is,
@@ -426,8 +448,15 @@ class FederationHandler:
                 filter_out_erased_senders=False,
                 filter_out_remote_partial_state_events=False,
             )
+            logger.info(
+                "JASON: _maybe_backfill_inner: filtered_extremities: %r",
+                filtered_extremities,
+            )
             if filtered_extremities:
                 extremities_to_request.append(bp.event_id)
+                # extremities_to_request.extend(
+                #     [fe.event_id for fe in filtered_extremities]
+                # )
             else:
                 logger.debug(
                     "_maybe_backfill_inner: skipping extremity %s as it would not be visible",
