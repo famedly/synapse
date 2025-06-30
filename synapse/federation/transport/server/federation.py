@@ -678,6 +678,18 @@ class FederationVersionServlet(BaseFederationServlet):
 
     REQUIRE_AUTH = False
 
+    def __init__(
+        self,
+        hs: "HomeServer",
+        authenticator: Authenticator,
+        ratelimiter: FederationRateLimiter,
+        server_name: str,
+    ):
+        # Enable auth on the /version endpoint if enabled. Not sure how many
+        # ramifications this will end up having.
+        self.REQUIRE_AUTH = hs.config.server.require_auth_for_server_version
+        super().__init__(hs, authenticator, ratelimiter, server_name)
+
     async def on_GET(
         self,
         origin: Optional[str],
