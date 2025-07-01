@@ -1,0 +1,49 @@
+# GitHub actions workflow to build and push base docker images for pull requests.
+name: Build Dev Docker Image on PR
+
+on:
+  pull_request:
+  push:
+    branches-ignore:
+      - master
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.generate-tag.outputs.tag }}
+    steps:
+      - name: Generate Docker tag
+        id: generate-tag
+        run: |
+          RAW_REF="${GITHUB_HEAD_REF:-${GITHUB_REF##*/}}"
+          SAFE_BRANCH=$(echo "$RAW_REF" | tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9._-]+/-/g' | sed -E 's/^-+|-+$//g')
+          TAG="dev-${SAFE_BRANCH}"
+          echo "tag=$TAG" >> $GITHUB_OUTPUT
+      - name: Debug generated tag
+        run: |
+          echo "generated tag:"
+          echo "${{ steps.generate-tag.outputs.tag }}"
+  dev-build-and-push-ghcr:
+    uses: famedly/github-workflows/.github/workflows/docker.yml@jason-docker-namespace
+    needs: prepare
+    with:
+      push: true
+      registry: ghcr.io
+      image_name: famedly/synapse
+      file: docker/Dockerfile
+      tags: type=raw, value=${{ needs.prepare.outputs.tag }}
+      flavor: latest=false
+
+  dev-build-and-push:
+    uses: famedly/github-workflows/.github/workflows/docker.yml@jason-docker-namespace
+    needs: prepare
+    with:
+      push: true
+      registry: docker-oss.nexus.famedly.de
+      registry_user: famedly-ci
+      image_name: synapse
+      file: docker/Dockerfile
+      tags: type=raw, value=${{ needs.prepare.outputs.tag }}
+      flavor: latest=false
+    secrets: inherit
