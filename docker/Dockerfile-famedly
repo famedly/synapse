@@ -3,7 +3,7 @@
 # Synapse Token Authenticator
 ARG STA_VERSION=0.11.0
 # Synapse Invite Checker
-ARG SIC_VERSION=0.4.5
+ARG SIC_VERSION=0.4.6
 
 ARG SYNAPSE_VERSION=latest
 
