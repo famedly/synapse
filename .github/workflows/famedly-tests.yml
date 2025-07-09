@@ -5,9 +5,7 @@ name: Tests
 # so a change to a pull request was triggering both. Also run tests when a tag is pushed.
 on:
   push:
-    branches: ["master", "release-*"]
-    tags:
-      - '**'
+    branches: ["master"]
   pull_request:
   merge_group:
   workflow_dispatch:
