@@ -50,6 +50,7 @@ from synapse.api.errors import StoreError
 from synapse.api.room_versions import RoomVersion, RoomVersions
 from synapse.config.homeserver import HomeServerConfig
 from synapse.events import EventBase
+from synapse.metrics import LaterGauge
 from synapse.replication.tcp.streams.partial_state import UnPartialStatedRoomStream
 from synapse.storage._base import (
     db_to_json,
@@ -165,6 +166,18 @@ class RoomWorkerStore(CacheInvalidationWorkerStore):
             sequence_name="un_partial_stated_room_stream_sequence",
             # TODO(faster_joins, multiple writers) Support multiple writers.
             writers=["master"],
+        )
+        LaterGauge(
+            "synapse_rooms_total",
+            "",
+            [],
+            self.get_room_count,
+        )
+        LaterGauge(
+            "synapse_locally_joined_rooms_total",
+            "",
+            [],
+            self.get_locally_joined_room_count,
         )
 
     def process_replication_position(
@@ -402,6 +415,20 @@ class RoomWorkerStore(CacheInvalidationWorkerStore):
             return row[0]
 
         return await self.db_pool.runInteraction("get_rooms", f)
+
+    async def get_locally_joined_room_count(self) -> int:
+        """Retrieve the total number of locally joined rooms."""
+
+        def f(txn: LoggingTransaction) -> int:
+            sql = """
+                SELECT count(*) FROM room_stats_current
+                WHERE local_users_in_room > 0
+            """
+            txn.execute(sql)
+            row = cast(Tuple[int], txn.fetchone())
+            return row[0]
+
+        return await self.db_pool.runInteraction("get_locally_joined_room_count", f)
 
     async def get_largest_public_rooms(
         self,
