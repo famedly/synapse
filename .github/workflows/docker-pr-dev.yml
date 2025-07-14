@@ -10,6 +10,13 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  poke-with-stick:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "${{ github.head_ref }}"
+      - run: echo "${{ github.ref }}"
+      - run: echo "${{ github.ref_name }}"
+
   dev-build-and-push-ghcr:
     uses: famedly/github-workflows/.github/workflows/docker.yml@jason-docker-namespace
     with:
