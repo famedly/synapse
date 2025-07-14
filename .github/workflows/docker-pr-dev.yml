@@ -19,10 +19,12 @@ jobs:
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: |
-            name=,enable=false
+          images: enable=false
           tags: |
             type=ref,event=branch
+          flavor: |
+            latest=false
+            prefix=dev-
 
       - name: Debug generated tag
         run: |
