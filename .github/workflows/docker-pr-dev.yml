@@ -13,19 +13,18 @@ jobs:
   prepare:
     runs-on: ubuntu-latest
     outputs:
-      tag: ${{ steps.generate-tag.outputs.tag }}
+      tags: ${{ steps.meta.outputs.tags }}
     steps:
-      - name: Generate Docker tag
-        id: generate-tag
-        run: |
-          RAW_REF="${GITHUB_HEAD_REF:-${GITHUB_REF##*/}}"
-          SAFE_BRANCH=$(echo "$RAW_REF" | tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9._-]+/-/g' | sed -E 's/^-+|-+$//g')
-          TAG="dev-${SAFE_BRANCH}"
-          echo "tag=$TAG" >> $GITHUB_OUTPUT
+      - name: Docker meta
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          tags: type=ref,event=branch
+
       - name: Debug generated tag
         run: |
           echo "generated tag:"
-          echo "${{ steps.generate-tag.outputs.tag }}"
+          echo "${{ steps.meta.outputs.tags }}"
 
   dev-build-and-push-ghcr:
     uses: famedly/github-workflows/.github/workflows/docker.yml@jason-docker-namespace
@@ -35,7 +34,7 @@ jobs:
       registry: ghcr.io
       image_name: famedly/synapse
       file: docker/Dockerfile
-      tags: type=raw, value=${{ needs.prepare.outputs.tag }}
+      tags: type=raw, value=${{ needs.prepare.outputs.tags }}
       flavor: latest=false
 
   dev-build-and-push-nexus:
@@ -47,6 +46,6 @@ jobs:
       registry_user: famedly-ci
       image_name: synapse
       file: docker/Dockerfile
-      tags: type=raw, value=${{ needs.prepare.outputs.tag }}
+      tags: type=raw, value=${{ needs.prepare.outputs.tags }}
       flavor: latest=false
     secrets: inherit
