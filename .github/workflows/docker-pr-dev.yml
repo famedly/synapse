@@ -10,47 +10,28 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  prepare:
-    runs-on: ubuntu-latest
-    outputs:
-      tags: ${{ steps.meta.outputs.tags }}
-    steps:
-      - name: Docker meta
-        id: meta
-        uses: docker/metadata-action@v5
-        with:
-          images: enable=false
-          tags: |
-            type=ref,event=branch
-          flavor: |
-            latest=false
-            prefix=dev-
-
-      - name: Debug generated tag
-        run: |
-          echo "generated tag:"
-          echo "${{ steps.meta.outputs.tags }}"
-
   dev-build-and-push-ghcr:
     uses: famedly/github-workflows/.github/workflows/docker.yml@jason-docker-namespace
-    needs: prepare
     with:
       push: true
       registry: ghcr.io
       image_name: famedly/synapse
       file: docker/Dockerfile
-      tags: type=raw, value=${{ needs.prepare.outputs.tags }}
-      flavor: latest=false
+      tags: type=ref,event=branch
+      flavor: |
+        latest=false
+        prefix=dev-
 
   dev-build-and-push-nexus:
     uses: famedly/github-workflows/.github/workflows/docker.yml@jason-docker-namespace
-    needs: prepare
     with:
       push: true
       registry: docker-oss.nexus.famedly.de
       registry_user: famedly-ci
       image_name: synapse
       file: docker/Dockerfile
-      tags: type=raw, value=${{ needs.prepare.outputs.tags }}
-      flavor: latest=false
+      tags: type=ref,event=branch
+      flavor: |
+        latest=false
+        prefix=dev-
     secrets: inherit
