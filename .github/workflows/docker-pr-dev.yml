@@ -17,7 +17,8 @@ jobs:
       registry: ghcr.io
       image_name: famedly/synapse
       file: docker/Dockerfile
-      tags: type=ref,event=branch
+      tags: |
+        type=ref,event=pr
       flavor: |
         latest=false
         prefix=dev-
@@ -30,7 +31,8 @@ jobs:
       registry_user: famedly-ci
       image_name: synapse
       file: docker/Dockerfile
-      tags: type=ref,event=branch
+      tags: |
+        type=ref,event=pr
       flavor: |
         latest=false
         prefix=dev-
