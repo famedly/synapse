@@ -3,7 +3,7 @@
 set -e
 
 release_name=$1
-release_branch_name="release-${release_name%.*}"
+release_branch_name="famedly-release/${release_name%.*}"
 
 logical_cores=$([ $(uname) = 'Darwin' ] &&
                        sysctl -n hw.logicalcpu_max ||
