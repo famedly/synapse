@@ -467,8 +467,7 @@ def init_tracer(hs: "HomeServer") -> None:
 def init_tracer_jaeger(hs: "HomeServer") -> None:
     if JaegerConfig is None:
         raise ConfigError(
-            "The server has been configured to use jaeger but jaeger is not "
-            "installed."
+            "The server has been configured to use jaeger but jaeger is not installed."
         )
 
     # Pull out the jaeger config if it was given. Otherwise set it to something sensible.
