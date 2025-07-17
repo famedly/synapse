@@ -178,13 +178,13 @@ class RoomWorkerStore(CacheInvalidationWorkerStore):
         LaterGauge(
             "synapse_rooms_total",
             "",
-            ["rooms"],
+            [],
             lambda: self._room_count,
         )
         LaterGauge(
             "synapse_locally_joined_rooms_total",
             "",
-            ["rooms"],
+            [],
             lambda: self._locally_joined_room_count,
         )
 
