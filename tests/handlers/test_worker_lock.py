@@ -69,8 +69,11 @@ class WorkerLockTestCase(unittest.HomeserverTestCase):
                 f"Adjusting test_lock_contention: timeout={timeout_seconds}s"
             )
         else:
-            # Settings for other architectures
-            timeout_seconds = 5
+            # Settings for other architectures. The 5 seconds originally given to this
+            # test was insufficient when under load. Sometimes it would fail on CI. For
+            # lack of a better/reliable Twisted mechanism option, this uses signal which
+            # watches wallclock time instead of Twisted's simulated time.
+            timeout_seconds = 15
         # It takes around 0.5s on a 5+ years old laptop
         with test_timeout(timeout_seconds):  # Use the dynamically set timeout
             d = self._take_locks(
