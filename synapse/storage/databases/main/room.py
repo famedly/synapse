@@ -167,17 +167,25 @@ class RoomWorkerStore(CacheInvalidationWorkerStore):
             # TODO(faster_joins, multiple writers) Support multiple writers.
             writers=["master"],
         )
+
+        self._room_count: int = 0
+        self._locally_joined_room_count: int = 0
+
+        self._room_metrics_updater = self.hs.get_clock().looping_call(
+            self._update_room_count_metric, 30 * 1000
+        )
+
         LaterGauge(
             "synapse_rooms_total",
             "",
-            [],
-            self.get_room_count,
+            ["rooms"],
+            lambda: self._room_count,
         )
         LaterGauge(
             "synapse_locally_joined_rooms_total",
             "",
-            [],
-            self.get_locally_joined_room_count,
+            ["rooms"],
+            lambda: self._locally_joined_room_count,
         )
 
     def process_replication_position(
@@ -409,7 +417,7 @@ class RoomWorkerStore(CacheInvalidationWorkerStore):
         """Retrieve the total number of rooms."""
 
         def f(txn: LoggingTransaction) -> int:
-            sql = "SELECT count(*)  FROM rooms"
+            sql = "SELECT count(*) FROM rooms"
             txn.execute(sql)
             row = cast(Tuple[int], txn.fetchone())
             return row[0]
@@ -429,6 +437,14 @@ class RoomWorkerStore(CacheInvalidationWorkerStore):
             return row[0]
 
         return await self.db_pool.runInteraction("get_locally_joined_room_count", f)
+
+    async def _update_room_count_metric(self) -> int:
+        """Updates the room count metrics periodically.
+        - synapse_rooms_total
+        - synapse_locally_joined_rooms_total
+        """
+        self._room_count = await self.get_room_count()
+        self._locally_joined_room_count = await self.get_locally_joined_room_count()
 
     async def get_largest_public_rooms(
         self,
