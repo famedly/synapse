@@ -27,6 +27,7 @@ import platform
 import threading
 from typing import (
     Callable,
+    Awaitable,
     Dict,
     Generic,
     Iterable,
@@ -56,7 +57,7 @@ from synapse.metrics._gc import MIN_TIME_BETWEEN_GCS, install_gc_manager
 from synapse.metrics._twisted_exposition import MetricsResource, generate_latest
 from synapse.metrics._types import Collector
 from synapse.types import StrSequence
-from synapse.util import SYNAPSE_VERSION
+from synapse.util import SYNAPSE_VERSION, Clock
 
 logger = logging.getLogger(__name__)
 
@@ -460,6 +461,38 @@ threadpool_total_max_threads = Gauge(
     "Maximum number of threads configured in the threadpool",
     ["name"],
 )
+
+# Gauges for room counts
+rooms_gauge = Gauge("synapse_rooms_total", "Total number of rooms")
+
+locally_joined_rooms_gauge = Gauge(
+    "synapse_locally_joined_rooms_total", "Total number of locally joined rooms"
+)
+
+
+def register_gauge_metric(
+    gauge: Gauge, update_func: Awaitable[int], clock: Clock, interval_ms: int
+) -> None:
+    """
+    Registers a Prometheus gauge metric with periodic async updates.
+
+    Args:
+        gauge: The prometheus_client Gauge instance.
+        update_func: An async function that returns the metric value.
+        interval_ms: Update interval in milliseconds.
+    """
+    cache = {"value": 0}
+    gauge.set_function(lambda: cache["value"])
+
+    async def updater():
+        cache["value"] = await update_func()
+
+    clock.looping_call(updater, interval_ms)
+    logger.info(
+        "Registered gauge metric %s with update interval %d ms",
+        gauge._name,
+        interval_ms,
+    )
 
 
 def register_threadpool(name: str, threadpool: ThreadPool) -> None:
