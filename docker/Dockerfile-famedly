@@ -1,9 +1,10 @@
 # syntax=docker/dockerfile:1
 
+# The versions of these modules are now defined in /.ci/scripts/calculate_builds.py
 # Synapse Token Authenticator
-ARG STA_VERSION=0.11.0
+ARG STA_VERSION
 # Synapse Invite Checker
-ARG SIC_VERSION=0.4.6
+ARG SIC_VERSION
 
 ARG SYNAPSE_VERSION=latest
 
