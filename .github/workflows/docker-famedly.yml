@@ -7,12 +7,6 @@ name: Docker
 on:
   push:
     tags: ["v*.*.*_*"]
-  workflow_dispatch:
-    inputs:
-      tags:
-        description: "Tag for the docker image"
-        type: string
-        required: true
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -46,14 +40,31 @@ jobs:
       tags: |
         type=match,group=1,pattern=(v\d+.\d+.\d+)_\d+
         type=match,group=1,pattern=(v\d+.\d+.\d+_\d+)
-        type=raw,value=${{ inputs.tags }},enable=${{ github.event_name == 'workflow_dispatch'}}
         type=sha,format=long
       flavor: latest=false
+
+  calculate_mod_build:
+    if: ${{ !cancelled() && !failure() }} # Allow for stopping the build job
+    needs:
+      - community-build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+      - id: get-matrix
+        run: .ci/scripts/calculate_builds.py
+    outputs:
+      build_matrix: ${{ steps.get-matrix.outputs.build_matrix }}
 
   production-build:
     if: ${{ !cancelled() && !failure() }} # Allow for stopping the build job
     needs:
-      - community-build
+      - calculate_mod_build
+    strategy:
+      matrix:
+        job:  ${{ fromJson(needs.calculate_mod_build.outputs.build_matrix) }}
     uses: famedly/github-workflows/.github/workflows/docker.yml@jason-docker-namespace
     with:
       push: ${{ github.event_name != 'pull_request' }} # Always build, don't publish on pull requests
@@ -63,11 +74,12 @@ jobs:
       file: docker/Dockerfile-famedly
       # Notice that there is a leading 'sha-' in front of the actual sha, as that is
       # how the docker meta action produces that tag.
-      build_args: "SYNAPSE_VERSION=sha-${{ github.sha }}"
-      # tag the production image used for famedly deployments.
-      # Allow for workflow_dispatch to create a docker image tagged with a custom tag.
+      build_args: |
+        "SYNAPSE_VERSION=sha-${{ github.sha }}"
+        "STA_VERSION=${{ matrix.job.sta-version }}"
+        "SIC_VERSION=${{ matrix.job.sic-version }}"
+      # Tag the production image used for famedly deployments.
       tags: |
-        type=match,group=1,pattern=(v\d+.\d+.\d+_\d+)
-        type=raw,value=${{ inputs.tags }},enable=${{ github.event_name == 'workflow_dispatch'}}
+        type=ref,event=tag,suffix=-${{ matrix.job.mod_pack_name }}
       flavor: latest=false
     secrets: inherit
