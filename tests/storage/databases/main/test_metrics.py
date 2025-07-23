@@ -1,13 +1,35 @@
+import logging
+from unittest.mock import patch
+
 from synapse.metrics import REGISTRY
+from synapse.storage.databases.main.metrics import (
+    GAUGE_METRICS_CONFIG, 
+    REGISTERD_METRICS,
+)
 from tests.unittest import HomeserverTestCase
-from unittest.mock import AsyncMock, patch
-from synapse.storage.databases.main.room import RoomWorkerStore
+
+logger = logging.getLogger(__name__)
 
 
 class MetricsTestCase(HomeserverTestCase):
-    def test_room_count_metrics_registered(self) -> None:
+
+    def tearDown(self) -> None:
+        # Ensures that metrics do not persist across tests.
+        for config in GAUGE_METRICS_CONFIG:
+            collector = REGISTERD_METRICS.get(config["name"])
+            if collector:
+                try:
+                    REGISTRY.unregister(collector)
+                    REGISTERD_METRICS.pop(config["name"], None)
+                except Exception:
+                    logger.error(
+                        f"Failed to unregister metric {config['name']} in tearDown."
+                    )
+        super().tearDown()
+
+    def test_gauge_metrics_config_registered(self) -> None:
         """
-        Test that room count metrics are correctly registered and updated.
+        Test metrics that are defined in GAUGE_METRICS_CONFIG are correctly registered.
         """
         # Ensure the metrics are registered
         self.assertIn("synapse_rooms_total", REGISTRY._names_to_collectors)
@@ -21,29 +43,43 @@ class MetricsTestCase(HomeserverTestCase):
             REGISTRY.get_sample_value("synapse_locally_joined_rooms_total"), 0
         )
 
-    def test_room_count_metrics_updated(self) -> None:
+    def test_registered_metrics_update_interval(self) -> None:
         """
-        Test that room count metrics are updated correctly.
+        Test if the registered metrics from GAUGE_METRICS_CONFIG are updated correctly
+        after the specified interval.
         """
+
+        def fetch_gauge_value_side_effect(sql: str, params: tuple, metric_name: str) -> int:
+            if metric_name == "synapse_rooms_total":
+                return 10
+            elif metric_name == "synapse_locally_joined_rooms_total":
+                return 8
+            return 0
+
         with patch.object(
-            RoomWorkerStore,
-            "get_room_count",
-            new=AsyncMock(return_value=40),
-        ), patch.object(
-            RoomWorkerStore,
-            "get_locally_joined_room_count",
-            new=AsyncMock(return_value=25),
+            self.hs.get_datastores().main,
+            "_fetch_gauge_value",
+            side_effect=fetch_gauge_value_side_effect,
         ):
-            self.setup_test_homeserver()
+            # The metrics registered before patching must be unregistered.
+            for config in GAUGE_METRICS_CONFIG:
+                collector = REGISTERD_METRICS.get(config["name"])
+                if collector:
+                    REGISTRY.unregister(collector)
+                    REGISTERD_METRICS.pop(config["name"], None)
+
+            # Re-register metrics after patching
+            self.hs.get_datastores().main.setup_metrics()
+
             # Check initial values
             self.assertEqual(REGISTRY.get_sample_value("synapse_rooms_total"), 0)
             self.assertEqual(
                 REGISTRY.get_sample_value("synapse_locally_joined_rooms_total"), 0
             )
-            # Run the background update
-            self.reactor.advance(35)
-            # Check updated values
-            self.assertEqual(REGISTRY.get_sample_value("synapse_rooms_total"), 40)
+
+            # Check values after the update interval
+            self.reactor.advance(15)
+            self.assertEqual(REGISTRY.get_sample_value("synapse_rooms_total"), 10)
             self.assertEqual(
-                REGISTRY.get_sample_value("synapse_locally_joined_rooms_total"), 25
+                REGISTRY.get_sample_value("synapse_locally_joined_rooms_total"), 8
             )

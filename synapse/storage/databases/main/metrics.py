@@ -21,7 +21,9 @@
 import calendar
 import logging
 import time
-from typing import TYPE_CHECKING, Dict, List, Tuple, cast
+from typing import TYPE_CHECKING, Dict, List, Optional, Tuple, cast
+
+from prometheus_client import REGISTRY, Gauge
 
 from synapse.metrics import GaugeBucketCollector
 from synapse.metrics.background_process_metrics import wrap_as_background_process
@@ -60,6 +62,26 @@ _excess_state_events_collecter = GaugeBucketCollector(
     buckets=[0] + [1 << n for n in range(12)],
 )
 
+GAUGE_METRICS_CONFIG = [
+    {
+        "name": "synapse_rooms_total",
+        "desc": "Total number of rooms",
+        "query": """
+                SELECT COUNT(*) FROM rooms
+                """,
+    },
+    {
+        "name": "synapse_locally_joined_rooms_total",
+        "desc": "Total number of locally joined rooms",
+        "query": """
+                SELECT count(*) FROM room_stats_current
+                    WHERE local_users_in_room > 0
+                """,
+    },
+]
+
+REGISTERD_METRICS : Dict[str, Gauge]= {}
+
 
 class ServerMetricsStore(EventPushActionsWorkerStore, SQLBaseStore):
     """Functions to pull various metrics from the DB, for e.g. phone home
@@ -80,6 +102,7 @@ class ServerMetricsStore(EventPushActionsWorkerStore, SQLBaseStore):
 
         # Used in _generate_user_daily_visits to keep track of progress
         self._last_user_visit_update = self._get_start_of_day()
+        self.setup_metrics()
 
     @wrap_as_background_process("read_forward_extremities")
     async def _read_forward_extremities(self) -> None:
@@ -469,3 +492,51 @@ class ServerMetricsStore(EventPushActionsWorkerStore, SQLBaseStore):
         await self.db_pool.runInteraction(
             "generate_user_daily_visits", _generate_user_daily_visits
         )
+
+    async def _fetch_gauge_value(
+        self, sql: str, params: Tuple, metric_name: str
+    ) -> int:
+        """
+        Fetches a gauge value from the database with given query and query params.
+        """
+
+        def _query(txn: LoggingTransaction) -> int:
+            txn.execute(sql, params)
+            (count,) = cast(Tuple[int], txn.fetchone())
+            return count
+
+        return await self.db_pool.runInteraction(metric_name, _query)
+
+    async def _update_all_metrics(self) -> None:
+        """
+        Updates all registered gauge metrics in REGISTERD_METRICS.
+        """
+        for config in GAUGE_METRICS_CONFIG:
+            metric: Optional[Gauge] = REGISTERD_METRICS.get(config["name"])
+            if not metric:
+                continue
+            try:
+                result = await self._fetch_gauge_value(
+                    sql=config["query"],
+                    params=tuple(config.get("params", ())),
+                    metric_name=config["name"],
+                )
+                metric.set(result)
+            except Exception as e:
+                print(f"Error fetching metrics {config['name']}: {e}")
+                metric.set(0)
+
+    def setup_metrics(self) -> None:
+        """
+        Sets up the metrics defined in GAUGE_METRICS_CONFIG.
+        """
+        for config in GAUGE_METRICS_CONFIG:
+            if REGISTRY._names_to_collectors.get(config["name"]):
+                continue
+            else:
+                g = Gauge(config["name"], config["desc"])
+                logger.info("Registered gauge metric %s.", g._name)
+                REGISTERD_METRICS[config["name"]] = g
+
+        # Start the periodic update of REGISTERD_METRICS every 15 seconds.
+        self._clock.looping_call(self._update_all_metrics, 15 * 1000)
