@@ -1039,18 +1039,16 @@ class EventsWorkerStore(SQLBaseStore):
             events: list of event_ids to fetch
             update_metrics: Whether to update the cache hit ratio metrics
         """
-        event_map = {}
-
+        bulk_events_as_tuple = {(event,) for event in events}
+        bulk_event_map = self._get_event_cache.get_many_local(bulk_events_as_tuple, update_metrics=update_metrics)
+        # _get_event_cache has keys that are a tuple of the event_id, do a quick swap
+        # on that to make it just be a regular string from here on. (Why is this a
+        # tuple? It's not a TreeCache which requires such)
+        event_map = {k:v for (k,), v in bulk_event_map.items()}
+        events = events - event_map.keys()
         for event_id in events:
-            # First check if it's in the event cache
-            ret = self._get_event_cache.get_local(
-                (event_id,), None, update_metrics=update_metrics
-            )
-            if ret:
-                event_map[event_id] = ret
-                continue
 
-            # Otherwise check if we still have the event in memory.
+            # It may be we still have the event in memory.
             event = self._event_ref.get(event_id)
             if event:
                 # Reconstruct an event cache entry
