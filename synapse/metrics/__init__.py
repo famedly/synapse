@@ -27,7 +27,6 @@ import platform
 import threading
 from typing import (
     Callable,
-    Awaitable,
     Dict,
     Generic,
     Iterable,
