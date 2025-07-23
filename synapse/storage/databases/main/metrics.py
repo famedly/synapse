@@ -80,8 +80,7 @@ GAUGE_METRICS_CONFIG = [
     },
 ]
 
-REGISTERD_METRICS: Dict[str, Gauge] = {}
-
+REGISTERED_METRICS: Dict[str, Gauge] = {}
 
 class ServerMetricsStore(EventPushActionsWorkerStore, SQLBaseStore):
     """Functions to pull various metrics from the DB, for e.g. phone home
@@ -512,7 +511,7 @@ class ServerMetricsStore(EventPushActionsWorkerStore, SQLBaseStore):
         Updates all registered gauge metrics in REGISTERD_METRICS.
         """
         for config in GAUGE_METRICS_CONFIG:
-            metric: Optional[Gauge] = REGISTERD_METRICS.get(config["name"])
+            metric: Optional[Gauge] = REGISTERED_METRICS.get(config["name"])
             if not metric:
                 continue
             try:
@@ -536,7 +535,7 @@ class ServerMetricsStore(EventPushActionsWorkerStore, SQLBaseStore):
             else:
                 g = Gauge(config["name"], config["desc"])
                 logger.info("Registered gauge metric %s.", g._name)
-                REGISTERD_METRICS[config["name"]] = g
+                REGISTERED_METRICS[config["name"]] = g
 
         # Start the periodic update of REGISTERD_METRICS every 15 seconds.
         self._clock.looping_call(self._update_all_metrics, 15 * 1000)
