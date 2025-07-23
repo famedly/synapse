@@ -3,16 +3,16 @@ from unittest.mock import patch
 
 from synapse.metrics import REGISTRY
 from synapse.storage.databases.main.metrics import (
-    GAUGE_METRICS_CONFIG, 
+    GAUGE_METRICS_CONFIG,
     REGISTERD_METRICS,
 )
+
 from tests.unittest import HomeserverTestCase
 
 logger = logging.getLogger(__name__)
 
 
 class MetricsTestCase(HomeserverTestCase):
-
     def tearDown(self) -> None:
         # Ensures that metrics do not persist across tests.
         for config in GAUGE_METRICS_CONFIG:
@@ -49,7 +49,9 @@ class MetricsTestCase(HomeserverTestCase):
         after the specified interval.
         """
 
-        def fetch_gauge_value_side_effect(sql: str, params: tuple, metric_name: str) -> int:
+        def fetch_gauge_value_side_effect(
+            sql: str, params: tuple, metric_name: str
+        ) -> int:
             if metric_name == "synapse_rooms_total":
                 return 10
             elif metric_name == "synapse_locally_joined_rooms_total":
