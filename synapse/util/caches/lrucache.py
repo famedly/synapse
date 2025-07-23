@@ -36,6 +36,7 @@ from typing import (
     List,
     Literal,
     Optional,
+    Sequence,
     Set,
     Tuple,
     Type,
@@ -724,6 +725,48 @@ class LruCache(Generic[KT, VT]):
                 return default
 
         @synchronized
+        def cache_get_many_as_dict(
+            keys: Iterable[KT],
+            callbacks: Collection[Callable[[], None]] = (),
+            update_metrics: bool = True,
+            update_last_access: bool = True,
+        ) -> Dict[KT, VT]:
+            """Look up several keys in the cache. Any found are returned as a dict of
+               { key: value }
+               Missing keys are ignored, allowing easy determination of those missing
+               by using .keys() on the returned dict
+
+                Specifically, this is to allow getting multiple keys/values while
+                without taking the lock several times in rapid succession.
+
+            Args:
+                keys
+                callbacks: A collection of callbacks that will fire when the
+                    node is removed from the cache (either due to invalidation
+                    or expiry).
+                update_metrics: Whether to update the hit rate metrics
+                update_last_access: Whether to update the last access metrics
+                    on a node if successfully fetched. These metrics are used
+                    to determine when to remove the node from the cache. Set
+                    to False if this fetch should *not* prevent a node from
+                    being expired.
+            """
+            result_dict = {}
+            for key in keys:
+                node = cache.get(key, None)
+                if node is not None:
+                    if update_last_access:
+                        move_node_to_front(node)
+                    node.add_callbacks(callbacks)
+                    if update_metrics and metrics:
+                        metrics.inc_hits()
+                    result_dict[key] = node.value
+                else:
+                    if update_metrics and metrics:
+                        metrics.inc_misses()
+            return result_dict
+
+        @synchronized
         def cache_set(
             key: KT, value: VT, callbacks: Collection[Callable[[], None]] = ()
         ) -> None:
@@ -847,6 +890,8 @@ class LruCache(Generic[KT, VT]):
         self._on_resize = evict
 
         self.get = cache_get
+        if cache_type is dict:
+            self.get_many_as_dict = cache_get_many_as_dict
         self.set = cache_set
         self.setdefault = cache_set_default
         self.pop = cache_pop
@@ -936,6 +981,11 @@ class AsyncLruCache(Generic[KT, VT]):
         self, key: KT, default: Optional[T] = None, update_metrics: bool = True
     ) -> Optional[VT]:
         return self._lru_cache.get(key, update_metrics=update_metrics)
+
+    def get_many_local(
+        self, keys: Iterable[KT], update_metrics: bool = True
+    ) -> Dict[KT, VT]:
+        return self._lru_cache.get_many_as_dict(keys, update_metrics=update_metrics)
 
     async def set(self, key: KT, value: VT) -> None:
         # This will add the entries in the correct order, local first external second
