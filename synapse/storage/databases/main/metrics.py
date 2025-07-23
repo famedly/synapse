@@ -80,7 +80,7 @@ GAUGE_METRICS_CONFIG = [
     },
 ]
 
-REGISTERD_METRICS : Dict[str, Gauge]= {}
+REGISTERD_METRICS: Dict[str, Gauge] = {}
 
 
 class ServerMetricsStore(EventPushActionsWorkerStore, SQLBaseStore):
