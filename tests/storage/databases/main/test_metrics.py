@@ -24,7 +24,7 @@ from unittest.mock import patch
 from synapse.metrics import REGISTRY
 from synapse.storage.databases.main.metrics import (
     GAUGE_METRICS_CONFIG,
-    REGISTERD_METRICS,
+    REGISTERED_METRICS,
 )
 
 from tests.unittest import HomeserverTestCase
@@ -36,11 +36,11 @@ class MetricsTestCase(HomeserverTestCase):
     def tearDown(self) -> None:
         # Ensures that metrics do not persist across tests.
         for config in GAUGE_METRICS_CONFIG:
-            collector = REGISTERD_METRICS.get(config["name"])
+            collector = REGISTERED_METRICS.get(config["name"])
             if collector:
                 try:
                     REGISTRY.unregister(collector)
-                    REGISTERD_METRICS.pop(config["name"], None)
+                    REGISTERED_METRICS.pop(config["name"], None)
                 except Exception:
                     logger.error(
                         "Failed to unregister metric %s in tearDown.", config["name"]
@@ -85,10 +85,10 @@ class MetricsTestCase(HomeserverTestCase):
         ):
             # The metrics registered before patching must be unregistered.
             for config in GAUGE_METRICS_CONFIG:
-                collector = REGISTERD_METRICS.get(config["name"])
+                collector = REGISTERED_METRICS.get(config["name"])
                 if collector:
                     REGISTRY.unregister(collector)
-                    REGISTERD_METRICS.pop(config["name"], None)
+                    REGISTERED_METRICS.pop(config["name"], None)
 
             # Re-register metrics after patching
             self.hs.get_datastores().main.setup_metrics()

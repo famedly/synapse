@@ -396,7 +396,7 @@ class RoomWorkerStore(CacheInvalidationWorkerStore):
         """Retrieve the total number of rooms."""
 
         def f(txn: LoggingTransaction) -> int:
-            sql = "SELECT count(*) FROM rooms"
+            sql = "SELECT count(*)  FROM rooms"
             txn.execute(sql)
             row = cast(Tuple[int], txn.fetchone())
             return row[0]

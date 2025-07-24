@@ -82,6 +82,7 @@ GAUGE_METRICS_CONFIG = [
 
 REGISTERED_METRICS: Dict[str, Gauge] = {}
 
+
 class ServerMetricsStore(EventPushActionsWorkerStore, SQLBaseStore):
     """Functions to pull various metrics from the DB, for e.g. phone home
     stats and prometheus metrics.
@@ -508,7 +509,7 @@ class ServerMetricsStore(EventPushActionsWorkerStore, SQLBaseStore):
 
     async def _update_all_metrics(self) -> None:
         """
-        Updates all registered gauge metrics in REGISTERD_METRICS.
+        Updates all registered gauge metrics in REGISTERED_METRICS.
         """
         for config in GAUGE_METRICS_CONFIG:
             metric: Optional[Gauge] = REGISTERED_METRICS.get(config["name"])
@@ -537,5 +538,5 @@ class ServerMetricsStore(EventPushActionsWorkerStore, SQLBaseStore):
                 logger.info("Registered gauge metric %s.", g._name)
                 REGISTERED_METRICS[config["name"]] = g
 
-        # Start the periodic update of REGISTERD_METRICS every 15 seconds.
+        # Start the periodic update of REGISTERED_METRICS every 15 seconds.
         self._clock.looping_call(self._update_all_metrics, 15 * 1000)
