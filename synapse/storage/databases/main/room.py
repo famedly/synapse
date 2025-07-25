@@ -38,6 +38,7 @@ from typing import (
 )
 
 import attr
+from prometheus_client import Gauge
 
 from synapse.api.constants import (
     Direction,
@@ -73,6 +74,13 @@ if TYPE_CHECKING:
     from synapse.server import HomeServer
 
 logger = logging.getLogger(__name__)
+
+# Gauges for room counts
+rooms_gauge = Gauge("synapse_rooms_total", "Total number of rooms")
+
+locally_joined_rooms_gauge = Gauge(
+    "synapse_locally_joined_rooms_total", "Total number of locally joined rooms"
+)
 
 
 @attr.s(slots=True, frozen=True, auto_attribs=True)
@@ -166,6 +174,10 @@ class RoomWorkerStore(CacheInvalidationWorkerStore):
             # TODO(faster_joins, multiple writers) Support multiple writers.
             writers=["master"],
         )
+
+        # update room metrics every hour
+        self._clock.looping_call(self.get_room_count, 60 * 60 * 1000)
+        self._clock.looping_call(self.get_locally_joined_room_count, 60 * 60 * 1000)
 
     def process_replication_position(
         self, stream_name: str, instance_name: str, token: int
@@ -401,7 +413,25 @@ class RoomWorkerStore(CacheInvalidationWorkerStore):
             row = cast(Tuple[int], txn.fetchone())
             return row[0]
 
-        return await self.db_pool.runInteraction("get_rooms", f)
+        res = await self.db_pool.runInteraction("get_rooms", f)
+        rooms_gauge.set(res)
+        return res
+
+    async def get_locally_joined_room_count(self) -> int:
+        """Retrieve the total number of locally joined rooms."""
+
+        def f(txn: LoggingTransaction) -> int:
+            sql = """
+                SELECT count(*) FROM room_stats_current
+                WHERE local_users_in_room > 0
+                """
+            txn.execute(sql)
+            row = cast(Tuple[int], txn.fetchone())
+            return row[0]
+
+        res = await self.db_pool.runInteraction("get_locally_joined_room_count", f)
+        locally_joined_rooms_gauge.set(res)
+        return res
 
     async def get_largest_public_rooms(
         self,
