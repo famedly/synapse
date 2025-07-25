@@ -108,14 +108,20 @@ class RoomStoreTestCase(HomeserverTestCase):
                 self.assertEqual(REGISTRY.get_sample_value("synapse_rooms_total"), 8)
 
         with patch.object(
-            RoomWorkerStore, "get_locally_joined_room_count", wraps=self.store.get_locally_joined_room_count
+            RoomWorkerStore,
+            "get_locally_joined_room_count",
+            wraps=self.store.get_locally_joined_room_count,
         ):
             with patch.object(
                 self.store.db_pool, "runInteraction", new=AsyncMock(return_value=20)
             ):
                 # Check initial values. It is same as the previous runInteraction mock value.
-                self.assertEqual(REGISTRY.get_sample_value("synapse_locally_joined_rooms_total"), 8)
+                self.assertEqual(
+                    REGISTRY.get_sample_value("synapse_locally_joined_rooms_total"), 8
+                )
 
                 # Check values after the update interval
                 self.reactor.advance(60 * 60)
-                self.assertEqual(REGISTRY.get_sample_value("synapse_locally_joined_rooms_total"), 20)
+                self.assertEqual(
+                    REGISTRY.get_sample_value("synapse_locally_joined_rooms_total"), 20
+                )
