@@ -25,75 +25,42 @@ import json
 import os
 
 
-def set_output(key: str, value: str):
+def set_output(key: str, value: str) -> None:
     # See https://docs.github.com/en/actions/using-workflows/workflow-commands-for-github-actions#setting-an-output-parameter
     with open(os.environ["GITHUB_OUTPUT"], "at") as f:
         print(f"{key}={value}", file=f)
 
-
-IS_PR = os.environ["GITHUB_REF"].startswith("refs/pull/")
 
 # First calculate the various trial jobs.
 #
 # For PRs, we only run each type of test with the oldest Python version supported (which
 # is Python 3.9 right now)
 
-trial_sqlite_tests = [
+trial_tests = [
     {
-        "python-version": "3.9",
+        "python-version": "3.12",
         "database": "sqlite",
         "extras": "all",
-    }
-]
-
-if not IS_PR:
-    trial_sqlite_tests.extend(
-        {
-            "python-version": version,
-            "database": "sqlite",
-            "extras": "all",
-        }
-        for version in ("3.10", "3.11", "3.12", "3.13")
-    )
-
-trial_postgres_tests = [
+    },
     {
-        "python-version": "3.9",
+        "python-version": "3.12",
         "database": "postgres",
         "postgres-version": "13",
         "extras": "all",
-    }
-]
-
-if not IS_PR:
-    trial_postgres_tests.append(
-        {
-            "python-version": "3.13",
-            "database": "postgres",
-            "postgres-version": "17",
-            "extras": "all",
-        }
-    )
-
-trial_no_extra_tests = [
+    },
     {
-        "python-version": "3.9",
-        "database": "sqlite",
-        "extras": "",
-    }
+        "python-version": "3.12",
+        "database": "postgres",
+        "postgres-version": "17",
+        "extras": "all",
+    },
 ]
 
 print("::group::Calculated trial jobs")
-print(
-    json.dumps(
-        trial_sqlite_tests + trial_postgres_tests + trial_no_extra_tests, indent=4
-    )
-)
+print(json.dumps(trial_tests, indent=4))
 print("::endgroup::")
 
-test_matrix = json.dumps(
-    trial_sqlite_tests + trial_postgres_tests + trial_no_extra_tests
-)
+test_matrix = json.dumps(trial_tests)
 set_output("trial_test_matrix", test_matrix)
 
 
@@ -104,43 +71,24 @@ set_output("trial_test_matrix", test_matrix)
 
 sytest_tests = [
     {
-        "sytest-tag": "bullseye",
+        "sytest-tag": "testing",
     },
     {
-        "sytest-tag": "bullseye",
+        "sytest-tag": "testing",
         "postgres": "postgres",
     },
     {
-        "sytest-tag": "bullseye",
+        "sytest-tag": "testing",
         "postgres": "multi-postgres",
         "workers": "workers",
     },
     {
-        "sytest-tag": "bullseye",
+        "sytest-tag": "testing",
         "postgres": "multi-postgres",
         "workers": "workers",
         "reactor": "asyncio",
     },
 ]
-
-if not IS_PR:
-    sytest_tests.extend(
-        [
-            {
-                "sytest-tag": "bullseye",
-                "reactor": "asyncio",
-            },
-            {
-                "sytest-tag": "bullseye",
-                "postgres": "postgres",
-                "reactor": "asyncio",
-            },
-            {
-                "sytest-tag": "testing",
-                "postgres": "postgres",
-            },
-        ]
-    )
 
 
 print("::group::Calculated sytest jobs")
