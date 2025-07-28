@@ -10,6 +10,10 @@ No significant changes since 1.134.0rc1.
 - New docker image tagging for Famedly production builds (Jason Little)
 - Reduce trial test runners to `nproc * 2` from `* 3` (Jason Little)
 
+### Famedly additions for v1.134.0_2
+
+- chore: bump SIC version to v0.4.7 (Jason Little)
+
 # Synapse 1.134.0rc1 (2025-07-09)
 
 ### Features
