@@ -33,8 +33,6 @@ from tests.unittest import HomeserverTestCase
 
 class ServerMetricsStoreTestCase(HomeserverTestCase):
     def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
-        # We can't test RoomStore on its own without the DirectoryStore, for
-        # management of the 'room_aliases' table
         self.store = hs.get_datastores().main
 
     def test_room_metrics_registered(self) -> None:
