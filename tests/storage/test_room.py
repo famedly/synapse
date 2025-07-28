@@ -18,15 +18,12 @@
 # [This file includes modifications made by New Vector Limited]
 #
 #
-from unittest.mock import AsyncMock, patch
-
-from prometheus_client import REGISTRY
-
 from twisted.test.proto_helpers import MemoryReactor
 
 from synapse.api.room_versions import RoomVersions
+from synapse.rest.admin import register_servlets_for_client_rest_resource
+from synapse.rest.client import login, room
 from synapse.server import HomeServer
-from synapse.storage.databases.main.room import RoomWorkerStore
 from synapse.types import RoomAlias, RoomID, UserID
 from synapse.util import Clock
 
@@ -34,6 +31,13 @@ from tests.unittest import HomeserverTestCase
 
 
 class RoomStoreTestCase(HomeserverTestCase):
+    # Register the required servlets for user registration, login, and room creation
+    servlets = [
+        register_servlets_for_client_rest_resource,
+        login.register_servlets,
+        room.register_servlets,
+    ]
+
     def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
         # We can't test RoomStore on its own without the DirectoryStore, for
         # management of the 'room_aliases' table
@@ -72,56 +76,13 @@ class RoomStoreTestCase(HomeserverTestCase):
             self.get_success(self.store.get_room_with_stats("!uknown:test"))
         )
 
-    def test_room_metrics_registered(self) -> None:
-        """
-        Test following metrics are registered:
-        - synapse_rooms_total
-        - synapse_locally_joined_rooms_total
-        """
-        # Ensure the metrics are registered
-        self.assertIn("synapse_rooms_total", REGISTRY._names_to_collectors)
-        self.assertIn(
-            "synapse_locally_joined_rooms_total", REGISTRY._names_to_collectors
-        )
+    def test_get_room_count(self) -> None:
+        res = self.get_success(self.store.get_room_count())
+        self.assertEqual(res, 1)
 
-        # Check initial values
-        self.assertEqual(REGISTRY.get_sample_value("synapse_rooms_total"), 0)
-        self.assertEqual(
-            REGISTRY.get_sample_value("synapse_locally_joined_rooms_total"), 0
-        )
-
-    def test_room_metrics_updated(self) -> None:
-        """
-        Test if registered metrics are updated correctly after the specified interval.
-        """
-        with patch.object(
-            RoomWorkerStore, "get_room_count", wraps=self.store.get_room_count
-        ):
-            with patch.object(
-                self.store.db_pool, "runInteraction", new=AsyncMock(return_value=8)
-            ):
-                # Check initial values
-                self.assertEqual(REGISTRY.get_sample_value("synapse_rooms_total"), 0)
-
-                # Check values after the update interval
-                self.reactor.advance(60 * 60)
-                self.assertEqual(REGISTRY.get_sample_value("synapse_rooms_total"), 8)
-
-        with patch.object(
-            RoomWorkerStore,
-            "get_locally_joined_room_count",
-            wraps=self.store.get_locally_joined_room_count,
-        ):
-            with patch.object(
-                self.store.db_pool, "runInteraction", new=AsyncMock(return_value=20)
-            ):
-                # Check initial values. It is same as the previous runInteraction mock value.
-                self.assertEqual(
-                    REGISTRY.get_sample_value("synapse_locally_joined_rooms_total"), 8
-                )
-
-                # Check values after the update interval
-                self.reactor.advance(60 * 60)
-                self.assertEqual(
-                    REGISTRY.get_sample_value("synapse_locally_joined_rooms_total"), 20
-                )
+    def test_get_locally_joined_room_count(self) -> None:
+        self.register_user("u1", "pass")
+        u1_token = self.login("u1", "pass")
+        self.helper.create_room_as("u1", tok=u1_token)
+        res = self.get_success(self.store.get_locally_joined_room_count())
+        self.assertEqual(res, 1)
