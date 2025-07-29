@@ -64,7 +64,7 @@ _excess_state_events_collecter = GaugeBucketCollector(
 )
 
 # Gauges for room counts
-number_of_rooms_gauge = Gauge("synapse_rooms_total", "Total number of rooms")
+known_rooms_gauge = Gauge("synapse_known_rooms_total", "Total number of rooms")
 
 locally_joined_rooms_gauge = Gauge(
     "synapse_locally_joined_rooms_total", "Total number of locally joined rooms"
@@ -88,7 +88,7 @@ class ServerMetricsStore(EventPushActionsWorkerStore, SQLBaseStore):
             # Read the extrems every 60 minutes
             self._clock.looping_call(self._read_forward_extremities, HOUR_IN_MS)
             # update room metrics every 60 minutes
-            self._clock.looping_call(self.set_number_of_rooms_gauge, HOUR_IN_MS)
+            self._clock.looping_call(self.set_known_rooms_gauge, HOUR_IN_MS)
             self._clock.looping_call(self.set_locally_joined_rooms_gauge, HOUR_IN_MS)
 
         # Used in _generate_user_daily_visits to keep track of progress
@@ -483,9 +483,9 @@ class ServerMetricsStore(EventPushActionsWorkerStore, SQLBaseStore):
             "generate_user_daily_visits", _generate_user_daily_visits
         )
 
-    async def set_number_of_rooms_gauge(self) -> None:
+    async def set_known_rooms_gauge(self) -> None:
         res = await self.hs.get_datastores().main.get_room_count()
-        number_of_rooms_gauge.set(res)
+        known_rooms_gauge.set(res)
 
     async def set_locally_joined_rooms_gauge(self) -> None:
         res = await self.hs.get_datastores().main.get_locally_joined_room_count()

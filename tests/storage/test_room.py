@@ -77,12 +77,32 @@ class RoomStoreTestCase(HomeserverTestCase):
         )
 
     def test_get_room_count(self) -> None:
+        # A room already exists from prepare.
         res = self.get_success(self.store.get_room_count())
         self.assertEqual(res, 1)
 
+        self.get_success(
+            self.store.store_room(
+                RoomID.from_string("!new_room:test").to_string(),
+                room_creator_user_id=self.u_creator.to_string(),
+                is_public=True,
+                room_version=RoomVersions.V1,
+            )
+        )
+        res = self.get_success(self.store.get_room_count())
+        self.assertEqual(res, 2)
+
     def test_get_locally_joined_room_count(self) -> None:
+        # locally joined room count starts at 0.
+        res = self.get_success(self.store.get_locally_joined_room_count())
+        self.assertEqual(res, 0)
+
         self.register_user("u1", "pass")
         u1_token = self.login("u1", "pass")
         self.helper.create_room_as("u1", tok=u1_token)
         res = self.get_success(self.store.get_locally_joined_room_count())
         self.assertEqual(res, 1)
+
+        self.helper.create_room_as("u1", tok=u1_token)
+        res = self.get_success(self.store.get_locally_joined_room_count())
+        self.assertEqual(res, 2)
