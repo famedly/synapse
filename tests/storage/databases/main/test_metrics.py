@@ -25,7 +25,6 @@ from prometheus_client import REGISTRY
 from twisted.test.proto_helpers import MemoryReactor
 
 from synapse.server import HomeServer
-from synapse.storage.databases.main.metrics import ServerMetricsStore
 from synapse.util import Clock
 
 from tests.unittest import HomeserverTestCase
@@ -38,55 +37,56 @@ class ServerMetricsStoreTestCase(HomeserverTestCase):
     def test_room_metrics_registered(self) -> None:
         """
         Test following metrics are registered:
-        - synapse_rooms_total
+        - synapse_known_rooms_total
         - synapse_locally_joined_rooms_total
         """
         # Ensure the metrics are registered
-        self.assertIn("synapse_rooms_total", REGISTRY._names_to_collectors)
+        self.assertIn("synapse_known_rooms_total", REGISTRY._names_to_collectors)
         self.assertIn(
             "synapse_locally_joined_rooms_total", REGISTRY._names_to_collectors
         )
 
         # Check initial values
-        self.assertEqual(REGISTRY.get_sample_value("synapse_rooms_total"), 0)
+        self.assertEqual(REGISTRY.get_sample_value("synapse_known_rooms_total"), 0)
         self.assertEqual(
             REGISTRY.get_sample_value("synapse_locally_joined_rooms_total"), 0
         )
 
-    def test_room_metrics_updated(self) -> None:
+    def test_set_room_metrics(self) -> None:
+        """
+        Test set metric functions for room metrics.
+        """
+        with patch.object(self.store, "get_room_count", new=AsyncMock(return_value=5)):
+            self.get_success(self.store.set_known_rooms_gauge())
+            self.assertEqual(REGISTRY.get_sample_value("synapse_known_rooms_total"), 5)
+        with patch.object(
+            self.store, "get_locally_joined_room_count", new=AsyncMock(return_value=10)
+        ):
+            self.get_success(self.store.set_locally_joined_rooms_gauge())
+            self.assertEqual(
+                REGISTRY.get_sample_value("synapse_locally_joined_rooms_total"), 10
+            )
+
+    def test_room_metrics_updated_after_interval(self) -> None:
         """
         Test if registered metrics are updated correctly after the specified interval.
         """
-        with patch.object(
-            ServerMetricsStore,
-            "set_number_of_rooms_gauge",
-            wraps=self.store.set_number_of_rooms_gauge,
-        ):
-            with patch.object(
-                self.store.db_pool, "runInteraction", new=AsyncMock(return_value=8)
-            ):
-                # Check initial values
-                self.assertEqual(REGISTRY.get_sample_value("synapse_rooms_total"), 0)
+        # Check initial values
+        self.assertEqual(REGISTRY.get_sample_value("synapse_known_rooms_total"), 0)
 
-                # Check values after the update interval
-                self.reactor.advance(60 * 60)
-                self.assertEqual(REGISTRY.get_sample_value("synapse_rooms_total"), 8)
+        with patch.object(self.store, "get_room_count", new=AsyncMock(return_value=8)):
+            # Check values after the update interval
+            self.reactor.advance(60 * 60)
+            self.assertEqual(REGISTRY.get_sample_value("synapse_known_rooms_total"), 8)
+
+        self.assertEqual(
+            REGISTRY.get_sample_value("synapse_locally_joined_rooms_total"), 0
+        )
 
         with patch.object(
-            ServerMetricsStore,
-            "set_locally_joined_rooms_gauge",
-            wraps=self.store.set_locally_joined_rooms_gauge,
+            self.store, "get_locally_joined_room_count", new=AsyncMock(return_value=20)
         ):
-            with patch.object(
-                self.store.db_pool, "runInteraction", new=AsyncMock(return_value=20)
-            ):
-                # Check initial values. It is same as the previous runInteraction mock value.
-                self.assertEqual(
-                    REGISTRY.get_sample_value("synapse_locally_joined_rooms_total"), 8
-                )
-
-                # Check values after the update interval
-                self.reactor.advance(60 * 60)
-                self.assertEqual(
-                    REGISTRY.get_sample_value("synapse_locally_joined_rooms_total"), 20
-                )
+            self.reactor.advance(60 * 60)
+            self.assertEqual(
+                REGISTRY.get_sample_value("synapse_locally_joined_rooms_total"), 20
+            )
