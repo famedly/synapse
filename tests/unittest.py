@@ -51,7 +51,6 @@ from unittest.mock import Mock, patch
 import canonicaljson
 import signedjson.key
 import unpaddedbase64
-from prometheus_client import REGISTRY, Gauge
 from typing_extensions import Concatenate, ParamSpec
 
 from twisted.internet.defer import Deferred, ensureDeferred
@@ -474,16 +473,6 @@ class HomeserverTestCase(TestCase):
     def tearDown(self) -> None:
         # Reset to not use frozen dicts.
         events.USE_FROZEN_DICTS = False
-        # Reset gauge metrics values to 0.
-        for collector in REGISTRY._names_to_collectors.values():
-            if isinstance(collector, Gauge):
-                for metric in collector.collect():
-                    for sample in metric.samples:
-                        if sample.labels:
-                            # Reset each label value for labeled gauges.
-                            collector.labels(**sample.labels).set(0)
-                        else:
-                            collector.set(0)
 
     def wait_on_thread(self, deferred: Deferred, timeout: int = 10) -> None:
         """
