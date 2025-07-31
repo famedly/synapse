@@ -14,6 +14,10 @@ No significant changes since 1.134.0rc1.
 
 - chore: bump SIC version to v0.4.7 (Jason Little)
 
+### Famedly additions for v1.134.0_3
+
+- chore: update sta version to v0.12.0 (Matheus Zaniolo)
+
 # Synapse 1.134.0rc1 (2025-07-09)
 
 ### Features
