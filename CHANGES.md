@@ -18,7 +18,7 @@ No significant changes since 1.134.0rc1.
 
 - chore: Add workflows to build docker image on pull request (Soyoung Kim)
 - chore: update docker registry (Soyoung Kim)
-- chore: update sta version to v0.12.0 (Matheus Zaniolo)
+- chore: bump STA version to v0.12.0 (Matheus Zaniolo)
 
 # Synapse 1.134.0rc1 (2025-07-09)
 

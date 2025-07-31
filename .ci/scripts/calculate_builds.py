@@ -57,7 +57,7 @@ all_mod_pack_versions = {
 
 # Adjust this section to decide what gets built and layered on top
 # THIS IS THE SECTION TO EDIT, after you have added the new versions above
-current_mod_packs_to_build = ["mod004", "mod012"]
+current_mod_packs_to_build = ["mod004", "mod013"]
 
 generated_jobs: list[dict[str, Any]] = []
 for mod_pack_job in current_mod_packs_to_build:
