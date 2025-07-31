@@ -58,6 +58,7 @@ enum EventInternalMetadataData {
     TxnId(Box<str>),
     TokenId(i64),
     DeviceId(Box<str>),
+    SendAdditionalContext(bool),
 }
 
 impl EventInternalMetadataData {
@@ -114,6 +115,13 @@ impl EventInternalMetadataData {
             EventInternalMetadataData::DeviceId(o) => (
                 pyo3::intern!(py, "device_id"),
                 o.into_pyobject(py).unwrap_infallible().into_any(),
+            ),
+            EventInternalMetadataData::SendAdditionalContext(o) => (
+                pyo3::intern!(py, "send_additional_context"),
+                o.into_pyobject(py)
+                    .unwrap_infallible()
+                    .to_owned()
+                    .into_any(),
             ),
         }
     }
@@ -175,6 +183,11 @@ impl EventInternalMetadataData {
                 value
                     .extract()
                     .map(String::into_boxed_str)
+                    .with_context(|| format!("'{key_str}' has invalid type"))?,
+            ),
+            "send_additional_context" => EventInternalMetadataData::SendAdditionalContext(
+                value
+                    .extract()
                     .with_context(|| format!("'{key_str}' has invalid type"))?,
             ),
             _ => return Ok(None),
@@ -370,6 +383,16 @@ impl EventInternalMetadata {
         get_property_opt!(self, Redacted).copied().unwrap_or(false)
     }
 
+    /// Whether this is a join that occurred at the same depth as another event.
+    ///
+    /// This is used to see if the joining server should proactively be sent other
+    /// events that occurred between the make_join and send_join.
+    fn should_send_additional_context(&self) -> bool {
+        get_property_opt!(self, SendAdditionalContext)
+            .copied()
+            .unwrap_or(false)
+    }
+
     /// Whether this event can trigger a push notification
     fn is_notifiable(&self) -> bool {
         !self.outlier || self.is_out_of_band_membership()
@@ -435,6 +458,16 @@ impl EventInternalMetadata {
     #[setter]
     fn set_redacted(&mut self, obj: bool) {
         set_property!(self, Redacted, obj);
+    }
+
+    #[getter]
+    fn get_send_additional_context(&self) -> PyResult<bool> {
+        let bool = get_property!(self, SendAdditionalContext)?;
+        Ok(*bool)
+    }
+    #[setter]
+    fn set_send_additional_context(&mut self, obj: bool) {
+        set_property!(self, SendAdditionalContext, obj);
     }
 
     /// The transaction ID, if it was set when the event was created.

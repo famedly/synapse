@@ -268,7 +268,13 @@ class FederationEventHandler:
 
         # Try to fetch any missing prev events to fill in gaps in the graph
         prevs = set(pdu.prev_event_ids())
+        logger.info(
+            "JASON: on_receive_pdu: initial try to collect prev_events: %r", prevs
+        )
         seen = await self._store.have_events_in_timeline(prevs)
+        logger.info(
+            "JASON: on_receive_pdu: initial view on events that are seen: %r", seen
+        )
         missing_prevs = prevs - seen
 
         if missing_prevs:
@@ -404,6 +410,18 @@ class FederationEventHandler:
         # may not have an up-to-date list of the other homeservers participating in
         # the room, so we send it on their behalf.
         event.internal_metadata.send_on_behalf_of = origin
+
+        # If the join handshake started and another event was persisted before the join
+        # finished, there will be another forward extremity at that depth that is not
+        # referenced by the join's prev_events. We also do not know the stream ordering
+        # yet for this join, to do the lookup for it. Set the flag now, to avoid having
+        # to check while persisting if this is:
+        # 1. A new join(and not a join->join transition like what happens with display
+        #   names)
+        # 2. Not a backfilled join, as we don't care about those for proactively sending
+        #   related events
+        if event.membership == Membership.JOIN:
+            event.internal_metadata.send_additional_context = True
 
         context = await self._state_handler.compute_event_context(event)
         await self._check_event_auth(origin, event, context)
@@ -730,7 +748,10 @@ class FederationEventHandler:
         event_id = pdu.event_id
 
         seen = await self._store.have_events_in_timeline(prevs)
-
+        logger.info(
+            "JASON: _get_missing_events_for_pdu: inner view on events that are seen: %r",
+            seen,
+        )
         if not prevs - seen:
             return
 
