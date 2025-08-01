@@ -20,7 +20,6 @@ RUN --mount=type=cache,target=/root/.cache/pip \
   pip install setuptools \
   && pip install --no-warn-script-location \
     synapse-token-authenticator==${STA_VERSION} \
-    matrix-synapse-ldap3 \
     synapse-s3-storage-provider \
     synapse-invite-checker==${SIC_VERSION} \
     https://github.com/famedly/synapse-invite-policies/archive/refs/heads/main.zip \
