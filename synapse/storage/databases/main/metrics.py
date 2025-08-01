@@ -21,7 +21,7 @@
 import calendar
 import logging
 import time
-from typing import TYPE_CHECKING, Dict, List, Tuple, cast
+from typing import TYPE_CHECKING, Dict, List, Optional, Tuple, cast
 
 from prometheus_client import Gauge
 
@@ -70,6 +70,23 @@ locally_joined_rooms_gauge = Gauge(
     "synapse_locally_joined_rooms_total", "Total number of locally joined rooms"
 )
 
+# Gauges for message & event counts
+messages_by_source_gauge = Gauge(
+    "synapse_messages_by_source",
+    "Number of messages sent by the server, both local and remote events.",
+    ["source"],
+)
+events_by_source_gauge = Gauge(
+    "synapse_events_by_source",
+    "Number of events sent by the server, grouped by source",
+    ["source"],
+)
+encrypted_events_by_source_gauge = Gauge(
+    "synapse_encrypted_events_by_source",
+    "Number of encrypted events sent by the server, grouped by source",
+    ["source"],
+)
+
 
 class ServerMetricsStore(EventPushActionsWorkerStore, SQLBaseStore):
     """Functions to pull various metrics from the DB, for e.g. phone home
@@ -90,6 +107,12 @@ class ServerMetricsStore(EventPushActionsWorkerStore, SQLBaseStore):
             # update room metrics every 60 minutes
             self._clock.looping_call(self.set_known_rooms_gauge, HOUR_IN_MS)
             self._clock.looping_call(self.set_locally_joined_rooms_gauge, HOUR_IN_MS)
+            # update message metrics every 60 minutes
+            self._clock.looping_call(self.set_messages_by_source_gauge, HOUR_IN_MS)
+            self._clock.looping_call(self.set_events_by_source_gauge, HOUR_IN_MS)
+            self._clock.looping_call(
+                self.set_encrypted_events_by_source_gauge, HOUR_IN_MS
+            )
 
         # Used in _generate_user_daily_visits to keep track of progress
         self._last_user_visit_update = self._get_start_of_day()
@@ -215,6 +238,28 @@ class ServerMetricsStore(EventPushActionsWorkerStore, SQLBaseStore):
         return await self.db_pool.runInteraction(
             "count_daily_sent_messages", _count_messages
         )
+
+    async def _count_events(
+        self, event_types: Optional[list] = None, local: bool = True
+    ) -> int:
+        where_clauses = []
+        params = []
+        if event_types:
+            if isinstance(event_types, list):
+                placeholders = ", ".join("?" for _ in event_types)
+                where_clauses.append(f"type IN ({placeholders})")
+                params.extend(event_types)
+        sender_clause = "sender LIKE ?" if local else "sender NOT LIKE ?"
+        where_clauses.append(sender_clause)
+        params.append("%:" + self.hs.hostname)
+        sql = f"SELECT COUNT(*) FROM events WHERE {' AND '.join(where_clauses)}"
+
+        def _count(txn: LoggingTransaction) -> int:
+            txn.execute(sql, tuple(params))
+            (count,) = cast(Tuple[int], txn.fetchone())
+            return count
+
+        return await self.db_pool.runInteraction("count_events_for_metrics", _count)
 
     async def count_daily_active_rooms(self) -> int:
         def _count(txn: LoggingTransaction) -> int:
@@ -490,3 +535,29 @@ class ServerMetricsStore(EventPushActionsWorkerStore, SQLBaseStore):
     async def set_locally_joined_rooms_gauge(self) -> None:
         res = await self.hs.get_datastores().main.get_locally_joined_room_count()
         locally_joined_rooms_gauge.set(res)
+
+    async def set_messages_by_source_gauge(self) -> None:
+        local_count = await self._count_events(
+            event_types=["m.room.message", "m.room.encrypted"], local=True
+        )
+        messages_by_source_gauge.labels(source="local").set(local_count)
+        remote_count = await self._count_events(
+            event_types=["m.room.message", "m.room.encrypted"], local=False
+        )
+        messages_by_source_gauge.labels(source="remote").set(remote_count)
+
+    async def set_events_by_source_gauge(self) -> None:
+        local_count = await self._count_events(event_types=None, local=True)
+        events_by_source_gauge.labels(source="local").set(local_count)
+        remote_count = await self._count_events(event_types=None, local=False)
+        events_by_source_gauge.labels(source="remote").set(remote_count)
+
+    async def set_encrypted_events_by_source_gauge(self) -> None:
+        local_count = await self._count_events(
+            event_types=["m.room.encrypted"], local=True
+        )
+        encrypted_events_by_source_gauge.labels(source="local").set(local_count)
+        remote_count = await self._count_events(
+            event_types=["m.room.encrypted"], local=False
+        )
+        encrypted_events_by_source_gauge.labels(source="remote").set(remote_count)

@@ -18,12 +18,15 @@
 # [This file includes modifications made by New Vector Limited]
 #
 #
+from typing import Optional
 from unittest.mock import AsyncMock, patch
 
 from prometheus_client import REGISTRY, Gauge
 
 from twisted.test.proto_helpers import MemoryReactor
 
+from synapse.rest.admin import register_servlets_for_client_rest_resource
+from synapse.rest.client import login, room
 from synapse.server import HomeServer
 from synapse.util import Clock
 
@@ -31,20 +34,63 @@ from tests.unittest import HomeserverTestCase
 
 
 class ServerMetricsStoreTestCase(HomeserverTestCase):
+    servlets = [
+        register_servlets_for_client_rest_resource,
+        login.register_servlets,
+        room.register_servlets,
+    ]
+
     def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
         self.store = hs.get_datastores().main
 
-    def test_room_metrics_registered(self) -> None:
+    def assert_count_events_sql(
+        self,
+        event_types: Optional[list[str]],
+        local: bool,
+        expected_sql: str,
+        expected_params: tuple,
+    ) -> None:
+        class Txn:
+            def __init__(self) -> None:
+                self.sql: str = ""
+                self.params: tuple = ()
+
+            def execute(self, sql: str, params: tuple) -> None:
+                self.sql = sql
+                self.params = params
+
+            def fetchone(self) -> tuple[int]:
+                return (100,)
+
+        with patch.object(self.store.db_pool, "runInteraction") as mock_run:
+            self.get_success(
+                self.store._count_events(event_types=event_types, local=local)
+            )
+            # Get the function passed to runInteraction
+            interaction_fn = mock_run.call_args[0][1]
+            # Create a mock txn object
+            txn = Txn()
+            # Run the interaction function
+            interaction_fn(txn)
+            self.assertEqual(txn.sql, expected_sql)
+            self.assertEqual(txn.params, expected_params)
+
+    def test_metrics_registered(self) -> None:
         """
         Test following metrics are registered:
         - synapse_known_rooms_total
         - synapse_locally_joined_rooms_total
+        - synapse_messages_by_source
+        - synapse_events_by_source
+        - synapse_encrypted_events_by_source
         """
+        registered = REGISTRY._names_to_collectors
         # Ensure the metrics are registered
-        self.assertIn("synapse_known_rooms_total", REGISTRY._names_to_collectors)
-        self.assertIn(
-            "synapse_locally_joined_rooms_total", REGISTRY._names_to_collectors
-        )
+        self.assertIn("synapse_known_rooms_total", registered)
+        self.assertIn("synapse_locally_joined_rooms_total", registered)
+        self.assertIn("synapse_messages_by_source", registered)
+        self.assertIn("synapse_events_by_source", registered)
+        self.assertIn("synapse_encrypted_events_by_source", registered)
 
     def test_set_room_metrics(self) -> None:
         """
@@ -89,4 +135,77 @@ class ServerMetricsStoreTestCase(HomeserverTestCase):
             self.reactor.advance(60 * 60)
             self.assertEqual(
                 REGISTRY.get_sample_value("synapse_locally_joined_rooms_total"), 20
+            )
+
+    def test_count_events_sql(self) -> None:
+        hostname = self.store.hs.hostname
+        self.assert_count_events_sql(
+            event_types=["m.room.message", "m.room.encrypted"],
+            local=True,
+            expected_sql="SELECT COUNT(*) FROM events WHERE type IN (?, ?) AND sender LIKE ?",
+            expected_params=("m.room.message", "m.room.encrypted", "%:" + hostname),
+        )
+        self.assert_count_events_sql(
+            event_types=None,
+            local=False,
+            expected_sql="SELECT COUNT(*) FROM events WHERE sender NOT LIKE ?",
+            expected_params=("%:" + hostname,),
+        )
+        self.assert_count_events_sql(
+            event_types=["m.room.encrypted"],
+            local=False,
+            expected_sql="SELECT COUNT(*) FROM events WHERE type IN (?) AND sender NOT LIKE ?",
+            expected_params=("m.room.encrypted", "%:" + hostname),
+        )
+
+    def test_set_event_metrics(self) -> None:
+        with patch.object(
+            self.store, "_count_events", new=AsyncMock(side_effect=[5, 10])
+        ):
+            self.get_success(self.store.set_messages_by_source_gauge())
+            self.assertEqual(
+                REGISTRY.get_sample_value(
+                    "synapse_messages_by_source", {"source": "local"}
+                ),
+                5,
+            )
+            self.assertEqual(
+                REGISTRY.get_sample_value(
+                    "synapse_messages_by_source", {"source": "remote"}
+                ),
+                10,
+            )
+
+        with patch.object(
+            self.store, "_count_events", new=AsyncMock(side_effect=[7, 12])
+        ):
+            self.get_success(self.store.set_events_by_source_gauge())
+            self.assertEqual(
+                REGISTRY.get_sample_value(
+                    "synapse_events_by_source", {"source": "local"}
+                ),
+                7,
+            )
+            self.assertEqual(
+                REGISTRY.get_sample_value(
+                    "synapse_events_by_source", {"source": "remote"}
+                ),
+                12,
+            )
+
+        with patch.object(
+            self.store, "_count_events", new=AsyncMock(side_effect=[3, 4])
+        ):
+            self.get_success(self.store.set_encrypted_events_by_source_gauge())
+            self.assertEqual(
+                REGISTRY.get_sample_value(
+                    "synapse_encrypted_events_by_source", {"source": "local"}
+                ),
+                3,
+            )
+            self.assertEqual(
+                REGISTRY.get_sample_value(
+                    "synapse_encrypted_events_by_source", {"source": "remote"}
+                ),
+                4,
             )
