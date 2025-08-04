@@ -1709,7 +1709,7 @@ class DeviceWorkerStore(RoomMemberWorkerStore, EndToEndKeyWorkerStore):
         return devices
 
     @cached()
-    async def _get_min_device_lists_changes_in_room(self) -> int:
+    async def _get_min_device_lists_changes_in_room(self) -> int:  #
         """Returns the minimum stream ID that we have entries for
         `device_lists_changes_in_room`
         """
@@ -1796,8 +1796,9 @@ class DeviceWorkerStore(RoomMemberWorkerStore, EndToEndKeyWorkerStore):
 
         min_stream_id = await self._get_min_device_lists_changes_in_room()
 
-        if min_stream_id > from_id:
-            raise Exception("stream ID is too old")
+        if min_stream_id > from_id:  #
+            msg = f"stream ID is too old, {min_stream_id} > {from_id}"
+            raise Exception(msg)
 
         sql = """
             SELECT DISTINCT room_id FROM device_lists_changes_in_room

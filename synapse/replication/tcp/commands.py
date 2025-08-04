@@ -167,6 +167,9 @@ class RdataCommand(Command):
     def get_logcontext_id(self) -> str:
         return "RDATA-" + self.stream_name
 
+    def __repr__(self) -> str:
+        return f"RdataCommand(stream={self.stream_name!r}, instance={self.instance_name!r}, position={self.token!r}, row=...)"
+
 
 class PositionCommand(Command):
     """Sent by an instance to tell others the stream position without needing to
@@ -217,6 +220,9 @@ class PositionCommand(Command):
                 str(self.new_token),
             )
         )
+
+    def __repr__(self) -> str:
+        return f"PositionCommand(stream={self.stream_name!r}, instance={self.instance_name!r}, prev_token={self.prev_token!r}, new_token={self.new_token!r}, row=...)"
 
 
 class ErrorCommand(_SimpleCommand):
