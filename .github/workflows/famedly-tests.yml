@@ -361,6 +361,7 @@ jobs:
         env:
           POSTGRES: ${{ (matrix.database == 'Postgres') && 1 || '' }}
           WORKERS: ${{ (matrix.arrangement == 'workers') && 1 || '' }}
+          SYNAPSE_TEST_LOG_LEVEL: DEBUG
         name: Run Complement Tests
 
   cargo-test:
