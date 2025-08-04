@@ -24,7 +24,10 @@ import time
 from typing import TYPE_CHECKING, Dict, List, Tuple, cast
 
 from synapse.metrics import GaugeBucketCollector
-from synapse.metrics.background_process_metrics import wrap_as_background_process
+from synapse.metrics.background_process_metrics import (
+    run_as_background_process,
+    wrap_as_background_process,
+)
 from synapse.storage._base import SQLBaseStore
 from synapse.storage.database import (
     DatabasePool,
@@ -223,6 +226,15 @@ class ServerMetricsStore(EventPushActionsWorkerStore, SQLBaseStore):
         yesterday = int(self._clock.time_msec()) - (1000 * 60 * 60 * 24)
         return await self.db_pool.runInteraction(
             "count_daily_users", self._count_users, yesterday
+        )
+
+    async def count_weekly_users(self) -> int:
+        """
+        Counts the number of users who used this homeserver in the last 7 days.
+        """
+        seven_days_ago = int(self._clock.time_msec()) - (1000 * 60 * 60 * 24 * 7)
+        return await self.db_pool.runInteraction(
+            "count_weekly_users", self._count_users, seven_days_ago
         )
 
     async def count_monthly_users(self) -> int:
@@ -469,3 +481,19 @@ class ServerMetricsStore(EventPushActionsWorkerStore, SQLBaseStore):
         await self.db_pool.runInteraction(
             "generate_user_daily_visits", _generate_user_daily_visits
         )
+
+    async def count_users_per_status(self, status: dict) -> int:
+        def _count_users(txn: LoggingTransaction) -> int:
+            conditions = []
+            params = []
+            for col, val in status.items():
+                conditions.append(f"{col} = ?")
+                params.append(val)
+            sql = "SELECT COUNT(*) FROM users"
+            if conditions:
+                sql += " WHERE " + " AND ".join(conditions)
+            txn.execute(sql, tuple(params))
+            (count,) = cast(Tuple[int], txn.fetchone())
+            return count
+
+        return await self.db_pool.runInteraction("count_users", _count_users)
