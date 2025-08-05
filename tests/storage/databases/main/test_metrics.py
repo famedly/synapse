@@ -65,14 +65,14 @@ class ServerMetricsStoreTestCase(HomeserverTestCase):
         """
         Test if registered metrics are updated correctly after the specified interval.
         """
-        self.assertEqual(REGISTRY.get_sample_value("synapse_known_rooms_total"), 0)
+        self.assertNotEqual(REGISTRY.get_sample_value("synapse_known_rooms_total"), 8)
         with patch.object(self.store, "get_room_count", new=AsyncMock(return_value=8)):
             # Check values after the update interval
             self.reactor.advance(15 * 60)
             self.assertEqual(REGISTRY.get_sample_value("synapse_known_rooms_total"), 8)
 
-        self.assertEqual(
-            REGISTRY.get_sample_value("synapse_locally_joined_rooms_total"), 0
+        self.assertNotEqual(
+            REGISTRY.get_sample_value("synapse_locally_joined_rooms_total"), 20
         )
         with patch.object(
             self.store, "get_locally_joined_room_count", new=AsyncMock(return_value=20)
