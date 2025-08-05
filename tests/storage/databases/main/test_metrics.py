@@ -20,7 +20,7 @@
 #
 from unittest.mock import AsyncMock, patch
 
-from prometheus_client import REGISTRY, Gauge
+from prometheus_client import REGISTRY
 
 from twisted.test.proto_helpers import MemoryReactor
 
@@ -65,28 +65,19 @@ class ServerMetricsStoreTestCase(HomeserverTestCase):
         """
         Test if registered metrics are updated correctly after the specified interval.
         """
-        # Set initial values
-        gauge = REGISTRY._names_to_collectors.get("synapse_known_rooms_total")
-        if isinstance(gauge, Gauge):
-            gauge.set(0)
         self.assertEqual(REGISTRY.get_sample_value("synapse_known_rooms_total"), 0)
-
         with patch.object(self.store, "get_room_count", new=AsyncMock(return_value=8)):
             # Check values after the update interval
-            self.reactor.advance(60 * 60)
+            self.reactor.advance(15 * 60)
             self.assertEqual(REGISTRY.get_sample_value("synapse_known_rooms_total"), 8)
 
-        gauge = REGISTRY._names_to_collectors.get("synapse_locally_joined_rooms_total")
-        if isinstance(gauge, Gauge):
-            gauge.set(0)
         self.assertEqual(
             REGISTRY.get_sample_value("synapse_locally_joined_rooms_total"), 0
         )
-
         with patch.object(
             self.store, "get_locally_joined_room_count", new=AsyncMock(return_value=20)
         ):
-            self.reactor.advance(60 * 60)
+            self.reactor.advance(15 * 60)
             self.assertEqual(
                 REGISTRY.get_sample_value("synapse_locally_joined_rooms_total"), 20
             )

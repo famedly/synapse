@@ -25,9 +25,12 @@ from typing import TYPE_CHECKING, Dict, List, Tuple, cast
 
 from prometheus_client import Gauge
 
-from synapse.appservice.api import HOUR_IN_MS
+from synapse.appservice.api import HOUR_IN_MS, QUARTER_HOUR_IN_MS
 from synapse.metrics import GaugeBucketCollector
-from synapse.metrics.background_process_metrics import wrap_as_background_process
+from synapse.metrics.background_process_metrics import (
+    run_as_background_process,
+    wrap_as_background_process,
+)
 from synapse.storage._base import SQLBaseStore
 from synapse.storage.database import (
     DatabasePool,
@@ -87,9 +90,23 @@ class ServerMetricsStore(EventPushActionsWorkerStore, SQLBaseStore):
         if hs.config.worker.run_background_tasks:
             # Read the extrems every 60 minutes
             self._clock.looping_call(self._read_forward_extremities, HOUR_IN_MS)
-            # update room metrics every 60 minutes
-            self._clock.looping_call(self.set_known_rooms_gauge, HOUR_IN_MS)
-            self._clock.looping_call(self.set_locally_joined_rooms_gauge, HOUR_IN_MS)
+            # update room metrics every 15 minutes
+            self._clock.looping_call(self.set_known_rooms_gauge, QUARTER_HOUR_IN_MS)
+            self._clock.looping_call(
+                self.set_locally_joined_rooms_gauge, QUARTER_HOUR_IN_MS
+            )
+
+            def setup() -> None:
+                run_as_background_process(
+                    desc="set_known_rooms_gauge", func=self.set_known_rooms_gauge
+                )
+                run_as_background_process(
+                    desc="set_locally_joined_rooms_gauge",
+                    func=self.set_locally_joined_rooms_gauge,
+                )
+
+            # Set up the gauges when the server starts
+            hs.get_reactor().callWhenRunning(setup)
 
         # Used in _generate_user_daily_visits to keep track of progress
         self._last_user_visit_update = self._get_start_of_day()
