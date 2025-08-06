@@ -1794,11 +1794,11 @@ class DeviceWorkerStore(RoomMemberWorkerStore, EndToEndKeyWorkerStore):
         Will raise an exception if the given stream ID is too old.
         """
 
-        min_stream_id = await self._get_min_device_lists_changes_in_room()
-
-        if min_stream_id > from_id:  #
-            msg = f"stream ID is too old, {min_stream_id} > {from_id}"
-            raise Exception(msg)
+        # min_stream_id = await self._get_min_device_lists_changes_in_room()
+        #
+        # if min_stream_id > from_id:  #
+        #     msg = f"stream ID is too old, {min_stream_id} > {from_id}"
+        #     raise Exception(msg)
 
         sql = """
             SELECT DISTINCT room_id FROM device_lists_changes_in_room
