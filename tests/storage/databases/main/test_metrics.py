@@ -20,7 +20,7 @@
 #
 from unittest.mock import AsyncMock, patch
 
-from prometheus_client import REGISTRY
+from prometheus_client import REGISTRY, Gauge
 
 from twisted.test.proto_helpers import MemoryReactor
 
@@ -33,6 +33,20 @@ from tests.unittest import HomeserverTestCase
 class ServerMetricsStoreTestCase(HomeserverTestCase):
     def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
         self.store = hs.get_datastores().main
+        self.set_metrics_to_zero()
+
+    def set_metrics_to_zero(self) -> None:
+        """
+        There is an issue when the tests are run in parallel where the metrics
+        are not reset between tests, leading to incorrect values.
+        This method resets the metrics to zero before each test to ensure
+        that each test starts with a clean slate.
+        """
+        metrics = ["synapse_known_rooms_total", "synapse_locally_joined_rooms_total"]
+        for metric_name in metrics:
+            gauge = REGISTRY._names_to_collectors.get(metric_name)
+            if gauge is not None and isinstance(gauge, Gauge):
+                gauge.set(0)
 
     def test_room_metrics_registered(self) -> None:
         """
@@ -65,14 +79,14 @@ class ServerMetricsStoreTestCase(HomeserverTestCase):
         """
         Test if registered metrics are updated correctly after the specified interval.
         """
-        self.assertNotEqual(REGISTRY.get_sample_value("synapse_known_rooms_total"), 8)
+        self.assertEqual(REGISTRY.get_sample_value("synapse_known_rooms_total"), 0)
         with patch.object(self.store, "get_room_count", new=AsyncMock(return_value=8)):
             # Check values after the update interval
             self.reactor.advance(15 * 60)
             self.assertEqual(REGISTRY.get_sample_value("synapse_known_rooms_total"), 8)
 
-        self.assertNotEqual(
-            REGISTRY.get_sample_value("synapse_locally_joined_rooms_total"), 20
+        self.assertEqual(
+            REGISTRY.get_sample_value("synapse_locally_joined_rooms_total"), 0
         )
         with patch.object(
             self.store, "get_locally_joined_room_count", new=AsyncMock(return_value=20)
