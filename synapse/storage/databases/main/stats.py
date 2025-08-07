@@ -35,6 +35,8 @@ from typing import (
     cast,
 )
 
+from prometheus_client import Gauge
+
 from twisted.internet.defer import DeferredLock
 
 from synapse.api.constants import Direction, EventContentFields, EventTypes, Membership
@@ -75,6 +77,13 @@ TYPE_TO_TABLE = {"room": ("room_stats", "room_id"), "user": ("user_stats", "user
 
 # these are the tables (& ID columns) which contain our actual subjects
 TYPE_TO_ORIGIN_TABLE = {"room": ("rooms", "room_id"), "user": ("users", "name")}
+
+# Gauges for room counts
+known_rooms_gauge = Gauge("synapse_known_rooms_total", "Total number of rooms")
+
+locally_joined_rooms_gauge = Gauge(
+    "synapse_locally_joined_rooms_total", "Total number of locally joined rooms"
+)
 
 
 class UserSortOrder(Enum):
@@ -353,9 +362,26 @@ class StatsStore(StateDeltasStore):
                 updatevalues={"stream_id": stream_id},
             )
 
+        def _get_room_stats_txn(txn: LoggingTransaction) -> Tuple[int, int]:
+            """Retrieve the total number of rooms and locally joined rooms."""
+            sql = """
+                SELECT
+                    count(*) AS total,
+                    count(CASE WHEN local_users_in_room > 0 THEN 1 END) AS locally_joined
+                FROM room_stats_current;
+                """
+            txn.execute(sql)
+            row = cast(Tuple[int, int], txn.fetchone())
+            return row[0], row[1]
+
         await self.db_pool.runInteraction(
             "bulk_update_stats_delta", _bulk_update_stats_delta_txn
         )
+        room_count, locally_joined_room_count = await self.db_pool.runInteraction(
+            "get_room_stats", _get_room_stats_txn
+        )
+        known_rooms_gauge.set(room_count)
+        locally_joined_rooms_gauge.set(locally_joined_room_count)
 
     async def update_stats_delta(
         self,

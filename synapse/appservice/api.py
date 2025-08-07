@@ -85,7 +85,6 @@ sent_todevice_counter = Counter(
 )
 
 HOUR_IN_MS = 60 * 60 * 1000
-QUARTER_HOUR_IN_MS = 15 * 60 * 1000
 
 APP_SERVICE_PREFIX = "/_matrix/app/v1"
 

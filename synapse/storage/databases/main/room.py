@@ -403,20 +403,6 @@ class RoomWorkerStore(CacheInvalidationWorkerStore):
 
         return await self.db_pool.runInteraction("get_rooms", f)
 
-    async def get_locally_joined_room_count(self) -> int:
-        """Retrieve the total number of locally joined rooms."""
-
-        def f(txn: LoggingTransaction) -> int:
-            sql = """
-                SELECT count(*) FROM room_stats_current
-                WHERE local_users_in_room > 0
-                """
-            txn.execute(sql)
-            row = cast(Tuple[int], txn.fetchone())
-            return row[0]
-
-        return await self.db_pool.runInteraction("get_locally_joined_room_count", f)
-
     async def get_largest_public_rooms(
         self,
         network_tuple: Optional[ThirdPartyInstanceID],

@@ -18,11 +18,10 @@
 # [This file includes modifications made by New Vector Limited]
 #
 #
+
 from twisted.test.proto_helpers import MemoryReactor
 
 from synapse.api.room_versions import RoomVersions
-from synapse.rest.admin import register_servlets_for_client_rest_resource
-from synapse.rest.client import login, room
 from synapse.server import HomeServer
 from synapse.types import RoomAlias, RoomID, UserID
 from synapse.util import Clock
@@ -31,13 +30,6 @@ from tests.unittest import HomeserverTestCase
 
 
 class RoomStoreTestCase(HomeserverTestCase):
-    # Register the required servlets for user registration, login, and room creation
-    servlets = [
-        register_servlets_for_client_rest_resource,
-        login.register_servlets,
-        room.register_servlets,
-    ]
-
     def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
         # We can't test RoomStore on its own without the DirectoryStore, for
         # management of the 'room_aliases' table
@@ -75,34 +67,3 @@ class RoomStoreTestCase(HomeserverTestCase):
         self.assertIsNone(
             self.get_success(self.store.get_room_with_stats("!uknown:test"))
         )
-
-    def test_get_room_count(self) -> None:
-        # A room already exists from prepare.
-        res = self.get_success(self.store.get_room_count())
-        self.assertEqual(res, 1)
-
-        self.get_success(
-            self.store.store_room(
-                RoomID.from_string("!new_room:test").to_string(),
-                room_creator_user_id=self.u_creator.to_string(),
-                is_public=True,
-                room_version=RoomVersions.V1,
-            )
-        )
-        res = self.get_success(self.store.get_room_count())
-        self.assertEqual(res, 2)
-
-    def test_get_locally_joined_room_count(self) -> None:
-        # locally joined room count starts at 0.
-        res = self.get_success(self.store.get_locally_joined_room_count())
-        self.assertEqual(res, 0)
-
-        self.register_user("u1", "pass")
-        u1_token = self.login("u1", "pass")
-        self.helper.create_room_as("u1", tok=u1_token)
-        res = self.get_success(self.store.get_locally_joined_room_count())
-        self.assertEqual(res, 1)
-
-        self.helper.create_room_as("u1", tok=u1_token)
-        res = self.get_success(self.store.get_locally_joined_room_count())
-        self.assertEqual(res, 2)
