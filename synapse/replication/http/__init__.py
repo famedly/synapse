@@ -23,6 +23,7 @@ from typing import TYPE_CHECKING
 from synapse.http.server import JsonResource
 from synapse.replication.http import (
     account_data,
+    deactivate_account,
     delayed_events,
     devices,
     federation,
@@ -59,10 +60,11 @@ class ReplicationRestResource(JsonResource):
         account_data.register_servlets(hs, self)
         push.register_servlets(hs, self)
         state.register_servlets(hs, self)
+        devices.register_servlets(hs, self)
 
         # The following can't currently be instantiated on workers.
         if hs.config.worker.worker_app is None:
             login.register_servlets(hs, self)
             register.register_servlets(hs, self)
-            devices.register_servlets(hs, self)
             delayed_events.register_servlets(hs, self)
+            deactivate_account.register_servlets(hs, self)
