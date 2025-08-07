@@ -23,8 +23,14 @@ import logging
 import time
 from typing import TYPE_CHECKING, Dict, List, Tuple, cast
 
+from prometheus_client import Gauge
+
+from synapse.appservice.api import HOUR_IN_MS
 from synapse.metrics import GaugeBucketCollector
-from synapse.metrics.background_process_metrics import wrap_as_background_process
+from synapse.metrics.background_process_metrics import (
+    run_as_background_process,
+    wrap_as_background_process,
+)
 from synapse.storage._base import SQLBaseStore
 from synapse.storage.database import (
     DatabasePool,
@@ -60,6 +66,31 @@ _excess_state_events_collecter = GaugeBucketCollector(
     buckets=[0] + [1 << n for n in range(12)],
 )
 
+# Gauges for room counts
+known_rooms_gauge = Gauge("synapse_known_rooms_total", "Total number of rooms")
+
+locally_joined_rooms_gauge = Gauge(
+    "synapse_locally_joined_rooms_total", "Total number of locally joined rooms"
+)
+
+# Gauge for users
+users_in_status_gauge = Gauge(
+    "synapse_user_count",
+    "Number of users in active, deactivated, suspended, and locked status",
+    ["status"],
+)
+
+users_in_time_ranges_gauge = Gauge(
+    "synapse_active_users",
+    "Number of active users in time ranges in 24h, 7d, and 30d",
+    ["time_range"],
+)
+
+# We may want to add additional ranges in the future.
+retained_users_gauge = Gauge(
+    "synapse_retained_users", "Number of retained users in 30d", ["time_range"]
+)
+
 
 class ServerMetricsStore(EventPushActionsWorkerStore, SQLBaseStore):
     """Functions to pull various metrics from the DB, for e.g. phone home
@@ -74,9 +105,35 @@ class ServerMetricsStore(EventPushActionsWorkerStore, SQLBaseStore):
     ):
         super().__init__(database, db_conn, hs)
 
-        # Read the extrems every 60 minutes
         if hs.config.worker.run_background_tasks:
-            self._clock.looping_call(self._read_forward_extremities, 60 * 60 * 1000)
+            # Read the extrems every 60 minutes
+            self._clock.looping_call(self._read_forward_extremities, HOUR_IN_MS)
+            # update room metrics every 60 minutes
+            self._clock.looping_call(self.set_known_rooms_gauge, HOUR_IN_MS)
+            self._clock.looping_call(self.set_locally_joined_rooms_gauge, HOUR_IN_MS)
+            # update user metrics every 60 minutes
+            self._clock.looping_call(self.set_users_in_status_gauge, HOUR_IN_MS)
+            self._clock.looping_call(
+                self.set_active_users_in_time_ranges_gauge, HOUR_IN_MS
+            )
+            self._clock.looping_call(self.set_retained_users_gauge, HOUR_IN_MS)
+
+            def init_metrics() -> None:
+                run_as_background_process(
+                    desc="set_users_in_status_gauge",
+                    func=self.set_users_in_status_gauge,
+                )
+                run_as_background_process(
+                    desc="set_active_users_in_time_ranges_gauge",
+                    func=self.set_active_users_in_time_ranges_gauge,
+                )
+                run_as_background_process(
+                    desc="set_retained_users_gauge",
+                    func=self.set_retained_users_gauge,
+                )
+
+            # init_metrics will be called first when the reactor starts.
+            hs.get_reactor().callWhenRunning(init_metrics)
 
         # Used in _generate_user_daily_visits to keep track of progress
         self._last_user_visit_update = self._get_start_of_day()
@@ -223,6 +280,15 @@ class ServerMetricsStore(EventPushActionsWorkerStore, SQLBaseStore):
         yesterday = int(self._clock.time_msec()) - (1000 * 60 * 60 * 24)
         return await self.db_pool.runInteraction(
             "count_daily_users", self._count_users, yesterday
+        )
+
+    async def count_weekly_users(self) -> int:
+        """
+        Counts the number of users who used this homeserver in the last 7 days.
+        """
+        seven_days_ago = int(self._clock.time_msec()) - (1000 * 60 * 60 * 24 * 7)
+        return await self.db_pool.runInteraction(
+            "count_weekly_users", self._count_users, seven_days_ago
         )
 
     async def count_monthly_users(self) -> int:
@@ -469,3 +535,68 @@ class ServerMetricsStore(EventPushActionsWorkerStore, SQLBaseStore):
         await self.db_pool.runInteraction(
             "generate_user_daily_visits", _generate_user_daily_visits
         )
+
+    async def set_known_rooms_gauge(self) -> None:
+        res = await self.hs.get_datastores().main.get_room_count()
+        known_rooms_gauge.set(res)
+
+    async def set_locally_joined_rooms_gauge(self) -> None:
+        res = await self.hs.get_datastores().main.get_locally_joined_room_count()
+        locally_joined_rooms_gauge.set(res)
+
+    async def count_users_per_status(self, status: dict) -> int:
+        def _count_users(txn: LoggingTransaction) -> int:
+            conditions = []
+            params = []
+            for col, val in status.items():
+                conditions.append(f"{col} = ?")
+                params.append(val)
+            sql = "SELECT COUNT(*) FROM users"
+            if conditions:
+                sql += " WHERE " + " AND ".join(conditions)
+            txn.execute(sql, tuple(params))
+            (count,) = cast(Tuple[int], txn.fetchone())
+            return count
+
+        return await self.db_pool.runInteraction("count_users", _count_users)
+
+    async def set_users_in_status_gauge(self) -> None:
+        res = await self.count_users_per_status(
+            {"deactivated": 0, "locked": False, "suspended": False}
+        )
+        users_in_status_gauge.labels(status="active").set(res)
+
+        res = await self.count_users_per_status(
+            {
+                "deactivated": 1,
+            }
+        )
+        users_in_status_gauge.labels(status="deactivated").set(res)
+
+        res = await self.count_users_per_status(
+            {
+                "suspended": True,
+            }
+        )
+        users_in_status_gauge.labels(status="suspended").set(res)
+
+        res = await self.count_users_per_status(
+            {
+                "locked": True,
+            }
+        )
+        users_in_status_gauge.labels(status="locked").set(res)
+
+    async def set_active_users_in_time_ranges_gauge(self) -> None:
+        res = await self.count_daily_users()
+        users_in_time_ranges_gauge.labels(time_range="24h").set(res)
+
+        res = await self.count_weekly_users()
+        users_in_time_ranges_gauge.labels(time_range="7d").set(res)
+
+        res = await self.count_monthly_users()
+        users_in_time_ranges_gauge.labels(time_range="30d").set(res)
+
+    async def set_retained_users_gauge(self) -> None:
+        res = await self.count_r30v2_users()
+        retained_users_gauge.labels(time_range="30d").set(float(res.get("all", 0)))
