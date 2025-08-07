@@ -192,7 +192,9 @@ class ProfileHandler:
         if not by_admin and target_user != requester.user:
             raise AuthError(400, "Cannot set another user's displayname")
 
-        if not by_admin and not self.hs.config.registration.enable_set_displayname:
+        if (
+            not by_admin and not self.hs.config.registration.enable_set_displayname
+        ) and not (deactivation and new_displayname == ""):
             profile = await self.store.get_profileinfo(target_user)
             if profile.display_name:
                 raise SynapseError(
@@ -296,7 +298,9 @@ class ProfileHandler:
         if not by_admin and target_user != requester.user:
             raise AuthError(400, "Cannot set another user's avatar_url")
 
-        if not by_admin and not self.hs.config.registration.enable_set_avatar_url:
+        if (
+            not by_admin and not self.hs.config.registration.enable_set_avatar_url
+        ) and not (deactivation and new_avatar_url == ""):
             profile = await self.store.get_profileinfo(target_user)
             if profile.avatar_url:
                 raise SynapseError(
