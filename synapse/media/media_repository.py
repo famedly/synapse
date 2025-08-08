@@ -69,7 +69,7 @@ from synapse.media.thumbnailer import Thumbnailer, ThumbnailError
 from synapse.media.url_previewer import UrlPreviewer
 from synapse.metrics.background_process_metrics import run_as_background_process
 from synapse.storage.databases.main.media_repository import LocalMedia, RemoteMedia
-from synapse.types import UserID
+from synapse.types import Requester, UserID
 from synapse.util.async_helpers import Linearizer
 from synapse.util.retryutils import NotRetryingDestination
 from synapse.util.stringutils import random_string
@@ -462,6 +462,7 @@ class MediaRepository:
         media_id: str,
         name: Optional[str],
         max_timeout_ms: int,
+        requester: Optional[Requester] = None,
         allow_authenticated: bool = True,
         federation: bool = False,
     ) -> None:
@@ -475,6 +476,7 @@ class MediaRepository:
                 the filename in the Content-Disposition header of the response.
             max_timeout_ms: the maximum number of milliseconds to wait for the
                 media to be uploaded.
+            requester: The local user placing the request
             allow_authenticated: whether media marked as authenticated may be served to this request
             federation: whether the local media being fetched is for a federation request
 
@@ -485,9 +487,11 @@ class MediaRepository:
         if not media_info:
             return
 
-        if self.hs.config.media.enable_authenticated_media and not allow_authenticated:
-            if media_info.authenticated:
+        if self.hs.config.media.enable_authenticated_media:
+            if not allow_authenticated and media_info.authenticated:
                 raise NotFoundError()
+            if self.media_attachment_enabled and requester and requester.user.to_string() != media_info.user_id:
+                raise SynapseError(403, "", Codes.UNAUTHORIZED)
 
         self.mark_recently_accessed(None, media_id)
 

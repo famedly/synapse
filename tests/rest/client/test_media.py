@@ -3001,6 +3001,8 @@ class LinkedMediaTestCase(unittest.HomeserverTestCase):
         self.store = hs.get_datastores().main
         self.user_1 = self.register_user("user_1", "pass")
         self.tok_1 = self.login("user_1", "pass")
+        self.user_2 = self.register_user("user_2", "pass")
+        self.tok_2 = self.login("user_2", "pass")
 
     def create_resource_dict(self) -> Dict[str, Resource]:
         # To give the deprecated endpoints a chance
@@ -3024,4 +3026,51 @@ class LinkedMediaTestCase(unittest.HomeserverTestCase):
         )
         self.assertEqual(channel.code, 200)
         res = channel.json_body.get("content_uri")
+        assert res is not None
+        uri = res.split("mxc://")[1]
 
+        # request media over authenticated endpoint, should be found
+        channel2 = self.make_request(
+            "GET",
+            f"_matrix/client/v1/media/download/{uri}",
+            access_token=self.tok_1,
+            shorthand=False,
+        )
+        self.assertEqual(channel2.code, 200)
+
+        # request same media over unauthenticated media, should raise 404 not found
+        channel3 = self.make_request(
+            "GET", f"_matrix/media/v3/download/{uri}", shorthand=False
+        )
+        self.assertEqual(channel3.code, 404)
+
+    def test_media_uploaded_is_unaccessible_by_other_local_user(self) -> None:
+        # upload some local media with authentication on
+        channel = self.make_request(
+            "POST",
+            "_matrix/client/unstable/org.matrix.msc3911/media/upload?filename=test_png_upload",
+            SMALL_PNG,
+            self.tok_1,
+            shorthand=False,
+            content_type=b"image/png",
+            custom_headers=[("Content-Length", str(67))],
+        )
+        self.assertEqual(channel.code, 200)
+        res = channel.json_body.get("content_uri")
+        assert res is not None
+        uri = res.split("mxc://")[1]
+
+        # request media over authenticated endpoint, should be found
+        channel2 = self.make_request(
+            "GET",
+            f"_matrix/client/v1/media/download/{uri}",
+            access_token=self.tok_2,
+            shorthand=False,
+        )
+        self.assertEqual(channel2.code, 403)
+
+        # request same media over unauthenticated media, should raise 404 not found
+        channel3 = self.make_request(
+            "GET", f"_matrix/media/v3/download/{uri}", shorthand=False
+        )
+        self.assertEqual(channel3.code, 404)

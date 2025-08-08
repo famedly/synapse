@@ -242,7 +242,7 @@ class DownloadResource(RestServlet):
         # Validate the server name, raising if invalid
         parse_and_validate_server_name(server_name)
 
-        await self.auth.get_user_by_req(request, allow_guest=True)
+        requester = await self.auth.get_user_by_req(request, allow_guest=True)
 
         set_cors_headers(request)
         set_corp_headers(request)
@@ -266,7 +266,7 @@ class DownloadResource(RestServlet):
 
         if self._is_mine_server_name(server_name):
             await self.media_repo.get_local_media(
-                request, media_id, file_name, max_timeout_ms
+                request, media_id, file_name, max_timeout_ms, requester=requester
             )
         else:
             ip_address = request.getClientAddress().host
