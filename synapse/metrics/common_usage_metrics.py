@@ -35,12 +35,35 @@ current_dau_gauge = Gauge(
     "Current daily active users count",
 )
 
+# Gauges for message & event counts
+messages_by_source_gauge = Gauge(
+    "synapse_messages_by_source",
+    "Number of messages sent by the server, both local and remote events.",
+    ["source"],
+)
+events_by_source_gauge = Gauge(
+    "synapse_events_by_source",
+    "Number of events sent by the server, grouped by source",
+    ["source"],
+)
+encrypted_events_by_source_gauge = Gauge(
+    "synapse_encrypted_events_by_source",
+    "Number of encrypted events sent by the server, grouped by source",
+    ["source"],
+)
+
 
 @attr.s(auto_attribs=True)
 class CommonUsageMetrics:
     """Usage metrics shared between the phone home stats and the prometheus exporter."""
 
     daily_active_users: int
+    message_by_local: int
+    message_by_remote: int
+    event_by_local: int
+    event_by_remote: int
+    encrypted_event_by_local: int
+    encrypted_event_by_remote: int
 
 
 class CommonUsageMetricsManager:
@@ -76,9 +99,23 @@ class CommonUsageMetricsManager:
         use if it doesn't exist yet, or update it.
         """
         dau_count = await self._store.count_daily_users()
+        (
+            local_message_count,
+            remote_message_count,
+            local_event_count,
+            remote_event_count,
+            local_encrypted_count,
+            remote_encrypted_count,
+        ) = await self._store.get_event_counts_for_metrics()
 
         return CommonUsageMetrics(
             daily_active_users=dau_count,
+            message_by_local=local_message_count,
+            message_by_remote=remote_message_count,
+            event_by_local=local_event_count,
+            event_by_remote=remote_event_count,
+            encrypted_event_by_local=local_encrypted_count,
+            encrypted_event_by_remote=remote_encrypted_count,
         )
 
     async def _update_gauges(self) -> None:
@@ -86,3 +123,19 @@ class CommonUsageMetricsManager:
         metrics = await self._collect()
 
         current_dau_gauge.set(float(metrics.daily_active_users))
+        messages_by_source_gauge.labels(source="local").set(
+            float(metrics.message_by_local)
+        )
+        messages_by_source_gauge.labels(source="remote").set(
+            float(metrics.message_by_remote)
+        )
+        events_by_source_gauge.labels(source="local").set(float(metrics.event_by_local))
+        events_by_source_gauge.labels(source="remote").set(
+            float(metrics.event_by_remote)
+        )
+        encrypted_events_by_source_gauge.labels(source="local").set(
+            float(metrics.encrypted_event_by_local)
+        )
+        encrypted_events_by_source_gauge.labels(source="remote").set(
+            float(metrics.encrypted_event_by_remote)
+        )

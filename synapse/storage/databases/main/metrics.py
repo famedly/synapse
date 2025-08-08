@@ -21,10 +21,8 @@
 import calendar
 import logging
 import time
-from typing import TYPE_CHECKING, Dict, List, Optional, Tuple, cast
-from prometheus_client import Gauge
+from typing import TYPE_CHECKING, Dict, List, Tuple, cast
 
-from synapse.appservice.api import HOUR_IN_MS
 from synapse.metrics import GaugeBucketCollector
 from synapse.metrics.background_process_metrics import wrap_as_background_process
 from synapse.storage._base import SQLBaseStore
@@ -62,22 +60,6 @@ _excess_state_events_collecter = GaugeBucketCollector(
     buckets=[0] + [1 << n for n in range(12)],
 )
 
-# Gauges for message & event counts
-messages_by_source_gauge = Gauge(
-    "synapse_messages_by_source",
-    "Number of messages sent by the server, both local and remote events.",
-    ["source"],
-)
-events_by_source_gauge = Gauge(
-    "synapse_events_by_source",
-    "Number of events sent by the server, grouped by source",
-    ["source"],
-)
-encrypted_events_by_source_gauge = Gauge(
-    "synapse_encrypted_events_by_source",
-    "Number of encrypted events sent by the server, grouped by source",
-    ["source"],
-)
 
 class ServerMetricsStore(EventPushActionsWorkerStore, SQLBaseStore):
     """Functions to pull various metrics from the DB, for e.g. phone home
@@ -92,16 +74,9 @@ class ServerMetricsStore(EventPushActionsWorkerStore, SQLBaseStore):
     ):
         super().__init__(database, db_conn, hs)
 
-        def _update_event_metrics():
-            self.set_messages_by_source_gauge()
-            self.set_events_by_source_gauge()
-            self.set_encrypted_events_by_source_gauge()
-
         # Read the extrems every 60 minutes
         if hs.config.worker.run_background_tasks:
             self._clock.looping_call(self._read_forward_extremities, 60 * 60 * 1000)
-            # update event metrics every 5 minutes
-            self._clock.looping_call(_update_event_metrics, 5 * 60 * 1000)
 
         # Used in _generate_user_daily_visits to keep track of progress
         self._last_user_visit_update = self._get_start_of_day()
@@ -495,50 +470,24 @@ class ServerMetricsStore(EventPushActionsWorkerStore, SQLBaseStore):
             "generate_user_daily_visits", _generate_user_daily_visits
         )
 
-    async def _count_events(
-        self, event_types: Optional[list] = None, local: bool = True
-    ) -> int:
-        where_clauses = []
-        params = []
-        if event_types:
-            if isinstance(event_types, list):
-                placeholders = ", ".join("?" for _ in event_types)
-                where_clauses.append(f"type IN ({placeholders})")
-                params.extend(event_types)
-        sender_clause = "sender LIKE ?" if local else "sender NOT LIKE ?"
-        where_clauses.append(sender_clause)
-        params.append("%:" + self.hs.hostname)
-        sql = f"SELECT COUNT(*) FROM events WHERE {' AND '.join(where_clauses)}"
+    async def get_event_counts_for_metrics(self) -> Tuple[int, int, int, int, int, int]:
+        """
+        Returns the number of messages, events, and encrypted events in the database,
+        split by local and remote.
+        """
 
-        def _count(txn: LoggingTransaction) -> int:
-            txn.execute(sql, tuple(params))
-            (count,) = cast(Tuple[int], txn.fetchone())
-            return count
+        def _count(txn: LoggingTransaction) -> Tuple[int, int, int, int, int, int]:
+            sql = """
+                SELECT
+                COUNT(CASE WHEN type IN ('m.room.message', 'm.room.encrypted') AND sender LIKE ? THEN 1 END) AS local_message_count,
+                COUNT(CASE WHEN type IN ('m.room.message', 'm.room.encrypted') AND sender NOT LIKE ? THEN 1 END) AS remote_message_count,
+                COUNT(CASE WHEN sender LIKE ? THEN 1 END) AS local_event_count,
+                COUNT(CASE WHEN sender NOT LIKE ? THEN 1 END) AS remote_event_count,
+                COUNT(CASE WHEN type = 'm.room.encrypted' AND sender LIKE ? THEN 1 END) AS local_encrypted_count,
+                COUNT(CASE WHEN type = 'm.room.encrypted' AND sender NOT LIKE ? THEN 1 END) AS remote_encrypted_count
+            FROM events
+            """
+            txn.execute(sql, tuple(("%:" + self.hs.hostname,) * 6))
+            return cast(Tuple[int, int, int, int, int, int], txn.fetchone())
 
-        return await self.db_pool.runInteraction("count_events_for_metrics", _count)
-
-    async def set_messages_by_source_gauge(self) -> None:
-        local_count = await self._count_events(
-            event_types=["m.room.message", "m.room.encrypted"], local=True
-        )
-        messages_by_source_gauge.labels(source="local").set(local_count)
-        remote_count = await self._count_events(
-            event_types=["m.room.message", "m.room.encrypted"], local=False
-        )
-        messages_by_source_gauge.labels(source="remote").set(remote_count)
-
-    async def set_events_by_source_gauge(self) -> None:
-        local_count = await self._count_events(event_types=None, local=True)
-        events_by_source_gauge.labels(source="local").set(local_count)
-        remote_count = await self._count_events(event_types=None, local=False)
-        events_by_source_gauge.labels(source="remote").set(remote_count)
-
-    async def set_encrypted_events_by_source_gauge(self) -> None:
-        local_count = await self._count_events(
-            event_types=["m.room.encrypted"], local=True
-        )
-        encrypted_events_by_source_gauge.labels(source="local").set(local_count)
-        remote_count = await self._count_events(
-            event_types=["m.room.encrypted"], local=False
-        )
-        encrypted_events_by_source_gauge.labels(source="remote").set(remote_count)
+        return await self.db_pool.runInteraction("get_event_counts_for_metrics", _count)
