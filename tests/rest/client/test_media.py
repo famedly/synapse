@@ -2967,3 +2967,61 @@ class MediaUploadLimits(unittest.HomeserverTestCase):
         # This will succeed as the weekly limit has reset
         channel = self.upload_media(900)
         self.assertEqual(channel.code, 200)
+
+
+class LinkedMediaTestCase(unittest.HomeserverTestCase):
+    """
+    Test endpoints related to MSC3911: Linking Media to Events
+
+    Borrowed heavily from AuthenticatedMediaTestCase above
+    """
+    servlets = [
+        media.register_servlets,
+        login.register_servlets,
+        admin.register_servlets,
+    ]
+
+    def make_homeserver(self, reactor: MemoryReactor, clock: Clock) -> HomeServer:
+        config = self.default_config()
+
+        self.clock = clock
+        self.storage_path = self.mktemp()
+        self.media_store_path = self.mktemp()
+        os.mkdir(self.storage_path)
+        os.mkdir(self.media_store_path)
+        config["media_store_path"] = self.media_store_path
+        config["enable_authenticated_media"] = True
+        config.setdefault("experimental_features", {}).update({"msc3911_enabled": True})
+
+        return self.setup_test_homeserver(config=config)
+
+    def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
+        self.repo = hs.get_media_repository()
+        self.client = hs.get_federation_http_client()
+        self.store = hs.get_datastores().main
+        self.user_1 = self.register_user("user_1", "pass")
+        self.tok_1 = self.login("user_1", "pass")
+
+    def create_resource_dict(self) -> Dict[str, Resource]:
+        # To give the deprecated endpoints a chance
+        resources = super().create_resource_dict()
+        resources["/_matrix/media"] = self.hs.get_media_repository_resource()
+        return resources
+
+    def test_media_uploaded_is_accessible_by_original_user(self) -> None:
+        """
+        Test that directly uploading media is accessible by the originating user
+        """
+        # upload some local media with authentication on
+        channel = self.make_request(
+            "POST",
+            "_matrix/client/unstable/org.matrix.msc3911/media/upload?filename=test_png_upload",
+            SMALL_PNG,
+            self.tok_1,
+            shorthand=False,
+            content_type=b"image/png",
+            custom_headers=[("Content-Length", str(67))],
+        )
+        self.assertEqual(channel.code, 200)
+        res = channel.json_body.get("content_uri")
+
