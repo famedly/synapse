@@ -497,6 +497,9 @@ class ExperimentalConfig(Config):
             "msc3381_polls_enabled", False
         )
 
+        # MSC3911: Linking media to events.
+        self.msc3911_enabled: bool = experimental.get("msc3911_enabled", False)
+
         # MSC3912: Relation-based redactions.
         self.msc3912_enabled: bool = experimental.get("msc3912_enabled", False)
 

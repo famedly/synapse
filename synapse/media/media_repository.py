@@ -184,6 +184,8 @@ class MediaRepository:
             key=lambda limit: limit.time_period_ms, reverse=True
         )
 
+        self.media_attachment_enabled = self.hs.config.experimental.msc3911_enabled
+
     def _start_update_recently_accessed(self) -> Deferred:
         return run_as_background_process(
             "update_recently_accessed_media", self._update_recently_accessed
