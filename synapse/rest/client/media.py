@@ -355,7 +355,7 @@ class BaseUploadServlet(RestServlet):
 
 
 class UploadServlet(BaseUploadServlet):
-    PATTERNS = [re.compile("/_matrix/media/(r0|v3|v1)/upload$")]
+    PATTERNS = [re.compile("/_matrix/client/unstable/org.matrix.msc3911/media/upload$")]
 
     async def on_POST(self, request: SynapseRequest) -> None:
         requester = await self.auth.get_user_by_req(request)
@@ -383,7 +383,7 @@ class UploadServlet(BaseUploadServlet):
 class AsyncUploadServlet(BaseUploadServlet):
     PATTERNS = [
         re.compile(
-            "/_matrix/media/v3/upload/(?P<server_name>[^/]*)/(?P<media_id>[^/]*)$"
+            "/_matrix/client/unstable/org.matrix.msc3911/media/upload/(?P<server_name>[^/]*)/(?P<media_id>[^/]*)$"
         )
     ]
 
