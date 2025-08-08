@@ -42,6 +42,8 @@ from synapse.media._base import (
 )
 from synapse.media.media_storage import FileResponder, MediaStorage
 from synapse.storage.databases.main.media_repository import LocalMedia
+from synapse.types import Requester
+
 
 if TYPE_CHECKING:
     from synapse.media.media_repository import MediaRepository
@@ -270,6 +272,7 @@ class ThumbnailProvider:
         self.media_storage = media_storage
         self.store = hs.get_datastores().main
         self.dynamic_thumbnails = hs.config.media.dynamic_thumbnails
+        self.media_attachment_enabled = self.hs.config.experimental.msc3911_enabled
 
     async def respond_local_thumbnail(
         self,
@@ -327,6 +330,7 @@ class ThumbnailProvider:
         max_timeout_ms: int,
         for_federation: bool,
         allow_authenticated: bool = True,
+        requester: Optional[Requester] = None,
     ) -> None:
         media_info = await self.media_repo.get_local_media_info(
             request, media_id, max_timeout_ms
@@ -335,10 +339,12 @@ class ThumbnailProvider:
             return
 
         # if the media the thumbnail is generated from is authenticated, don't serve the
-        # thumbnail over an unauthenticated endpoint
-        if self.hs.config.media.enable_authenticated_media and not allow_authenticated:
-            if media_info.authenticated:
+        # thumbnail over an unauthenticated endpoint#
+        if self.hs.config.media.enable_authenticated_media:
+            if not allow_authenticated and media_info.authenticated:
                 raise NotFoundError()
+            if self.media_attachment_enabled and requester and requester.user.to_string() != media_info.user_id:
+                raise SynapseError(403, "", Codes.UNAUTHORIZED)
 
         # Once we've checked auth we can return early if the media is cached on
         # the client
