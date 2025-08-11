@@ -1,0 +1,3 @@
+ALTER TABLE local_media_repository
+ADD COLUMN restricted BOOLEAN NOT NULL DEFAULT FALSE;
+-- by using DEFAULT FALSE, the existing data should be backwards compatible
