@@ -218,12 +218,15 @@ class MediaRepository:
             self.recently_accessed_locals.add(media_id)
 
     @trace
-    async def create_media_id(self, auth_user: UserID) -> Tuple[str, int]:
+    async def create_media_id(
+        self, auth_user: UserID, restricted: bool = False
+    ) -> Tuple[str, int]:
         """Create and store a media ID for a local user and return the MXC URI and its
         expiration.
 
         Args:
             auth_user: The user_id of the uploader
+            restricted: If this is to be considered restricted media
 
         Returns:
             A tuple containing the MXC URI of the stored content and the timestamp at
@@ -235,6 +238,7 @@ class MediaRepository:
             media_id=media_id,
             time_now_ms=now,
             user_id=auth_user,
+            restricted=restricted,
         )
         return f"mxc://{self.server_name}/{media_id}", now + self.unused_expiration_time
 
@@ -300,6 +304,7 @@ class MediaRepository:
         content_length: int,
         auth_user: UserID,
         media_id: Optional[str] = None,
+        restricted: bool = False,
     ) -> MXCUri:
         """Create or update the content of the given media ID.
 
@@ -311,6 +316,7 @@ class MediaRepository:
             auth_user: The user_id of the uploader
             media_id: The media ID to update if provided, otherwise creates
                 new media ID.
+            restricted: Boolean for if the media is restricted per msc3911
 
         Returns:
             The mxc url of the stored content
@@ -373,6 +379,7 @@ class MediaRepository:
                 user_id=auth_user,
                 sha256=sha256,
                 quarantined_by="system" if should_quarantine else None,
+                restricted=restricted,
             )
         else:
             await self.store.update_local_media(
@@ -878,6 +885,10 @@ class MediaRepository:
             quarantined_by=None,
             authenticated=authenticated,
             sha256=sha256writer.hexdigest(),
+            # The "pre-msc3916" method for downloading over federation, restricted
+            # will always be false and attachments will always be None here
+            restricted=False,
+            attachments=None,
         )
 
     async def _federation_download_remote_file(
@@ -1011,6 +1022,9 @@ class MediaRepository:
             quarantined_by=None,
             authenticated=authenticated,
             sha256=sha256writer.hexdigest(),
+            # Update this when the federation responses are updated
+            restricted=False,
+            attachments=None,
         )
 
     def _get_thumbnail_requirements(
