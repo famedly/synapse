@@ -44,7 +44,7 @@ from twisted.web.http_headers import Headers
 from twisted.web.iweb import UNKNOWN_LENGTH, IResponse
 from twisted.web.resource import Resource
 
-from synapse.api.errors import HttpResponseException
+from synapse.api.errors import Codes, HttpResponseException
 from synapse.api.ratelimiting import Ratelimiter
 from synapse.config.oembed import OEmbedEndpointConfig
 from synapse.http.client import MultipartResponse
@@ -2967,3 +2967,87 @@ class MediaUploadLimits(unittest.HomeserverTestCase):
         # This will succeed as the weekly limit has reset
         channel = self.upload_media(900)
         self.assertEqual(channel.code, 200)
+
+
+class UnrestrictedMediaUploadTestCase(unittest.HomeserverTestCase):
+    """
+    This test case simulates a homeserver with media create and upload endpoints are
+    limited when `msc3911_unrestricted_media_upload_disabled` is configured to be True.
+    """
+
+    extra_config = {
+        "experimental_features": {"msc3911_unrestricted_media_upload_disabled": True}
+    }
+    servlets = [
+        media.register_servlets,
+        login.register_servlets,
+        admin.register_servlets,
+    ]
+
+    def make_homeserver(self, reactor: MemoryReactor, clock: Clock) -> HomeServer:
+        config = self.default_config()
+        config.update(self.extra_config)
+        return self.setup_test_homeserver(config=config)
+
+    def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
+        self.media_repo = hs.get_media_repository_resource()
+        self.register_user("testuser", "testpass")
+        self.tok = self.login("testuser", "testpass")
+
+    def create_resource_dict(self) -> dict[str, Resource]:
+        resources = super().create_resource_dict()
+        resources["/_matrix/media"] = self.hs.get_media_repository_resource()
+        return resources
+
+    def test_disable_unrestricted_media_upload_post(self) -> None:
+        """
+        Tests that the upload servlet raises an error when unrestricted media upload is disabled.
+        """
+        channel = self.make_request(
+            "POST",
+            "/_matrix/media/v3/upload?filename=test_png_upload",
+            SMALL_PNG,
+            access_token=self.tok,
+            shorthand=False,
+            content_type=b"image/png",
+            custom_headers=[("Content-Length", str(67))],
+        )
+        self.assertEqual(channel.code, 403)
+        self.assertEqual(channel.json_body["errcode"], Codes.FORBIDDEN)
+        self.assertEqual(
+            channel.json_body["error"], "Unrestricted media upload is disabled"
+        )
+
+    def test_disable_unrestricted_media_upload_put(self) -> None:
+        """
+        Tests that the upload servlet raises an error when unrestricted media upload is disabled.
+        """
+        channel = self.make_request(
+            "PUT",
+            f"/_matrix/media/v3/upload/{self.hs.hostname}/test_png_upload",
+            content=b"dummy file content",
+            content_type=b"image/png",
+            access_token=self.tok,
+        )
+        self.assertEqual(channel.code, 403)
+        self.assertEqual(channel.json_body["errcode"], Codes.FORBIDDEN)
+        self.assertEqual(
+            channel.json_body["error"], "Unrestricted media upload is disabled"
+        )
+
+    def test_disable_unrestricted_media_upload_create(self) -> None:
+        """
+        Tests that the create servlet raises an error when unrestricted media upload is disabled.
+        """
+        channel = self.make_request(
+            "POST",
+            f"/_matrix/media/v1/create/{self.hs.hostname}/test_png_upload",
+            content=b"dummy file content",
+            content_type=b"image/png",
+            access_token=self.tok,
+        )
+        self.assertEqual(channel.code, 403)
+        self.assertEqual(channel.json_body["errcode"], Codes.FORBIDDEN)
+        self.assertEqual(
+            channel.json_body["error"], "Unrestricted media creation is disabled"
+        )

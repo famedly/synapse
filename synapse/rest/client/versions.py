@@ -177,6 +177,10 @@ class VersionsRestServlet(RestServlet):
                     "uk.tcpip.msc4133": self.config.experimental.msc4133_enabled,
                     # MSC4155: Invite filtering
                     "org.matrix.msc4155": self.config.experimental.msc4155_enabled,
+                    # MSC3911: Linking Media to Events
+                    "org.matrix.msc3911": self.config.experimental.msc3911_enabled,
+                    # MSC3911: Unrestricted Media Upload
+                    "org.matrix.msc3911.unrestricted_media_upload_disabled": self.config.experimental.msc3911_unrestricted_media_upload_disabled,
                 },
             },
         )
