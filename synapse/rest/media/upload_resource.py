@@ -53,7 +53,6 @@ class BaseUploadServlet(RestServlet):
         self._media_repository_callbacks = (
             hs.get_module_api_callbacks().media_repository
         )
-        self.msc3911_enabled = hs.config.experimental.msc3911_enabled
         self.msc3911_unrestricted_media_upload_disabled = (
             hs.config.experimental.msc3911_unrestricted_media_upload_disabled
         )

@@ -53,7 +53,6 @@ class CreateResource(RestServlet):
             clock=self.clock,
             cfg=hs.config.ratelimiting.rc_media_create,
         )
-        self.msc3911_enabled = hs.config.experimental.msc3911_enabled
         self.msc3911_unrestricted_media_upload_disabled = (
             hs.config.experimental.msc3911_unrestricted_media_upload_disabled
         )
