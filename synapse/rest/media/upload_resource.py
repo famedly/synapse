@@ -53,6 +53,9 @@ class BaseUploadServlet(RestServlet):
         self._media_repository_callbacks = (
             hs.get_module_api_callbacks().media_repository
         )
+        self.msc3911_unrestricted_media_upload_disabled = (
+            hs.config.experimental.msc3911_unrestricted_media_upload_disabled
+        )
 
     async def _get_file_metadata(
         self, request: SynapseRequest, user_id: str
@@ -113,6 +116,45 @@ class UploadServlet(BaseUploadServlet):
     PATTERNS = [re.compile("/_matrix/media/(r0|v3|v1)/upload$")]
 
     async def on_POST(self, request: SynapseRequest) -> None:
+        if self.msc3911_unrestricted_media_upload_disabled:
+            raise SynapseError(
+                403,
+                "Unrestricted media upload is disabled",
+                errcode=Codes.FORBIDDEN,
+            )
+
+        requester = await self.auth.get_user_by_req(request)
+        content_length, upload_name, media_type = await self._get_file_metadata(
+            request, requester.user.to_string()
+        )
+
+        try:
+            content: IO = request.content  # type: ignore
+            content_uri = await self.media_repo.create_or_update_content(
+                media_type, upload_name, content, content_length, requester.user
+            )
+        except SpamMediaException:
+            # For uploading of media we want to respond with a 400, instead of
+            # the default 404, as that would just be confusing.
+            raise SynapseError(400, "Bad content")
+
+        logger.info("Uploaded content with URI '%s'", content_uri)
+
+        respond_with_json(
+            request, 200, {"content_uri": str(content_uri)}, send_cors=True
+        )
+
+
+class UnstableUploadResource(BaseUploadServlet):
+    """
+    This is an unstable API endpoint for uploading media.
+    This is equivalent to the existing upload endpoint, but uploads restricted media in
+    a pending state until the media is attached.
+    """
+
+    PATTERNS = [re.compile("/_matrix/client/unstable/org.matrix.msc3911/media/upload$")]
+
+    async def on_POST(self, request: SynapseRequest) -> None:
         requester = await self.auth.get_user_by_req(request)
         content_length, upload_name, media_type = await self._get_file_metadata(
             request, requester.user.to_string()
@@ -139,6 +181,71 @@ class AsyncUploadServlet(BaseUploadServlet):
     PATTERNS = [
         re.compile(
             "/_matrix/media/v3/upload/(?P<server_name>[^/]*)/(?P<media_id>[^/]*)$"
+        )
+    ]
+
+    async def on_PUT(
+        self, request: SynapseRequest, server_name: str, media_id: str
+    ) -> None:
+        if self.msc3911_unrestricted_media_upload_disabled:
+            raise SynapseError(
+                403,
+                "Unrestricted media upload is disabled",
+                errcode=Codes.FORBIDDEN,
+            )
+
+        requester = await self.auth.get_user_by_req(request)
+
+        if server_name != self.server_name:
+            raise SynapseError(
+                404,
+                "Non-local server name specified",
+                errcode=Codes.NOT_FOUND,
+            )
+
+        lock = await self.store.try_acquire_lock(_UPLOAD_MEDIA_LOCK_NAME, media_id)
+        if not lock:
+            raise SynapseError(
+                409,
+                "Media ID cannot be overwritten",
+                errcode=Codes.CANNOT_OVERWRITE_MEDIA,
+            )
+
+        async with lock:
+            await self.media_repo.verify_can_upload(media_id, requester.user)
+            content_length, upload_name, media_type = await self._get_file_metadata(
+                request, requester.user.to_string()
+            )
+
+            try:
+                content: IO = request.content  # type: ignore
+                await self.media_repo.create_or_update_content(
+                    media_type,
+                    upload_name,
+                    content,
+                    content_length,
+                    requester.user,
+                    media_id=media_id,
+                )
+            except SpamMediaException:
+                # For uploading of media we want to respond with a 400, instead of
+                # the default 404, as that would just be confusing.
+                raise SynapseError(400, "Bad content")
+
+            logger.info("Uploaded content for media ID %r", media_id)
+            respond_with_json(request, 200, {}, send_cors=True)
+
+
+class UnstableAsyncUploadServlet(BaseUploadServlet):
+    """
+    This is an unstable API endpoint for async media uploading.
+    This is equivalent to the existing endpoint, but uploads restricted media in
+    a pending state until the media is attached.
+    """
+
+    PATTERNS = [
+        re.compile(
+            "/_matrix/client/unstable/org.matrix.msc3911/media/upload/(?P<server_name>[^/]*)/(?P<media_id>[^/]*)$"
         )
     ]
 

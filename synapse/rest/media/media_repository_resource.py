@@ -25,11 +25,16 @@ from synapse.config._base import ConfigError
 from synapse.http.server import HttpServer, JsonResource
 
 from .config_resource import MediaConfigResource
-from .create_resource import CreateResource
+from .create_resource import CreateResource, UnstableCreateResource
 from .download_resource import DownloadResource
 from .preview_url_resource import PreviewUrlResource
 from .thumbnail_resource import ThumbnailResource
-from .upload_resource import AsyncUploadServlet, UploadServlet
+from .upload_resource import (
+    AsyncUploadServlet,
+    UnstableAsyncUploadServlet,
+    UnstableUploadResource,
+    UploadServlet,
+)
 
 if TYPE_CHECKING:
     from synapse.server import HomeServer
@@ -99,6 +104,10 @@ class MediaRepositoryResource(JsonResource):
 
         # Note that many of these should not exist as v1 endpoints, but empirically
         # a lot of traffic still goes to them.
+        if hs.config.experimental.msc3911_enabled:
+            UnstableCreateResource(hs, media_repo).register(http_server)
+            UnstableUploadResource(hs, media_repo).register(http_server)
+            UnstableAsyncUploadServlet(hs, media_repo).register(http_server)
         CreateResource(hs, media_repo).register(http_server)
         UploadServlet(hs, media_repo).register(http_server)
         AsyncUploadServlet(hs, media_repo).register(http_server)
