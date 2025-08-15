@@ -23,7 +23,7 @@ from http import HTTPStatus
 from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple, Union
 from unittest.mock import AsyncMock, Mock
 
-from twisted.test.proto_helpers import MemoryReactor
+from twisted.internet.testing import MemoryReactor
 
 from synapse.api.constants import EventTypes, LoginType, Membership
 from synapse.api.errors import Codes, SynapseError

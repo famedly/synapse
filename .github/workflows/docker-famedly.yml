@@ -22,6 +22,7 @@ jobs:
     with:
       push: ${{ github.event_name != 'pull_request' }} # Always build, don't publish on pull requests
       registry: ghcr.io
+      registry_user: ${{ github.repository_owner }}
       image_name: famedly/synapse
       file: docker/Dockerfile
       # tag our new base image. If given a git tag of(as an example): "v1.234.5_6", this will
@@ -68,7 +69,7 @@ jobs:
     uses: famedly/github-workflows/.github/workflows/docker.yml@jason-docker-namespace
     with:
       push: ${{ github.event_name != 'pull_request' }} # Always build, don't publish on pull requests
-      registry_user: famedly
+      registry_user: ${{ vars.REGISTRY_USER }}
       registry:  registry.famedly.net/docker-oss
       image_name: synapse
       file: docker/Dockerfile-famedly
