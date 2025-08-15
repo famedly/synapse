@@ -9,6 +9,12 @@ Note: This release includes the security fixes from `1.135.2` and `1.136.0rc2`, 
 
 
 
+### Famedly additions for v1.136.0_1
+
+- chore: Remove matrix-synapse-ldap3 from Famedly module docker layer (Jason Little)
+- fix: Allow a user to GDPR erase their profile data even when changing profile data is disabled in configuration (Jason Little)
+- chore: Update mod packs to include invite checker v0.4.9
+
 # Synapse 1.136.0rc2 (2025-08-11)
 
 - Update MSC4293 redaction logic for room v12. ([\#80](https://github.com/element-hq/synapse/issues/80))
