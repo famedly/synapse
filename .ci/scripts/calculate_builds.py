@@ -54,6 +54,7 @@ all_mod_pack_versions = {
     "mod012": {"sic-version": "0.4.7", "sta-version": "0.11.0"},
     "mod013": {"sic-version": "0.4.7", "sta-version": "0.12.0"},
     "mod014": {"sic-version": "0.4.8", "sta-version": "0.12.0"},
+    "mod015": {"sic-version": "0.4.9", "sta-version": "0.12.0"},
 }
 
 # Adjust this section to decide what gets built and layered on top
