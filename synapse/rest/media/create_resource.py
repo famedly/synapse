@@ -23,7 +23,7 @@ import logging
 import re
 from typing import TYPE_CHECKING
 
-from synapse.api.errors import LimitExceededError
+from synapse.api.errors import Codes, LimitExceededError, SynapseError
 from synapse.api.ratelimiting import Ratelimiter
 from synapse.http.server import respond_with_json
 from synapse.http.servlet import RestServlet
@@ -53,8 +53,18 @@ class CreateResource(RestServlet):
             clock=self.clock,
             cfg=hs.config.ratelimiting.rc_media_create,
         )
+        self.msc3911_unrestricted_media_upload_disabled = (
+            hs.config.experimental.msc3911_unrestricted_media_upload_disabled
+        )
 
     async def on_POST(self, request: SynapseRequest) -> None:
+        if self.msc3911_unrestricted_media_upload_disabled:
+            raise SynapseError(
+                403,
+                "Unrestricted media creation is disabled",
+                errcode=Codes.FORBIDDEN,
+            )
+
         requester = await self.auth.get_user_by_req(request)
 
         # If the create media requests for the user are over the limit, drop them.
