@@ -25,6 +25,10 @@ Two patched Synapse releases are now available:
 
 
 
+### Famedly additions for v1.135.2_2
+
+- chore: Update mod packs to include fixed invite checker `v0.4.8` (Jason Little)
+
 # Synapse 1.135.0 (2025-08-01)
 
 No significant changes since 1.135.0rc2.
