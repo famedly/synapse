@@ -7,6 +7,13 @@ name: Docker
 on:
   push:
     tags: ["v*.*.*_*"]
+  workflow_dispatch:
+    # Manually trigger to build and push docker image with modules to nightly Harbor registry.
+    inputs:
+      tag:
+        description: 'Provide tag name with work package. Tag must only contain ASCII letters, digits, underscores, periods, or dashes.'
+        required: true
+        type: string
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -59,6 +66,18 @@ jobs:
     outputs:
       build_matrix: ${{ steps.get-matrix.outputs.build_matrix }}
 
+  validate_image_tag:
+    # Validate the tag input for workflow_dispatch.
+    if: ${{ github.event_name == 'workflow_dispatch' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Validate Image Tag
+        run: |
+          if ! [[ "${{ github.event.inputs.tag }}" =~ ^[a-zA-Z0-9._-]+$ ]]; then
+            echo "Error: tag must only contain ASCII letters, digits, underscores, periods, or dashes."
+            exit 1
+          fi
+
   production-build:
     if: ${{ !cancelled() && !failure() }} # Allow for stopping the build job
     needs:
@@ -70,7 +89,7 @@ jobs:
     with:
       push: ${{ github.event_name != 'pull_request' }} # Always build, don't publish on pull requests
       registry_user: ${{ vars.REGISTRY_USER }}
-      registry:  registry.famedly.net/docker-oss
+      registry: ${{ github.event_name == 'workflow_dispatch' && 'registry.famedly.net/docker-nightly' || 'registry.famedly.net/docker-oss' }}
       image_name: synapse
       file: docker/Dockerfile-famedly
       # Notice that there is a leading 'sha-' in front of the actual sha, as that is
@@ -82,5 +101,6 @@ jobs:
       # Tag the production image used for famedly deployments.
       tags: |
         type=ref,event=tag,suffix=-${{ matrix.job.mod_pack_name }}
+        type=raw,enable=${{ github.event_name == 'workflow_dispatch' }},value=${{ matrix.job.mod_pack_name }}-${{ github.event.inputs.tag }}
       flavor: latest=false
     secrets: inherit
