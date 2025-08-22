@@ -19,8 +19,10 @@
 # [This file includes modifications made by New Vector Limited]
 #
 #
+import json
 import logging
 from enum import Enum
+from http import HTTPStatus
 from typing import (
     TYPE_CHECKING,
     Collection,
@@ -35,6 +37,7 @@ from typing import (
 import attr
 
 from synapse.api.constants import Direction
+from synapse.api.errors import Codes, SynapseError
 from synapse.logging.opentracing import trace
 from synapse.media._base import ThumbnailInfo
 from synapse.storage._base import SQLBaseStore
@@ -55,6 +58,23 @@ BG_UPDATE_REMOVE_MEDIA_REPO_INDEX_WITHOUT_METHOD_2 = (
 logger = logging.getLogger(__name__)
 
 
+@attr.s(slots=True, frozen=True, auto_attribs=True, kw_only=True)
+class MediaRestrictions:
+    """
+    Per MSC3911: Media can be restricted by either 'event_id' or 'profile_user_id' but
+    never both. Having neither represents an unknown restriction exists
+
+    This needs a validator of some sort
+
+    Attributes:
+        event_id:
+        profile_user_id:
+    """
+
+    event_id: Optional[str] = None
+    profile_user_id: Optional[UserID] = None
+
+
 @attr.s(slots=True, frozen=True, auto_attribs=True)
 class LocalMedia:
     media_id: str
@@ -69,6 +89,8 @@ class LocalMedia:
     user_id: Optional[str]
     authenticated: Optional[bool]
     sha256: Optional[str]
+    restricted: bool
+    attachments: Optional[MediaRestrictions]
 
 
 @attr.s(slots=True, frozen=True, auto_attribs=True)
@@ -84,6 +106,8 @@ class RemoteMedia:
     quarantined_by: Optional[str]
     authenticated: Optional[bool]
     sha256: Optional[str]
+    restricted: bool
+    attachments: Optional[MediaRestrictions]
 
 
 @attr.s(slots=True, frozen=True, auto_attribs=True)
@@ -247,12 +271,19 @@ class MediaRepositoryStore(MediaRepositoryBackgroundUpdateStore):
                 "user_id",
                 "authenticated",
                 "sha256",
+                "restricted",
             ),
             allow_none=True,
             desc="get_local_media",
         )
         if row is None:
             return None
+        restriction_info = None
+        if bool(row[11]):
+            restriction_info = await self.get_media_restrictions(
+                self.server_name, media_id
+            )
+
         return LocalMedia(
             media_id=media_id,
             media_type=row[0],
@@ -266,6 +297,8 @@ class MediaRepositoryStore(MediaRepositoryBackgroundUpdateStore):
             user_id=row[8],
             authenticated=row[9],
             sha256=row[10],
+            restricted=bool(row[11]),
+            attachments=restriction_info,
         )
 
     async def get_local_media_by_user_paginate(
@@ -312,7 +345,7 @@ class MediaRepositoryStore(MediaRepositoryBackgroundUpdateStore):
 
             sql = """
                 SELECT
-                    media_id,
+                    lmr.media_id,
                     media_type,
                     media_length,
                     upload_name,
@@ -323,17 +356,24 @@ class MediaRepositoryStore(MediaRepositoryBackgroundUpdateStore):
                     safe_from_quarantine,
                     user_id,
                     authenticated,
-                    sha256
-                FROM local_media_repository
+                    sha256,
+                    restricted,
+                    ma.restrictions_json->'restrictions'->>'event_id' AS event_id,
+                    ma.restrictions_json->'restrictions'->>'event_id' AS profile_user_id
+                FROM local_media_repository AS lmr
+                -- a LEFT JOIN allows values from the right table to be NULL if non-existent
+                LEFT JOIN media_attachments AS ma ON lmr.media_id = ma.media_id
+                AND ma.server_name = ?
                 WHERE user_id = ?
-                ORDER BY {order_by_column} {order}, media_id ASC
+                ORDER BY lmr.{order_by_column} {order}, lmr.media_id ASC
                 LIMIT ? OFFSET ?
             """.format(
                 order_by_column=order_by_column,
                 order=order,
             )
 
-            args += [limit, start]
+            # Reset the args, instead of playing prepend and append games
+            args = [self.server_name, user_id, limit, start]
             txn.execute(sql, args)
             media = [
                 LocalMedia(
@@ -349,6 +389,12 @@ class MediaRepositoryStore(MediaRepositoryBackgroundUpdateStore):
                     user_id=row[9],
                     authenticated=row[10],
                     sha256=row[11],
+                    restricted=bool(row[12]),
+                    attachments=MediaRestrictions(
+                        event_id=row[13], profile_user_id=row[14]
+                    )
+                    if bool(row[12])
+                    else None,
                 )
                 for row in txn
             ]
@@ -451,6 +497,7 @@ class MediaRepositoryStore(MediaRepositoryBackgroundUpdateStore):
         media_id: str,
         time_now_ms: int,
         user_id: UserID,
+        restricted: bool = False,
     ) -> None:
         if self.hs.config.media.enable_authenticated_media:
             authenticated = True
@@ -464,6 +511,7 @@ class MediaRepositoryStore(MediaRepositoryBackgroundUpdateStore):
                 "created_ts": time_now_ms,
                 "user_id": user_id.to_string(),
                 "authenticated": authenticated,
+                "restricted": restricted,
             },
             desc="store_local_media_id",
         )
@@ -480,6 +528,7 @@ class MediaRepositoryStore(MediaRepositoryBackgroundUpdateStore):
         url_cache: Optional[str] = None,
         sha256: Optional[str] = None,
         quarantined_by: Optional[str] = None,
+        restricted: bool = False,
     ) -> None:
         if self.hs.config.media.enable_authenticated_media:
             authenticated = True
@@ -499,6 +548,7 @@ class MediaRepositoryStore(MediaRepositoryBackgroundUpdateStore):
                 "authenticated": authenticated,
                 "sha256": sha256,
                 "quarantined_by": quarantined_by,
+                "restricted": restricted,
             },
             desc="store_local_media",
         )
@@ -699,12 +749,17 @@ class MediaRepositoryStore(MediaRepositoryBackgroundUpdateStore):
                 "quarantined_by",
                 "authenticated",
                 "sha256",
+                "restricted",
             ),
             allow_none=True,
             desc="get_cached_remote_media",
         )
         if row is None:
             return row
+        restriction_info = None
+        if row[9] is not None and row[9] is True:
+            restriction_info = await self.get_media_restrictions(origin, media_id)
+
         return RemoteMedia(
             media_origin=origin,
             media_id=media_id,
@@ -717,6 +772,8 @@ class MediaRepositoryStore(MediaRepositoryBackgroundUpdateStore):
             quarantined_by=row[6],
             authenticated=row[7],
             sha256=row[8],
+            restricted=bool(row[9]),
+            attachments=restriction_info,
         )
 
     async def store_cached_remote_media(
@@ -729,6 +786,7 @@ class MediaRepositoryStore(MediaRepositoryBackgroundUpdateStore):
         upload_name: Optional[str],
         filesystem_id: str,
         sha256: Optional[str],
+        restricted: bool = False,
     ) -> None:
         if self.hs.config.media.enable_authenticated_media:
             authenticated = True
@@ -748,6 +806,7 @@ class MediaRepositoryStore(MediaRepositoryBackgroundUpdateStore):
                 "last_access_ts": time_now_ms,
                 "authenticated": authenticated,
                 "sha256": sha256,
+                "restricted": restricted,
             },
             desc="store_cached_remote_media",
         )
@@ -1070,3 +1129,72 @@ class MediaRepositoryStore(MediaRepositoryBackgroundUpdateStore):
             "get_media_uploaded_size_for_user",
             _get_media_uploaded_size_for_user_txn,
         )
+
+    async def get_media_restrictions(
+        self, server_name: str, media_id: str
+    ) -> Optional[MediaRestrictions]:
+        """
+        Retrieve the restrictions json on a given media_id. Will return None if the
+        media has not been attached to a restrictable reference yet. If all fields return None,
+        the restrictable reference is unknown.
+
+        Currently supported are:
+            event_id
+            profile_user_id
+        """
+        # The '->' and '->>' operators are compatible with both Postgres +9.5 and SQLite +3.38.0
+        sql = """
+        SELECT restrictions_json->'restrictions'->>'event_id' AS event_id, restrictions_json->'restrictions'->>'profile_user_id' AS profile_user_id
+        FROM media_attachments
+        WHERE server_name = ? AND media_id = ?
+        """
+        args = [server_name, media_id]
+        row: List[Tuple[Optional[str], Optional[str]]] = await self.db_pool.execute(
+            "get_media_restrictions_v2", sql, *args
+        )
+
+        # There should only ever be a single row. This is enforced by the constraint on
+        # the table to only have a single row per server_name/media_id combo
+        if row:
+            event_id = row[0][0]
+            # Because the UserID object can be None, the 'to_string()' method may not exist
+            profile_user_id = UserID.from_string(row[0][1]) if row[0][1] else None
+            return MediaRestrictions(event_id=event_id, profile_user_id=profile_user_id)
+
+        return None
+
+    async def set_media_restrictions(
+        self,
+        server_name: str,
+        media_id: str,
+        media_restrictions_json: JsonDict,
+    ) -> None:
+        """
+        Add the media restrictions to the database
+
+        Args:
+           server_name:
+           media_id:
+           media_restrictions_json: The media restrictions as dict
+
+        Raises:
+            SynapseError if the media already has restrictions on it
+        """
+        try:
+            await self.db_pool.simple_insert(
+                "media_attachments",
+                {
+                    "server_name": server_name,
+                    "media_id": media_id,
+                    "restrictions_json": json.dumps(media_restrictions_json),
+                },
+            )
+        except self.db_pool.engine.module.IntegrityError:
+            # For sqlite, a unique constraint violation is an integrity error. For
+            # psycopg2, a UniqueViolation is a subclass of IntegrityError, so this
+            # covers both.
+            raise SynapseError(
+                HTTPStatus.BAD_REQUEST,
+                f"This media, '{media_id}' already has restrictions set.",
+                errcode=Codes.INVALID_PARAM,
+            )

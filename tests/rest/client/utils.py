@@ -607,6 +607,33 @@ class RestHelper:
 
         return channel.json_body
 
+    def create_media_id_v1(
+        self,
+        tok: str,
+        expect_code: int = HTTPStatus.OK,
+    ) -> JsonDict:
+        """Create the media ID that can be uploaded to later
+        Args:
+            tok: The user token to use during the upload
+            expect_code: The return code to expect from attempting to upload the media
+        """
+        path = "/_matrix/media/v1/create"
+        channel = make_request(
+            self.reactor,
+            self.site,
+            "POST",
+            path,
+            access_token=tok,
+        )
+
+        assert channel.code == expect_code, "Expected: %d, got: %d, resp: %r" % (
+            expect_code,
+            channel.code,
+            channel.result["body"],
+        )
+
+        return channel.json_body
+
     def whoami(
         self,
         access_token: str,
