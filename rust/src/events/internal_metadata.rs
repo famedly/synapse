@@ -58,12 +58,17 @@ enum EventInternalMetadataData {
     TxnId(Box<str>),
     TokenId(i64),
     DeviceId(Box<str>),
+    MediaReferences(Vec<String>),
 }
 
 impl EventInternalMetadataData {
     /// Convert the field to its name and python object.
     fn to_python_pair<'a>(&self, py: Python<'a>) -> (&'a Bound<'a, PyString>, Bound<'a, PyAny>) {
         match self {
+            EventInternalMetadataData::MediaReferences(o) => (
+                pyo3::intern!(py, "media_references"),
+                o.into_pyobject(py).unwrap().into_any(),
+            ),
             EventInternalMetadataData::OutOfBandMembership(o) => (
                 pyo3::intern!(py, "out_of_band_membership"),
                 o.into_pyobject(py)
@@ -128,6 +133,11 @@ impl EventInternalMetadataData {
         let key_str: PyBackedStr = key.extract()?;
 
         let e = match &*key_str {
+            "media_references" => EventInternalMetadataData::MediaReferences(
+                value
+                    .extract()
+                    .with_context(|| format!("'{key_str}' has invalid type"))?,
+            ),
             "out_of_band_membership" => EventInternalMetadataData::OutOfBandMembership(
                 value
                     .extract()
@@ -468,5 +478,15 @@ impl EventInternalMetadata {
     #[setter]
     fn set_device_id(&mut self, obj: String) {
         set_property!(self, DeviceId, obj.into_boxed_str());
+    }
+
+    /// The media references for the restrictions being set for this event, if any.
+    #[getter]
+    fn get_media_references(&self) -> Option<&Vec<String>> {
+        get_property_opt!(self, MediaReferences)
+    }
+    #[setter]
+    fn set_media_references(&mut self, obj: Vec<String>) {
+        set_property!(self, MediaReferences, obj);
     }
 }
