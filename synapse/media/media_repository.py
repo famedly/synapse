@@ -407,7 +407,7 @@ class MediaRepository:
             send_cors=True,
         )
 
-    async def get_local_media_info(
+    async def get_local_media_info_for_request(
         self, request: SynapseRequest, media_id: str, max_timeout_ms: int
     ) -> Optional[LocalMedia]:
         """Gets the info dictionary for given local media ID. If the media has
@@ -486,7 +486,9 @@ class MediaRepository:
         Returns:
             Resolves once a response has successfully been written to request
         """
-        media_info = await self.get_local_media_info(request, media_id, max_timeout_ms)
+        media_info = await self.get_local_media_info_for_request(
+            request, media_id, max_timeout_ms
+        )
         if not media_info:
             return
 
