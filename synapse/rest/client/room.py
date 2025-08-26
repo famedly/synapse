@@ -306,6 +306,57 @@ class RoomStateEventRestServlet(RestServlet):
         if txn_id:
             set_tag("txn_id", txn_id)
 
+        media_info_for_attachment: set[LocalMedia] = set()
+        if self.enable_restricted_media:
+            # twisted.web.server.Request.args is incorrectly defined as Optional[Any]
+            args: Dict[bytes, List[bytes]] = request.args  # type: ignore
+            _attach_media_list = parse_strings_from_args(
+                args, "org.matrix.msc3911.attach_media", default=[]
+            )
+            attach_media_set: set[MXCUri] = set()
+
+            for unsafe_mxc in _attach_media_list:
+                # Deduplicate multiple attach media requests with the same MXC
+                # It may be that the mxc provided does not have the correct scheme
+                # attached, coax it into the correct form
+                if not unsafe_mxc.startswith("mxc://"):
+                    unsafe_mxc = f"mxc://{unsafe_mxc}"
+                attach_media_set.add(MXCUri.from_str(unsafe_mxc))
+
+            # Check each mxc passed in and raise 400, INVALID_PARAM for:
+            # * being non-existent
+            # * not being restricted
+            # * being from the wrong user
+
+            # XXX: Do we need to watch for race-y conditions where the local media info
+            #  will have changed between now and when it is persisted in a moment?
+            for mxc_uri in attach_media_set:
+                media_info = await self.media_repository.get_local_media_info(
+                    mxc_uri.media_id,
+                )
+
+                if media_info is None:
+                    raise SynapseError(
+                        HTTPStatus.BAD_REQUEST,
+                        f"The media attachment request is invalid as the media '{mxc_uri.media_id}' does not exist",
+                        Codes.INVALID_PARAM,
+                    )
+
+                if not media_info.restricted:
+                    raise SynapseError(
+                        HTTPStatus.BAD_REQUEST,
+                        f"The media attachment request is invalid as the media '{mxc_uri.media_id}' is not restricted",
+                        Codes.INVALID_PARAM,
+                    )
+
+                if media_info.user_id != requester.user.to_string():
+                    raise SynapseError(
+                        HTTPStatus.BAD_REQUEST,
+                        f"The media attachment request from '{requester.user.to_string()}' is invalid as the media '{mxc_uri}' was uploaded by someone else, '{media_info.user_id}'",
+                        Codes.INVALID_PARAM,
+                    )
+                media_info_for_attachment.add(media_info)
+
         content = parse_json_object_from_request(request)
 
         is_requester_admin = await self.auth.is_server_admin(requester)
@@ -360,6 +411,7 @@ class RoomStateEventRestServlet(RestServlet):
                     action=membership,
                     content=content,
                     origin_server_ts=origin_server_ts,
+                    media_info_for_attachment=media_info_for_attachment,
                 )
             else:
                 event_dict: JsonDict = {
@@ -379,7 +431,10 @@ class RoomStateEventRestServlet(RestServlet):
                     event,
                     _,
                 ) = await self.event_creation_handler.create_and_send_nonmember_event(
-                    requester, event_dict, txn_id=txn_id
+                    requester,
+                    event_dict,
+                    txn_id=txn_id,
+                    media_info_for_attachment=media_info_for_attachment,
                 )
                 event_id = event.event_id
         except ShadowBanError:
@@ -418,6 +473,58 @@ class RoomSendEventRestServlet(TransactionRestServlet):
         txn_id: Optional[str],
     ) -> Tuple[int, JsonDict]:
         content = parse_json_object_from_request(request)
+        # Requirement is only to do this for PUT, but the POST also uses the same
+        # abstraction. It appears the PUT variant includes a txn_id, perhaps use that?
+        media_info_for_attachment: set[LocalMedia] = set()
+        if self.enable_restricted_media:
+            # twisted.web.server.Request.args is incorrectly defined as Optional[Any]
+            args: Dict[bytes, List[bytes]] = request.args  # type: ignore
+            _attach_media_list = parse_strings_from_args(
+                args, "org.matrix.msc3911.attach_media", default=[]
+            )
+            attach_media_set: set[MXCUri] = set()
+
+            for unsafe_mxc in _attach_media_list:
+                # Deduplicate multiple attach media requests with the same MXC
+                # It may be that the mxc provided does not have the correct scheme
+                # attached, coax it into the correct form
+                if not unsafe_mxc.startswith("mxc://"):
+                    unsafe_mxc = f"mxc://{unsafe_mxc}"
+                attach_media_set.add(MXCUri.from_str(unsafe_mxc))
+
+            # Check each mxc passed in and raise 400, INVALID_PARAM for:
+            # * being non-existent
+            # * not being restricted
+            # * being from the wrong user
+
+            # XXX: Do we need to watch for race-y conditions where the local media info
+            #  will have changed between now and when it is persisted in a moment?
+            for mxc_uri in attach_media_set:
+                media_info = await self.media_repository.get_local_media_info(
+                    mxc_uri.media_id,
+                )
+
+                if media_info is None:
+                    raise SynapseError(
+                        HTTPStatus.BAD_REQUEST,
+                        f"The media attachment request is invalid as the media '{mxc_uri.media_id}' does not exist",
+                        Codes.INVALID_PARAM,
+                    )
+
+                if not media_info.restricted:
+                    raise SynapseError(
+                        HTTPStatus.BAD_REQUEST,
+                        f"The media attachment request is invalid as the media '{mxc_uri.media_id}' is not restricted",
+                        Codes.INVALID_PARAM,
+                    )
+
+                if media_info.user_id != requester.user.to_string():
+                    raise SynapseError(
+                        HTTPStatus.BAD_REQUEST,
+                        f"The media attachment request from '{requester.user.to_string()}' is invalid as the media '{mxc_uri}' was uploaded by someone else, '{media_info.user_id}'",
+                        Codes.INVALID_PARAM,
+                    )
+                media_info_for_attachment.add(media_info)
 
         origin_server_ts = None
         if requester.app_service:
@@ -454,7 +561,10 @@ class RoomSendEventRestServlet(TransactionRestServlet):
                 event,
                 _,
             ) = await self.event_creation_handler.create_and_send_nonmember_event(
-                requester, event_dict, txn_id=txn_id
+                requester,
+                event_dict,
+                txn_id=txn_id,
+                media_info_for_attachment=media_info_for_attachment,
             )
             event_id = event.event_id
         except ShadowBanError:
