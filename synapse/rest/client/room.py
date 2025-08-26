@@ -28,6 +28,7 @@ from http import HTTPStatus
 from typing import TYPE_CHECKING, Awaitable, Dict, List, Optional, Tuple
 from urllib import parse as urlparse
 
+from matrix_common.types.mxc_uri import MXCUri
 from prometheus_client.core import Histogram
 
 from twisted.web.server import Request
@@ -69,6 +70,7 @@ from synapse.metrics.background_process_metrics import run_as_background_process
 from synapse.rest.client._base import client_patterns
 from synapse.rest.client.transactions import HttpTransactionCache
 from synapse.state import CREATE_KEY, POWER_KEY
+from synapse.storage.databases.main.media_repository import LocalMedia
 from synapse.streams.config import PaginationConfig
 from synapse.types import JsonDict, Requester, StreamToken, ThirdPartyInstanceID, UserID
 from synapse.types.state import StateFilter
@@ -205,6 +207,9 @@ class RoomStateEventRestServlet(RestServlet):
         self.clock = hs.get_clock()
         self._max_event_delay_ms = hs.config.server.max_event_delay_ms
         self._spam_checker_module_callbacks = hs.get_module_api_callbacks().spam_checker
+        self.media_repository = hs.get_media_repository()
+        self.enable_restricted_media = hs.config.experimental.msc3911_enabled
+        self.server_name = hs.config.server.server_name
 
     def register(self, http_server: HttpServer) -> None:
         # /rooms/$roomid/state/$eventtype
@@ -395,6 +400,9 @@ class RoomSendEventRestServlet(TransactionRestServlet):
         self.delayed_events_handler = hs.get_delayed_events_handler()
         self.auth = hs.get_auth()
         self._max_event_delay_ms = hs.config.server.max_event_delay_ms
+        self.media_repository = hs.get_media_repository()
+        self.enable_restricted_media = hs.config.experimental.msc3911_enabled
+        self.server_name = hs.config.server.server_name
 
     def register(self, http_server: HttpServer) -> None:
         # /rooms/$roomid/send/$event_type[/$txn_id]
