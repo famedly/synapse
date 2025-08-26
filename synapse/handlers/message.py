@@ -1506,6 +1506,31 @@ class EventCreationHandler:
                         event.event_id,
                         prev_event.event_id,
                     )
+                    if media_restrictions:
+                        # Sort out what event_id's were part of the restrictions.
+                        existing_event_ids_from_media_restrictions = {
+                            res.event_id for res in media_restrictions
+                        }
+
+                        # If the de-duplicated event_id matches one of the existing
+                        # restrictions, then all is well. If it does not, then this
+                        # needs to be denied as invalid
+                        if (
+                            prev_event.event_id
+                            not in existing_event_ids_from_media_restrictions
+                        ):
+                            # TODO: suggestions for better log message, something that
+                            #  includes either of state event_id's and maybe the media
+                            #  restrictions?
+                            logger.warning(
+                                "Trying to attach media to deduplicated state event is forbidden"
+                            )
+                            raise SynapseError(
+                                HTTPStatus.BAD_REQUEST,
+                                "De-duplicated state event was not already attached to this media",
+                                Codes.INVALID_PARAM,
+                            )
+
                     return prev_event
 
             # Some media was trying to be attached to an event, but that media was
