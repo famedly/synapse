@@ -25,7 +25,7 @@ import logging
 import re
 from enum import Enum
 from http import HTTPStatus
-from typing import TYPE_CHECKING, Awaitable, Dict, List, Optional, Tuple
+from typing import TYPE_CHECKING, Awaitable, Callable, Dict, List, Optional, Tuple
 from urllib import parse as urlparse
 
 from matrix_common.types.mxc_uri import MXCUri
@@ -193,6 +193,79 @@ class RoomCreateRestServlet(TransactionRestServlet):
         return user_supplied_config
 
 
+async def validate_attachment_request_and_retrieve_media_info(
+    requester: Requester,
+    request: SynapseRequest,
+    get_local_media_info_cb: Callable[[str], Awaitable[Optional[LocalMedia]]],
+) -> set[LocalMedia]:
+    """
+    Parse the request args for potential media attachment parameters. Validate those
+    parameters are safe and sane, then retrieve the media information for each.
+
+    Args:
+        requester: The user placing the request, to verify they are allowed
+        request: The request itself that has the parameters for parsing
+        get_local_media_info_cb: The callback on the media repository that will retrieve
+            the media information
+    Returns:
+        Return the media info in a set, or an empty set if appropriate
+
+    Raises:
+        SynapseError: If any of the media is inappropriate or if the requester was not
+            allowed to attach the media
+    """
+    # twisted.web.server.Request.args is incorrectly defined as Optional[Any]
+    args: Dict[bytes, List[bytes]] = request.args  # type: ignore
+    attach_media_list = parse_strings_from_args(
+        args, "org.matrix.msc3911.attach_media", default=[]
+    )
+
+    attach_media_set = set()
+    for unsafe_mxc in attach_media_list:
+        # Deduplicate multiple attach media requests with the same MXC
+        # It may be that the mxc provided does not have the correct scheme
+        # attached, coax it into the correct form
+        if not unsafe_mxc.startswith("mxc://"):
+            unsafe_mxc = f"mxc://{unsafe_mxc}"
+        attach_media_set.add(MXCUri.from_str(unsafe_mxc))
+
+    # Check each mxc passed in and raise 400, INVALID_PARAM for:
+    # * being non-existent
+    # * not being restricted
+    # * being from the wrong user
+
+    # XXX: Do we need to watch for race-y conditions where the local media info
+    #  will have changed between now and when it is persisted in a moment?
+    media_info_for_attachment = set()
+    for mxc_uri in attach_media_set:
+        media_info = await get_local_media_info_cb(
+            mxc_uri.media_id,
+        )
+
+        if media_info is None:
+            raise SynapseError(
+                HTTPStatus.BAD_REQUEST,
+                f"The media attachment request is invalid as the media '{mxc_uri.media_id}' does not exist",
+                Codes.INVALID_PARAM,
+            )
+
+        if not media_info.restricted:
+            raise SynapseError(
+                HTTPStatus.BAD_REQUEST,
+                f"The media attachment request is invalid as the media '{mxc_uri.media_id}' is not restricted",
+                Codes.INVALID_PARAM,
+            )
+
+        if media_info.user_id != requester.user.to_string():
+            raise SynapseError(
+                HTTPStatus.BAD_REQUEST,
+                f"The media attachment request from '{requester.user.to_string()}' is invalid as the media '{mxc_uri}' was uploaded by someone else, '{media_info.user_id}'",
+                Codes.INVALID_PARAM,
+            )
+        media_info_for_attachment.add(media_info)
+    return media_info_for_attachment
+
+
 # TODO: Needs unit testing for generic events
 class RoomStateEventRestServlet(RestServlet):
     CATEGORY = "Event sending requests"
@@ -308,54 +381,15 @@ class RoomStateEventRestServlet(RestServlet):
 
         media_info_for_attachment: set[LocalMedia] = set()
         if self.enable_restricted_media:
-            # twisted.web.server.Request.args is incorrectly defined as Optional[Any]
-            args: Dict[bytes, List[bytes]] = request.args  # type: ignore
-            _attach_media_list = parse_strings_from_args(
-                args, "org.matrix.msc3911.attach_media", default=[]
-            )
-            attach_media_set: set[MXCUri] = set()
-
-            for unsafe_mxc in _attach_media_list:
-                # Deduplicate multiple attach media requests with the same MXC
-                # It may be that the mxc provided does not have the correct scheme
-                # attached, coax it into the correct form
-                if not unsafe_mxc.startswith("mxc://"):
-                    unsafe_mxc = f"mxc://{unsafe_mxc}"
-                attach_media_set.add(MXCUri.from_str(unsafe_mxc))
-
-            # Check each mxc passed in and raise 400, INVALID_PARAM for:
-            # * being non-existent
-            # * not being restricted
-            # * being from the wrong user
-
-            # XXX: Do we need to watch for race-y conditions where the local media info
-            #  will have changed between now and when it is persisted in a moment?
-            for mxc_uri in attach_media_set:
-                media_info = await self.media_repository.get_local_media_info(
-                    mxc_uri.media_id,
+            # This will raise if any of the attachment parameters or the requester is
+            # inappropriate
+            media_info_for_attachment = (
+                await validate_attachment_request_and_retrieve_media_info(
+                    requester,
+                    request,
+                    self.media_repository.get_local_media_info,
                 )
-
-                if media_info is None:
-                    raise SynapseError(
-                        HTTPStatus.BAD_REQUEST,
-                        f"The media attachment request is invalid as the media '{mxc_uri.media_id}' does not exist",
-                        Codes.INVALID_PARAM,
-                    )
-
-                if not media_info.restricted:
-                    raise SynapseError(
-                        HTTPStatus.BAD_REQUEST,
-                        f"The media attachment request is invalid as the media '{mxc_uri.media_id}' is not restricted",
-                        Codes.INVALID_PARAM,
-                    )
-
-                if media_info.user_id != requester.user.to_string():
-                    raise SynapseError(
-                        HTTPStatus.BAD_REQUEST,
-                        f"The media attachment request from '{requester.user.to_string()}' is invalid as the media '{mxc_uri}' was uploaded by someone else, '{media_info.user_id}'",
-                        Codes.INVALID_PARAM,
-                    )
-                media_info_for_attachment.add(media_info)
+            )
 
         content = parse_json_object_from_request(request)
 
@@ -477,54 +511,15 @@ class RoomSendEventRestServlet(TransactionRestServlet):
         # abstraction. It appears the PUT variant includes a txn_id, perhaps use that?
         media_info_for_attachment: set[LocalMedia] = set()
         if self.enable_restricted_media:
-            # twisted.web.server.Request.args is incorrectly defined as Optional[Any]
-            args: Dict[bytes, List[bytes]] = request.args  # type: ignore
-            _attach_media_list = parse_strings_from_args(
-                args, "org.matrix.msc3911.attach_media", default=[]
-            )
-            attach_media_set: set[MXCUri] = set()
-
-            for unsafe_mxc in _attach_media_list:
-                # Deduplicate multiple attach media requests with the same MXC
-                # It may be that the mxc provided does not have the correct scheme
-                # attached, coax it into the correct form
-                if not unsafe_mxc.startswith("mxc://"):
-                    unsafe_mxc = f"mxc://{unsafe_mxc}"
-                attach_media_set.add(MXCUri.from_str(unsafe_mxc))
-
-            # Check each mxc passed in and raise 400, INVALID_PARAM for:
-            # * being non-existent
-            # * not being restricted
-            # * being from the wrong user
-
-            # XXX: Do we need to watch for race-y conditions where the local media info
-            #  will have changed between now and when it is persisted in a moment?
-            for mxc_uri in attach_media_set:
-                media_info = await self.media_repository.get_local_media_info(
-                    mxc_uri.media_id,
+            # This will raise if any of the attachment parameters or the requester is
+            # inappropriate
+            media_info_for_attachment = (
+                await validate_attachment_request_and_retrieve_media_info(
+                    requester,
+                    request,
+                    self.media_repository.get_local_media_info,
                 )
-
-                if media_info is None:
-                    raise SynapseError(
-                        HTTPStatus.BAD_REQUEST,
-                        f"The media attachment request is invalid as the media '{mxc_uri.media_id}' does not exist",
-                        Codes.INVALID_PARAM,
-                    )
-
-                if not media_info.restricted:
-                    raise SynapseError(
-                        HTTPStatus.BAD_REQUEST,
-                        f"The media attachment request is invalid as the media '{mxc_uri.media_id}' is not restricted",
-                        Codes.INVALID_PARAM,
-                    )
-
-                if media_info.user_id != requester.user.to_string():
-                    raise SynapseError(
-                        HTTPStatus.BAD_REQUEST,
-                        f"The media attachment request from '{requester.user.to_string()}' is invalid as the media '{mxc_uri}' was uploaded by someone else, '{media_info.user_id}'",
-                        Codes.INVALID_PARAM,
-                    )
-                media_info_for_attachment.add(media_info)
+            )
 
         origin_server_ts = None
         if requester.app_service:
