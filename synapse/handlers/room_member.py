@@ -52,6 +52,7 @@ from synapse.logging import opentracing
 from synapse.metrics import event_processing_positions
 from synapse.metrics.background_process_metrics import run_as_background_process
 from synapse.replication.http.push import ReplicationCopyPusherRestServlet
+from synapse.storage.databases.main.media_repository import LocalMedia
 from synapse.storage.databases.main.state_deltas import StateDelta
 from synapse.storage.invite_rule import InviteRule
 from synapse.types import (
@@ -402,6 +403,7 @@ class RoomMemberHandler(metaclass=abc.ABCMeta):
         require_consent: bool = True,
         outlier: bool = False,
         origin_server_ts: Optional[int] = None,
+        media_info_for_attachment: Optional[set[LocalMedia]] = None,
     ) -> Tuple[str, int]:
         """
         Internal membership update function to get an existing event or create
@@ -503,6 +505,7 @@ class RoomMemberHandler(metaclass=abc.ABCMeta):
                             events_and_context=[(event, context)],
                             extra_users=[target],
                             ratelimit=ratelimit,
+                            media_info_for_attachment=media_info_for_attachment,
                         )
                     )
 
@@ -581,6 +584,7 @@ class RoomMemberHandler(metaclass=abc.ABCMeta):
         state_event_ids: Optional[List[str]] = None,
         depth: Optional[int] = None,
         origin_server_ts: Optional[int] = None,
+        media_info_for_attachment: Optional[set[LocalMedia]] = None,
     ) -> Tuple[str, int]:
         """Update a user's membership in a room.
 
@@ -673,6 +677,7 @@ class RoomMemberHandler(metaclass=abc.ABCMeta):
                             state_event_ids=state_event_ids,
                             depth=depth,
                             origin_server_ts=origin_server_ts,
+                            media_info_for_attachment=media_info_for_attachment,
                         )
 
         return result
@@ -695,6 +700,7 @@ class RoomMemberHandler(metaclass=abc.ABCMeta):
         state_event_ids: Optional[List[str]] = None,
         depth: Optional[int] = None,
         origin_server_ts: Optional[int] = None,
+        media_info_for_attachment: Optional[set[LocalMedia]] = None,
     ) -> Tuple[str, int]:
         """Helper for update_membership.
 
@@ -931,6 +937,7 @@ class RoomMemberHandler(metaclass=abc.ABCMeta):
                 require_consent=require_consent,
                 outlier=outlier,
                 origin_server_ts=origin_server_ts,
+                media_info_for_attachment=media_info_for_attachment,
             )
 
         latest_event_ids = await self.store.get_prev_events_for_room(room_id)
@@ -1189,6 +1196,7 @@ class RoomMemberHandler(metaclass=abc.ABCMeta):
             require_consent=require_consent,
             outlier=outlier,
             origin_server_ts=origin_server_ts,
+            media_info_for_attachment=media_info_for_attachment,
         )
 
     async def check_for_any_membership_in_room(

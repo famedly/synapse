@@ -960,6 +960,7 @@ class EventCreationHandler:
         ignore_shadow_ban: bool = False,
         outlier: bool = False,
         depth: Optional[int] = None,
+        media_info_for_attachment: Optional[set[LocalMedia]] = None,
     ) -> Tuple[EventBase, int]:
         """
         Creates an event, then sends it.
@@ -1061,6 +1062,7 @@ class EventCreationHandler:
                 ignore_shadow_ban=ignore_shadow_ban,
                 outlier=outlier,
                 depth=depth,
+                media_info_for_attachment=media_info_for_attachment,
             )
 
     async def _create_and_send_nonmember_event_locked(
@@ -1074,6 +1076,7 @@ class EventCreationHandler:
         ignore_shadow_ban: bool = False,
         outlier: bool = False,
         depth: Optional[int] = None,
+        media_info_for_attachment: Optional[set[LocalMedia]] = None,
     ) -> Tuple[EventBase, int]:
         room_id = event_dict["room_id"]
 
@@ -1162,6 +1165,7 @@ class EventCreationHandler:
                     events_and_context=[(event, context)],
                     ratelimit=ratelimit,
                     ignore_shadow_ban=ignore_shadow_ban,
+                    media_info_for_attachment=media_info_for_attachment,
                 )
 
                 break
@@ -1621,6 +1625,7 @@ class EventCreationHandler:
         event_dicts: Sequence[JsonDict],
         ratelimit: bool = True,
         ignore_shadow_ban: bool = False,
+        media_info_for_attachment: Optional[set[LocalMedia]] = None,
     ) -> None:
         """Helper to create and send a batch of new client events.
 
@@ -1703,6 +1708,7 @@ class EventCreationHandler:
             events_and_context,
             ignore_shadow_ban=ignore_shadow_ban,
             ratelimit=ratelimit,
+            media_info_for_attachment=media_info_for_attachment,
         )
 
     async def _persist_events(
