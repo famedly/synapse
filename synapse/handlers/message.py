@@ -70,6 +70,10 @@ from synapse.metrics.background_process_metrics import run_as_background_process
 from synapse.replication.http.send_event import ReplicationSendEventRestServlet
 from synapse.replication.http.send_events import ReplicationSendEventsRestServlet
 from synapse.storage.databases.main.events_worker import EventRedactBehaviour
+from synapse.storage.databases.main.media_repository import (
+    LocalMedia,
+    MediaRestrictions,
+)
 from synapse.types import (
     JsonDict,
     PersistedEventPosition,
@@ -1431,6 +1435,7 @@ class EventCreationHandler:
         ratelimit: bool = True,
         extra_users: Optional[List[UserID]] = None,
         ignore_shadow_ban: bool = False,
+        media_info_for_attachment: Optional[set[LocalMedia]] = None,
     ) -> EventBase:
         """Processes new events. Please note that if batch persisting events, an error in
         handling any one of these events will result in all of the events being dropped.
@@ -1460,6 +1465,25 @@ class EventCreationHandler:
                 a room that has been un-partial stated.
         """
         extra_users = extra_users or []
+        media_info_for_attachment = media_info_for_attachment or set()
+
+        # TODO: correct for error code, this was not mentioned and may become related
+        #  during room creation batching
+        if media_info_for_attachment and len(events_and_context) > 1:
+            raise SynapseError(
+                500,
+                "Can not attach a piece of media to more than one event at a time",
+                Codes.INVALID_PARAM,
+            )
+
+        # filter for the existing media attachments that were passed in based on the
+        # mxc. The 'attachments' key can be None, representing that an attachment has
+        # not been formed yet. If they are all None, will be an empty set
+        media_restrictions: set[MediaRestrictions] = {
+            local_media.attachments
+            for local_media in media_info_for_attachment
+            if local_media.attachments
+        }
 
         for event, context in events_and_context:
             # we don't apply shadow-banning to membership events here. Invites are blocked
@@ -1483,6 +1507,15 @@ class EventCreationHandler:
                         prev_event.event_id,
                     )
                     return prev_event
+
+            # Some media was trying to be attached to an event, but that media was
+            # already attached. Deny
+            if media_restrictions:
+                raise SynapseError(
+                    HTTPStatus.BAD_REQUEST,
+                    f"These media ids, '{media_info_for_attachment}' has already been attached to a reference: {media_restrictions}",
+                    Codes.INVALID_PARAM,
+                )
 
             if not event.is_state() and event.type in [
                 EventTypes.Message,
@@ -1541,6 +1574,17 @@ class EventCreationHandler:
         result, _ = await make_deferred_yieldable(
             gather_results(deferreds, consumeErrors=True)
         ).addErrback(unwrapFirstError)
+        # We previously guarded that there is only a single event being persisted. Now
+        # that it has successfully been persisted, let's set any media restrictions.
+        # This may need to be reconsidered when it comes time to deal with room
+        # creation. For example, we can access the event_id's from the
+        # `events_and_contexts` object, but which event_id do we attach too?
+        for media_info in media_info_for_attachment:
+            await self.store.set_media_restrictions(
+                self.server_name,
+                media_info.media_id,
+                {"restrictions": {"event_id": result.event_id}},
+            )
 
         return result
 
