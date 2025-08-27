@@ -25,6 +25,8 @@ import random
 from http import HTTPStatus
 from typing import TYPE_CHECKING, Iterable, List, Optional, Set, Tuple
 
+from matrix_common.types.mxc_uri import MXCUri
+
 from synapse import types
 from synapse.api.constants import (
     AccountDataTypes,
@@ -436,6 +438,8 @@ class RoomMemberHandler(metaclass=abc.ABCMeta):
                 opposed to being inline with the current DAG.
             origin_server_ts: The origin_server_ts to use if a new event is created. Uses
                 the current timestamp if set to None.
+            media_info_for_attachment: An optional set of LocalMedia objects, for use in
+                restricting media.
 
         Returns:
             Tuple of event ID and stream ordering position
@@ -488,6 +492,13 @@ class RoomMemberHandler(metaclass=abc.ABCMeta):
                     depth=depth,
                     require_consent=require_consent,
                     outlier=outlier,
+                    mxc_restriction_list_for_event=[
+                        MXCUri(self._server_name, local_media.media_id)
+                        for local_media in media_info_for_attachment
+                        if local_media
+                    ]
+                    if media_info_for_attachment is not None
+                    else None,
                 )
                 context = await unpersisted_context.persist(event)
                 prev_state_ids = await context.get_prev_state_ids(
@@ -615,6 +626,8 @@ class RoomMemberHandler(metaclass=abc.ABCMeta):
                 based on the prev_events.
             origin_server_ts: The origin_server_ts to use if a new event is created. Uses
                 the current timestamp if set to None.
+            media_info_for_attachment: An optional set of LocalMedia objects, for use in
+                restricting media.
 
         Returns:
             A tuple of the new event ID and stream ID.
@@ -733,6 +746,8 @@ class RoomMemberHandler(metaclass=abc.ABCMeta):
                 based on the prev_events.
             origin_server_ts: The origin_server_ts to use if a new event is created. Uses
                 the current timestamp if set to None.
+            media_info_for_attachment: An optional set of LocalMedia objects, for use in
+                restricting media.
 
         Returns:
             A tuple of the new event ID and stream ID.

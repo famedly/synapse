@@ -25,6 +25,7 @@ from http import HTTPStatus
 from typing import TYPE_CHECKING, Any, Dict, List, Mapping, Optional, Sequence, Tuple
 
 from canonicaljson import encode_canonical_json
+from matrix_common.types.mxc_uri import MXCUri
 
 from twisted.internet.interfaces import IDelayedCall
 
@@ -587,6 +588,7 @@ class EventCreationHandler:
         state_map: Optional[StateMap[str]] = None,
         for_batch: bool = False,
         current_state_group: Optional[int] = None,
+        mxc_restriction_list_for_event: Optional[List[MXCUri]] = None,
     ) -> Tuple[EventBase, UnpersistedEventContextBase]:
         """
         Given a dict from a client, create a new event. If bool for_batch is true, will
@@ -640,6 +642,9 @@ class EventCreationHandler:
 
             current_state_group: the current state group, used only for creating events for
                 batch persisting
+
+            mxc_restriction_list_for_event: An optional List of MXCUri objects, to be
+                used for setting media restrictions
 
         Raises:
             ResourceLimitError if server is blocked to some resource being
@@ -719,6 +724,14 @@ class EventCreationHandler:
 
         if txn_id is not None:
             builder.internal_metadata.txn_id = txn_id
+
+        logger.warning(
+            "JASON: media_restrictions passed in: %r", mxc_restriction_list_for_event
+        )
+        if mxc_restriction_list_for_event is not None:
+            builder.internal_metadata.media_references = [
+                str(mxc) for mxc in mxc_restriction_list_for_event
+            ]
 
         builder.internal_metadata.outlier = outlier
 
@@ -989,6 +1002,8 @@ class EventCreationHandler:
             depth: Override the depth used to order the event in the DAG.
                 Should normally be set to None, which will cause the depth to be calculated
                 based on the prev_events.
+            media_info_for_attachment: An optional set of LocalMedia objects, for use in
+                restricting media.
 
         Returns:
             The event, and its stream ordering (if deduplication happened,
@@ -1105,6 +1120,13 @@ class EventCreationHandler:
                     state_event_ids=state_event_ids,
                     outlier=outlier,
                     depth=depth,
+                    mxc_restriction_list_for_event=[
+                        MXCUri(self.server_name, local_media.media_id)
+                        for local_media in media_info_for_attachment
+                        if local_media
+                    ]
+                    if media_info_for_attachment is not None
+                    else None,
                 )
                 context = await unpersisted_context.persist(event)
 
@@ -1459,6 +1481,9 @@ class EventCreationHandler:
             ignore_shadow_ban: True if shadow-banned users should be allowed to
                 send this event.
 
+            media_info_for_attachment: An optional set of LocalMedia objects, for use in
+                restricting media.
+
         Return:
             If the event was deduplicated, the previous, duplicate, event. Otherwise,
             `event`.
@@ -1470,15 +1495,6 @@ class EventCreationHandler:
         """
         extra_users = extra_users or []
         media_info_for_attachment = media_info_for_attachment or set()
-
-        # TODO: correct for error code, this was not mentioned and may become related
-        #  during room creation batching
-        if media_info_for_attachment and len(events_and_context) > 1:
-            raise SynapseError(
-                500,
-                "Can not attach a piece of media to more than one event at a time",
-                Codes.INVALID_PARAM,
-            )
 
         # filter for the existing media attachments that were passed in based on the
         # mxc. The 'attachments' key can be None, representing that an attachment has
@@ -1603,17 +1619,6 @@ class EventCreationHandler:
         result, _ = await make_deferred_yieldable(
             gather_results(deferreds, consumeErrors=True)
         ).addErrback(unwrapFirstError)
-        # We previously guarded that there is only a single event being persisted. Now
-        # that it has successfully been persisted, let's set any media restrictions.
-        # This may need to be reconsidered when it comes time to deal with room
-        # creation. For example, we can access the event_id's from the
-        # `events_and_contexts` object, but which event_id do we attach too?
-        for media_info in media_info_for_attachment:
-            await self.store.set_media_restrictions(
-                self.server_name,
-                media_info.media_id,
-                {"restrictions": {"event_id": result.event_id}},
-            )
 
         return result
 
@@ -1647,6 +1652,8 @@ class EventCreationHandler:
             ratelimit: Whether to rate limit this send.
             ignore_shadow_ban: True if shadow-banned users should be allowed to
                 send these events.
+            media_info_for_attachment: An optional set of LocalMedia objects, for use in
+                restricting media.
         """
 
         if not event_dicts:
@@ -2131,6 +2138,19 @@ class EventCreationHandler:
 
         events_and_pos = []
         for event in persisted_events:
+            # My attempts to make 'media_references' an object directly on
+            # 'internal_metadata' appear to have been successful. This seems to work
+            maybe_media_restrictions_to_set = event.internal_metadata.get_dict().get(
+                "media_references"
+            )
+            if maybe_media_restrictions_to_set:
+                for mxc_str in maybe_media_restrictions_to_set:
+                    mxc = MXCUri.from_str(mxc_str)
+                    await self.store.set_media_restrictions(
+                        mxc.server_name,
+                        mxc.media_id,
+                        {"restrictions": {"event_id": event.event_id}},
+                    )
             if self._ephemeral_events_enabled:
                 # If there's an expiry timestamp on the event, schedule its expiry.
                 self._message_handler.maybe_schedule_expiry(event)
