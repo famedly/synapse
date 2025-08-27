@@ -21,23 +21,27 @@
 
 """Tests REST events for /profile paths."""
 
+import io
 import urllib.parse
 from http import HTTPStatus
 from typing import Any, Dict, Optional
 
 from canonicaljson import encode_canonical_json
+from matrix_common.types.mxc_uri import MXCUri
 
 from twisted.test.proto_helpers import MemoryReactor
+from twisted.web.resource import Resource
 
 from synapse.api.errors import Codes
 from synapse.rest import admin
-from synapse.rest.client import login, profile, room
+from synapse.rest.client import login, media, profile, room
 from synapse.server import HomeServer
 from synapse.storage.databases.main.profile import MAX_PROFILE_SIZE
-from synapse.types import UserID
+from synapse.types import JsonDict, UserID
 from synapse.util import Clock
 
 from tests import unittest
+from tests.test_utils import SMALL_PNG
 from tests.utils import USE_POSTGRES_FOR_TESTS
 
 
@@ -910,3 +914,210 @@ class OwnProfileUnrestrictedTestCase(unittest.HomeserverTestCase):
             access_token=self.requester_tok,
         )
         self.assertEqual(channel.code, 200, channel.result)
+
+
+class ProfileMediaAttachmentTestCase(unittest.HomeserverTestCase):
+    servlets = [
+        admin.register_servlets,
+        login.register_servlets,
+        media.register_servlets,
+        profile.register_servlets,
+    ]
+
+    def prepare(
+        self, reactor: MemoryReactor, clock: Clock, homeserver: HomeServer
+    ) -> None:
+        self.store = homeserver.get_datastores().main
+        self.server_name = self.hs.config.server.server_name
+        self.media_repo = self.hs.get_media_repository()
+
+        self.user = self.register_user("user", "password")
+        self.tok = self.login("user", "password")
+
+        self.other_user = self.register_user("other_user", "password")
+        self.other_tok = self.login("other_user", "password")
+
+    def default_config(self) -> JsonDict:
+        config = super().default_config()
+        config.setdefault("experimental_features", {})
+        config["experimental_features"].update({"msc3911_enabled": True})
+        return config
+
+    def create_resource_dict(self) -> dict[str, Resource]:
+        resources = super().create_resource_dict()
+        resources["/_matrix/media"] = self.hs.get_media_repository_resource()
+        return resources
+
+    def create_media_and_set_restricted_flag(self, user_id: str) -> MXCUri:
+        """
+        Create media without using an endpoint, and set the restricted flag.
+        """
+        content = io.BytesIO(SMALL_PNG)
+        content_uri = self.get_success(
+            self.media_repo.create_or_update_content(
+                "image/png",
+                "test_png_upload",
+                content,
+                67,
+                UserID.from_string(user_id),
+                restricted=True,
+            )
+        )
+        return content_uri
+
+    def test_can_attach_media_to_profile_update(self) -> None:
+        """
+        Test basic functionality, that a media ID can be attached to a user profile id.
+        """
+        mxc_uri = self.create_media_and_set_restricted_flag(self.user)
+        # Update user profile with attach_media.
+        channel = self.make_request(
+            "PUT",
+            f"/_matrix/client/v3/profile/{self.user}/avatar_url",
+            access_token=self.tok,
+            content={"avatar_url": str(mxc_uri)},
+        )
+        assert channel.code == HTTPStatus.OK
+        assert channel.json_body == {}
+
+        # Check if the media's restrictions field is updated with the profile_user_id.
+        restrictions = self.get_success(
+            self.store.get_media_restrictions(mxc_uri.server_name, mxc_uri.media_id)
+        )
+        assert restrictions is not None, str(restrictions)
+        assert restrictions.event_id is None
+        assert restrictions.profile_user_id == UserID.from_string(self.user)
+
+    def test_attaching_nonexistent_media_to_profile_fails(self) -> None:
+        """
+        Test that media that does not exist is not allowed to be attached to a user profile.
+        """
+        # Generate non-existing media.
+        nonexistent_mxc_uri = MXCUri.from_str("mxc://test/fakeMediaId")
+        channel = self.make_request(
+            "PUT",
+            f"/_matrix/client/v3/profile/{self.user}/avatar_url",
+            access_token=self.tok,
+            content={"avatar_url": str(nonexistent_mxc_uri)},
+        )
+
+        assert channel.code == HTTPStatus.BAD_REQUEST, channel.json_body
+        assert channel.json_body["errcode"] == Codes.INVALID_PARAM
+        assert "does not exist" in channel.json_body["error"]
+
+    def test_attaching_unrestricted_media_to_profile_fails(self) -> None:
+        """
+        Test that attaching unrestricted media to user profile fails.
+        """
+        # Create unrestricted media.
+        channel = self.make_request(
+            "POST",
+            "/_matrix/media/v3/upload?filename=test_png_upload",
+            SMALL_PNG,
+            access_token=self.tok,
+            content_type=b"image/png",
+            custom_headers=[("Content-Length", str(67))],
+        )
+        assert channel.code == 200, channel.result
+        content_uri = MXCUri.from_str(channel.json_body["content_uri"])
+
+        # Check media is unrestricted.
+        media_info = self.get_success(self.store.get_local_media(content_uri.media_id))
+        assert media_info is not None
+        assert not media_info.restricted
+
+        # Try to update user profile with unrestricted media.
+        channel = self.make_request(
+            "PUT",
+            f"/_matrix/client/v3/profile/{self.user}/avatar_url",
+            access_token=self.tok,
+            content={"avatar_url": str(content_uri)},
+        )
+        assert channel.code == HTTPStatus.BAD_REQUEST, channel.json_body
+        assert channel.json_body["errcode"] == Codes.INVALID_PARAM
+        assert "is not restricted" in channel.json_body["error"]
+
+    def test_attaching_already_attached_media_to_profile_fails(self) -> None:
+        """
+        Test that attaching already attached media to user profile fails.
+        """
+        mxc_uri = self.create_media_and_set_restricted_flag(self.user)
+        # Attach the media to the user profile.
+        channel = self.make_request(
+            "PUT",
+            f"/_matrix/client/v3/profile/{self.user}/avatar_url",
+            access_token=self.tok,
+            content={"avatar_url": str(mxc_uri)},
+        )
+        assert channel.code == HTTPStatus.OK
+        assert channel.json_body == {}
+
+        # Try attaching the same media again.
+        channel = self.make_request(
+            "PUT",
+            f"/_matrix/client/v3/profile/{self.user}/avatar_url",
+            access_token=self.tok,
+            content={"avatar_url": str(mxc_uri)},
+        )
+        assert channel.code == HTTPStatus.BAD_REQUEST, channel.json_body
+        assert channel.json_body["errcode"] == Codes.INVALID_PARAM
+        assert "already has restrictions set" in channel.json_body["error"]
+
+    def test_attaching_not_owned_media_to_profile_fails(self) -> None:
+        """
+        Test that attaching media not owned by the user to profile fails.
+        """
+        # Media is created with other_user.
+        mxc_uri = self.create_media_and_set_restricted_flag(self.other_user)
+        # Try to attach the media from other_user to user.
+        channel = self.make_request(
+            "PUT",
+            f"/_matrix/client/v3/profile/{self.user}/avatar_url",
+            access_token=self.tok,
+            content={"avatar_url": str(mxc_uri)},
+        )
+        assert channel.code == HTTPStatus.BAD_REQUEST, channel.json_body
+        assert channel.json_body["errcode"] == Codes.INVALID_PARAM
+        assert "does not exist" in channel.json_body["error"]
+
+    def test_remove_media_from_profile(self) -> None:
+        """
+        Test that removing media from user profile works.
+        """
+        mxc_uri = self.create_media_and_set_restricted_flag(self.user)
+        # Attach the media to the user profile.
+        channel = self.make_request(
+            "PUT",
+            f"/_matrix/client/v3/profile/{self.user}/avatar_url",
+            access_token=self.tok,
+            content={"avatar_url": str(mxc_uri)},
+        )
+        assert channel.code == HTTPStatus.OK
+        assert channel.json_body == {}
+
+        # Check media is set as user avatar.
+        user_avatar = self.get_success(
+            self.store.get_profile_avatar_url(
+                UserID.from_string(self.user),
+            )
+        )
+        assert user_avatar is not None
+        assert user_avatar in str(mxc_uri)
+
+        # Remove the media from the user profile.
+        channel = self.make_request(
+            "PUT",
+            f"/_matrix/client/v3/profile/{self.user}/avatar_url",
+            access_token=self.tok,
+            content={"avatar_url": ""},
+        )
+        assert channel.code == HTTPStatus.OK
+        assert channel.json_body == {}
+
+        # Check media is no longer attached.
+        user_avatar = self.get_success(
+            self.store.get_profile_avatar_url(
+                UserID.from_string(self.user),
+            )
+        )
+        assert user_avatar is None

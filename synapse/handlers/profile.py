@@ -77,6 +77,8 @@ class ProfileHandler:
 
         self._third_party_rules = hs.get_module_api_callbacks().third_party_event_rules
 
+        self.enable_restricted_media = hs.config.experimental.msc3911_enabled
+
     async def get_profile(self, user_id: str, ignore_backoff: bool = True) -> JsonDict:
         """
         Get a user's profile as a JSON dictionary.
@@ -331,6 +333,14 @@ class ProfileHandler:
             )
 
         await self.store.set_profile_avatar_url(target_user, avatar_url_to_set)
+
+        # msc3911: Update the media restrictions to include the profile user ID
+        if self.enable_restricted_media and avatar_url_to_set:
+            await self.hs.get_datastores().main.set_media_restricted_to_user_profile(
+                self.hs.config.server.server_name,
+                avatar_url_to_set,
+                str(target_user),
+            )
 
         profile = await self.store.get_profileinfo(target_user)
         await self.user_directory_handler.handle_local_profile_change(
