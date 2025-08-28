@@ -283,7 +283,7 @@ class ThumbnailProvider:
         for_federation: bool,
         allow_authenticated: bool = True,
     ) -> None:
-        media_info = await self.media_repo.get_local_media_info_for_request(
+        media_info = await self.media_repo.get_local_media_info(
             request, media_id, max_timeout_ms
         )
         if not media_info:
@@ -328,7 +328,7 @@ class ThumbnailProvider:
         for_federation: bool,
         allow_authenticated: bool = True,
     ) -> None:
-        media_info = await self.media_repo.get_local_media_info_for_request(
+        media_info = await self.media_repo.get_local_media_info(
             request, media_id, max_timeout_ms
         )
         if not media_info:
