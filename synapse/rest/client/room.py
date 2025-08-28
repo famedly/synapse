@@ -280,7 +280,7 @@ class RoomStateEventRestServlet(RestServlet):
         self.clock = hs.get_clock()
         self._max_event_delay_ms = hs.config.server.max_event_delay_ms
         self._spam_checker_module_callbacks = hs.get_module_api_callbacks().spam_checker
-        self.media_repository = hs.get_media_repository()
+        self.store = hs.get_datastores().main
         self.enable_restricted_media = hs.config.experimental.msc3911_enabled
         self.server_name = hs.config.server.server_name
 
@@ -387,7 +387,7 @@ class RoomStateEventRestServlet(RestServlet):
                 await validate_attachment_request_and_retrieve_media_info(
                     requester,
                     request,
-                    self.media_repository.get_local_media_info,
+                    self.store.get_local_media,
                 )
             )
 
@@ -489,7 +489,7 @@ class RoomSendEventRestServlet(TransactionRestServlet):
         self.delayed_events_handler = hs.get_delayed_events_handler()
         self.auth = hs.get_auth()
         self._max_event_delay_ms = hs.config.server.max_event_delay_ms
-        self.media_repository = hs.get_media_repository()
+        self.store = hs.get_datastores().main
         self.enable_restricted_media = hs.config.experimental.msc3911_enabled
         self.server_name = hs.config.server.server_name
 
@@ -517,7 +517,7 @@ class RoomSendEventRestServlet(TransactionRestServlet):
                 await validate_attachment_request_and_retrieve_media_info(
                     requester,
                     request,
-                    self.media_repository.get_local_media_info,
+                    self.store.get_local_media,
                 )
             )
 
