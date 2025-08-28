@@ -725,9 +725,6 @@ class EventCreationHandler:
         if txn_id is not None:
             builder.internal_metadata.txn_id = txn_id
 
-        logger.warning(
-            "JASON: media_restrictions passed in: %r", mxc_restriction_list_for_event
-        )
         if mxc_restriction_list_for_event is not None:
             builder.internal_metadata.media_references = [
                 str(mxc) for mxc in mxc_restriction_list_for_event

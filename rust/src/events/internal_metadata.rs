@@ -69,7 +69,6 @@ impl EventInternalMetadataData {
                 pyo3::intern!(py, "media_references"),
                 o.into_pyobject(py)
                     .unwrap()
-                    //    .to_owned()
                     .into_any(),
             ),
             EventInternalMetadataData::OutOfBandMembership(o) => (
@@ -139,7 +138,6 @@ impl EventInternalMetadataData {
             "media_references" => EventInternalMetadataData::MediaReferences(
                 value
                     .extract()
-                    // .map(String::into_boxed_str)
                     .with_context(|| format!("'{key_str}' has invalid type"))?,
             ),
             "out_of_band_membership" => EventInternalMetadataData::OutOfBandMembership(
@@ -484,7 +482,7 @@ impl EventInternalMetadata {
         set_property!(self, DeviceId, obj.into_boxed_str());
     }
 
-    /// The device ID of the user who sent this event, if any.
+    /// The media references for the restrictions being set for this event, if any.
     #[getter]
     fn get_media_references(&self) -> PyResult<&Vec<String>> {
         let s = get_property!(self, MediaReferences)?;
