@@ -2969,7 +2969,7 @@ class MediaUploadLimits(unittest.HomeserverTestCase):
         self.assertEqual(channel.code, 200)
 
 
-class UnrestrictedMediaUploadTestCase(unittest.HomeserverTestCase):
+class DisableUnrestrictedResourceTestCase(unittest.HomeserverTestCase):
     """
     This test case simulates a homeserver with media create and upload endpoints are
     limited when `msc3911_unrestricted_media_upload_disabled` is configured to be True.
@@ -2977,6 +2977,66 @@ class UnrestrictedMediaUploadTestCase(unittest.HomeserverTestCase):
 
     extra_config = {
         "experimental_features": {"msc3911_unrestricted_media_upload_disabled": True}
+    }
+    servlets = [
+        media.register_servlets,
+    ]
+
+    def make_homeserver(self, reactor: MemoryReactor, clock: Clock) -> HomeServer:
+        config = self.default_config()
+        config.update(self.extra_config)
+        return self.setup_test_homeserver(config=config)
+
+    def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
+        self.media_repo = hs.get_media_repository_resource()
+
+    def create_resource_dict(self) -> dict[str, Resource]:
+        resources = super().create_resource_dict()
+        resources["/_matrix/media"] = self.hs.get_media_repository_resource()
+        return resources
+
+    def test_unrestricted_resource_creation_disabled(self) -> None:
+        """
+        Tests that CreateResource raises an error when
+        `msc3911_unrestricted_media_upload_disabled` is True.
+        """
+        channel = self.make_request(
+            "POST",
+            "/_matrix/media/v1/create",
+        )
+        self.assertEqual(channel.code, 403)
+        self.assertEqual(channel.json_body["errcode"], Codes.FORBIDDEN)
+        self.assertEqual(
+            channel.json_body["error"], "Unrestricted media creation is disabled"
+        )
+
+    def test_unrestricted_resource_upload_disabled(self) -> None:
+        """
+        Tests that UploadServlet raises an error when
+        `msc3911_unrestricted_media_upload_disabled` is True.
+        """
+        channel = self.make_request(
+            "POST",
+            "/_matrix/media/v3/upload?filename=test_png_upload",
+            content=SMALL_PNG,
+            content_type=b"image/png",
+            custom_headers=[("Content-Length", str(67))],
+        )
+        self.assertEqual(channel.code, 403)
+        self.assertEqual(channel.json_body["errcode"], Codes.FORBIDDEN)
+        self.assertEqual(
+            channel.json_body["error"], "Unrestricted media upload is disabled"
+        )
+
+
+class RestrictedResourceTestCase(unittest.HomeserverTestCase):
+    """
+    Tests restricted media creation and upload endpoints when `msc3911_enabled` is
+    configured to be True.
+    """
+
+    extra_config = {
+        "experimental_features": {"msc3911_enabled": True},
     }
     servlets = [
         media.register_servlets,
@@ -2991,63 +3051,128 @@ class UnrestrictedMediaUploadTestCase(unittest.HomeserverTestCase):
 
     def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
         self.media_repo = hs.get_media_repository_resource()
-        self.register_user("testuser", "testpass")
-        self.tok = self.login("testuser", "testpass")
+        self.register_user("creator", "testpass")
+        self.creator_tok = self.login("creator", "testpass")
+
+        self.register_user("random_user", "testpass")
+        self.other_user_tok = self.login("random_user", "testpass")
 
     def create_resource_dict(self) -> dict[str, Resource]:
         resources = super().create_resource_dict()
         resources["/_matrix/media"] = self.hs.get_media_repository_resource()
         return resources
 
-    def test_disable_unrestricted_media_upload_post(self) -> None:
+    def test_create_restricted_resource(self) -> None:
         """
-        Tests that the upload servlet raises an error when unrestricted media upload is disabled.
+        Tests that the new create endpoint creates a restricted resource.
         """
         channel = self.make_request(
             "POST",
-            "/_matrix/media/v3/upload?filename=test_png_upload",
-            SMALL_PNG,
-            access_token=self.tok,
-            shorthand=False,
+            "/_matrix/client/unstable/org.matrix.msc3911/media/create",
+            access_token=self.creator_tok,
+        )
+        self.assertEqual(channel.code, 200)
+        self.assertIn("content_uri", channel.json_body)
+        self.assertIn("unused_expires_at", channel.json_body)
+        media_id = channel.json_body["content_uri"].split("/")[-1]
+
+        # Check the `restricted` field is True.
+        media = self.get_success(
+            self.hs.get_datastores().main.get_local_media(media_id)
+        )
+        assert media is not None
+        self.assertEqual(media.media_id, media_id)
+        self.assertTrue(media.restricted)
+
+    def test_upload_restricted_resource(self) -> None:
+        """
+        Tests that the new upload endpoints uploads a restricted resource.
+        """
+        channel = self.make_request(
+            "POST",
+            "/_matrix/client/unstable/org.matrix.msc3911/media/upload?filename=test_png_upload",
+            content=SMALL_PNG,
             content_type=b"image/png",
+            access_token=self.creator_tok,
             custom_headers=[("Content-Length", str(67))],
         )
-        self.assertEqual(channel.code, 403)
-        self.assertEqual(channel.json_body["errcode"], Codes.FORBIDDEN)
-        self.assertEqual(
-            channel.json_body["error"], "Unrestricted media upload is disabled"
-        )
+        self.assertEqual(channel.code, 200)
+        self.assertIn("content_uri", channel.json_body)
+        media_id = channel.json_body["content_uri"].split("/")[-1]
 
-    def test_disable_unrestricted_media_upload_put(self) -> None:
-        """
-        Tests that the upload servlet raises an error when unrestricted media upload is disabled.
-        """
+        # Check the `restricted` field is True.
+        media = self.get_success(
+            self.hs.get_datastores().main.get_local_media(media_id)
+        )
+        assert media is not None
+        self.assertEqual(media.media_id, media_id)
+        self.assertTrue(media.restricted)
+
+        # The media is not attached to any event yet, only creator can see it.
+        # The creator can download the restricted resource.
         channel = self.make_request(
-            "PUT",
-            f"/_matrix/media/v3/upload/{self.hs.hostname}/test_png_upload",
-            content=b"dummy file content",
-            content_type=b"image/png",
-            access_token=self.tok,
+            "GET",
+            f"/_matrix/client/v1/media/download/{self.hs.hostname}/{media_id}",
+            access_token=self.creator_tok,
         )
-        self.assertEqual(channel.code, 403)
-        self.assertEqual(channel.json_body["errcode"], Codes.FORBIDDEN)
-        self.assertEqual(
-            channel.json_body["error"], "Unrestricted media upload is disabled"
-        )
+        assert channel.code == 200
 
-    def test_disable_unrestricted_media_upload_create(self) -> None:
+        # The other user cannot download the restricted resource in pending state.
+        channel = self.make_request(
+            "GET",
+            f"/_matrix/client/v1/media/download/{self.hs.hostname}/{media_id}",
+            access_token=self.other_user_tok,
+        )
+        assert channel.code == 404
+
+    def test_async_upload_restricted_resource(self) -> None:
         """
-        Tests that the create servlet raises an error when unrestricted media upload is disabled.
+        Tests the combination of new create endpoint and the existing async upload
+        endpoint uploads a restricted resource.
         """
+        # Create media with new endpoint.
         channel = self.make_request(
             "POST",
-            f"/_matrix/media/v1/create/{self.hs.hostname}/test_png_upload",
-            content=b"dummy file content",
+            "/_matrix/client/unstable/org.matrix.msc3911/media/create",
+            access_token=self.creator_tok,
+        )
+        self.assertEqual(channel.code, 200)
+        self.assertIn("content_uri", channel.json_body)
+        self.assertIn("unused_expires_at", channel.json_body)
+        media_id = channel.json_body["content_uri"].split("/")[-1]
+
+        # Async upload with existing endpoint.
+        channel = self.make_request(
+            "PUT",
+            f"/_matrix/media/v3/upload/{self.hs.hostname}/{media_id}",
+            content=SMALL_PNG,
             content_type=b"image/png",
-            access_token=self.tok,
+            access_token=self.creator_tok,
+            custom_headers=[("Content-Length", str(67))],
         )
-        self.assertEqual(channel.code, 403)
-        self.assertEqual(channel.json_body["errcode"], Codes.FORBIDDEN)
-        self.assertEqual(
-            channel.json_body["error"], "Unrestricted media creation is disabled"
+        self.assertEqual(channel.code, 200)
+
+        # Check the `restricted` field is True.
+        media = self.get_success(
+            self.hs.get_datastores().main.get_local_media(media_id)
         )
+        assert media is not None
+        self.assertEqual(media.media_id, media_id)
+        self.assertTrue(media.restricted)
+
+        # Media is not attached to any event yet, only creator can see it.
+        # The creator can download the restricted resource.
+        channel = self.make_request(
+            "GET",
+            f"/_matrix/client/v1/media/download/{self.hs.hostname}/{media_id}",
+            access_token=self.creator_tok,
+        )
+        assert channel.code == 200
+
+        # The other user cannot download the restricted resource.
+        channel = self.make_request(
+            "GET",
+            f"/_matrix/client/v1/media/download/{self.hs.hostname}/{media_id}",
+            access_token=self.other_user_tok,
+        )
+        assert channel.code == 404

@@ -29,7 +29,6 @@ from typing import IO, TYPE_CHECKING, Dict, List, Optional, Set, Tuple
 import attr
 from matrix_common.types.mxc_uri import MXCUri
 
-import twisted.internet.error
 import twisted.web.http
 from twisted.internet.defer import Deferred
 
@@ -69,7 +68,7 @@ from synapse.media.thumbnailer import Thumbnailer, ThumbnailError
 from synapse.media.url_previewer import UrlPreviewer
 from synapse.metrics.background_process_metrics import run_as_background_process
 from synapse.storage.databases.main.media_repository import LocalMedia, RemoteMedia
-from synapse.types import UserID
+from synapse.types import Requester, UserID
 from synapse.util.async_helpers import Linearizer
 from synapse.util.retryutils import NotRetryingDestination
 from synapse.util.stringutils import random_string
@@ -493,6 +492,20 @@ class MediaRepository:
         if self.hs.config.media.enable_authenticated_media and not allow_authenticated:
             if media_info.authenticated:
                 raise NotFoundError()
+
+        # MSC3911: If media is restricted but restriction is empty, the media is in
+        # pending state and only creator can see it until it is attached to an event.
+        if media_info.restricted:
+            restrictions = await self.store.get_media_restrictions(
+                self.server_name, media_info.media_id
+            )
+            if not restrictions:
+                if not (
+                    isinstance(request.requester, Requester)
+                    and request.requester.user.to_string() == media_info.user_id
+                ):
+                    respond_404(request)
+                    return
 
         self.mark_recently_accessed(None, media_id)
 

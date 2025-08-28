@@ -37,9 +37,9 @@ logger = logging.getLogger(__name__)
 
 
 class CreateResource(RestServlet):
-    PATTERNS = [re.compile("/_matrix/media/v1/create")]
-
-    def __init__(self, hs: "HomeServer", media_repo: "MediaRepository"):
+    def __init__(
+        self, hs: "HomeServer", media_repo: "MediaRepository", restricted: bool = False
+    ):
         super().__init__()
 
         self.media_repo = media_repo
@@ -53,12 +53,21 @@ class CreateResource(RestServlet):
             clock=self.clock,
             cfg=hs.config.ratelimiting.rc_media_create,
         )
+        # MSC3911: If this is enabled, this endpoint will not allow media creation,which is unrestricted.
         self.msc3911_unrestricted_media_upload_disabled = (
             hs.config.experimental.msc3911_unrestricted_media_upload_disabled
         )
+        self.restricted = restricted
+
+        if self.restricted:
+            self.PATTERNS = [
+                re.compile("/_matrix/client/unstable/org.matrix.msc3911/media/create")
+            ]
+        else:
+            self.PATTERNS = [re.compile("/_matrix/media/v1/create")]
 
     async def on_POST(self, request: SynapseRequest) -> None:
-        if self.msc3911_unrestricted_media_upload_disabled:
+        if not self.restricted and self.msc3911_unrestricted_media_upload_disabled:
             raise SynapseError(
                 403,
                 "Unrestricted media creation is disabled",
@@ -81,7 +90,7 @@ class CreateResource(RestServlet):
             )
 
         content_uri, unused_expires_at = await self.media_repo.create_media_id(
-            requester.user
+            requester.user, restricted=self.restricted
         )
 
         logger.info(
