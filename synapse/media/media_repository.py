@@ -407,18 +407,6 @@ class MediaRepository:
             send_cors=True,
         )
 
-    async def get_local_media_info(self, media_id: str) -> Optional[LocalMedia]:
-        """Get the info dictionary for a given local media ID.
-
-         Args:
-             media_id: The media ID of the content
-
-        Returns:
-            A LocalMedia object of the information for the media item, or if the media
-            has not been uploaded yet or does not otherwise exist, it will return None
-        """
-        return await self.store.get_local_media(media_id)
-
     async def get_local_media_info_for_request(
         self, request: SynapseRequest, media_id: str, max_timeout_ms: int
     ) -> Optional[LocalMedia]:
@@ -441,7 +429,7 @@ class MediaRepository:
         wait_until = self.clock.time_msec() + max_timeout_ms
         while True:
             # Get the info for the media
-            media_info = await self.get_local_media_info(media_id)
+            media_info = await self.store.get_local_media(media_id)
             if not media_info:
                 logger.info("Media %s is unknown", media_id)
                 respond_404(request)
