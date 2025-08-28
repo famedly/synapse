@@ -242,7 +242,9 @@ async def validate_attachment_request_and_retrieve_media_info(
             mxc_uri.media_id,
         )
 
-        if media_info is None:
+        # Do not expose that it was a different user that uploaded the media. Denial of
+        # metadata leak
+        if media_info is None or media_info.user_id != requester.user.to_string():
             raise SynapseError(
                 HTTPStatus.BAD_REQUEST,
                 f"The media attachment request is invalid as the media '{mxc_uri.media_id}' does not exist",
@@ -256,12 +258,6 @@ async def validate_attachment_request_and_retrieve_media_info(
                 Codes.INVALID_PARAM,
             )
 
-        if media_info.user_id != requester.user.to_string():
-            raise SynapseError(
-                HTTPStatus.BAD_REQUEST,
-                f"The media attachment request from '{requester.user.to_string()}' is invalid as the media '{mxc_uri}' was uploaded by someone else, '{media_info.user_id}'",
-                Codes.INVALID_PARAM,
-            )
         media_info_for_attachment.add(media_info)
     return media_info_for_attachment
 
