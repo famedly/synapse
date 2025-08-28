@@ -67,9 +67,7 @@ impl EventInternalMetadataData {
         match self {
             EventInternalMetadataData::MediaReferences(o) => (
                 pyo3::intern!(py, "media_references"),
-                o.into_pyobject(py)
-                    .unwrap()
-                    .into_any(),
+                o.into_pyobject(py).unwrap().into_any(),
             ),
             EventInternalMetadataData::OutOfBandMembership(o) => (
                 pyo3::intern!(py, "out_of_band_membership"),
