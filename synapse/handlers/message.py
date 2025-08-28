@@ -2135,8 +2135,8 @@ class EventCreationHandler:
 
         events_and_pos = []
         for event in persisted_events:
-            # My attempts to make 'media_references' an object directly on
-            # 'internal_metadata' appear to have been successful. This seems to work
+            # TODO: Make 'media_references' an object directly on 'internal_metadata'.
+            #  This seems to work for now.
             maybe_media_restrictions_to_set = event.internal_metadata.get_dict().get(
                 "media_references"
             )
