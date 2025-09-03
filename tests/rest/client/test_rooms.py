@@ -4615,10 +4615,10 @@ class RoomStateMediaAttachmentTestCase(unittest.HomeserverTestCase):
         mxc_uri = self.create_media_and_set_restricted_flag()
         # attach media to some other event before we place our state request
         self.get_success(
-            self.store.set_media_restrictions(
+            self.store.set_media_restricted_to_event_id(
                 mxc_uri.server_name,
                 mxc_uri.media_id,
-                {"restrictions": {"event_id": "$some_fake_event_id"}},
+                "$some_fake_event_id",
             )
         )
 
@@ -4920,10 +4920,10 @@ class RoomSendEventMediaAttachmentTestCase(unittest.HomeserverTestCase):
 
         # attach media to some other event before we place our send event request
         self.get_success(
-            self.store.set_media_restrictions(
+            self.store.set_media_restricted_to_event_id(
                 mxc_uri.server_name,
                 mxc_uri.media_id,
-                {"restrictions": {"event_id": "$some_fake_event_id"}},
+                "$some_fake_event_id",
             )
         )
 

@@ -2133,18 +2133,6 @@ class EventCreationHandler:
 
         events_and_pos = []
         for event in persisted_events:
-            # Access the 'media_references' object from the event internal metadata.
-            # This will be None if it was not attached during creation of the event.
-            maybe_media_restrictions_to_set = event.internal_metadata.media_references
-
-            if maybe_media_restrictions_to_set:
-                for mxc_str in maybe_media_restrictions_to_set:
-                    mxc = MXCUri.from_str(mxc_str)
-                    await self.store.set_media_restrictions(
-                        mxc.server_name,
-                        mxc.media_id,
-                        {"restrictions": {"event_id": event.event_id}},
-                    )
             if self._ephemeral_events_enabled:
                 # If there's an expiry timestamp on the event, schedule its expiry.
                 self._message_handler.maybe_schedule_expiry(event)
