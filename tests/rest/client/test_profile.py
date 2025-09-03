@@ -1052,12 +1052,36 @@ class ProfileMediaAttachmentTestCase(unittest.HomeserverTestCase):
         assert channel.code == HTTPStatus.OK
         assert channel.json_body == {}
 
-        # Try attaching the same media again.
+        # Try attaching the same media again. It is idempotent operation so does not return any error.
         channel = self.make_request(
             "PUT",
             f"/_matrix/client/v3/profile/{self.user}/avatar_url",
             access_token=self.tok,
             content={"avatar_url": str(mxc_uri)},
+        )
+        assert channel.code == HTTPStatus.OK
+        assert channel.json_body == {}
+
+        # Try attaching other media that already has restrictions from other users fails.
+        already_attached = self.create_media_and_set_restricted_flag(self.user)
+        self.get_success_or_raise(
+            self.store.set_media_restricted_to_event_id(
+                self.server_name, already_attached.media_id, "$random_event_id"
+            )
+        )
+        retrieved_restrictions = self.get_success_or_raise(
+            self.store.get_media_restrictions(
+                self.server_name, already_attached.media_id
+            )
+        )
+        assert retrieved_restrictions is not None
+        assert retrieved_restrictions.event_id == "$random_event_id"
+
+        channel = self.make_request(
+            "PUT",
+            f"/_matrix/client/v3/profile/{self.user}/avatar_url",
+            access_token=self.tok,
+            content={"avatar_url": str(already_attached)},
         )
         assert channel.code == HTTPStatus.BAD_REQUEST, channel.json_body
         assert channel.json_body["errcode"] == Codes.INVALID_PARAM
