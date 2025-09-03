@@ -25,8 +25,6 @@ import re
 from http import HTTPStatus
 from typing import TYPE_CHECKING, Tuple
 
-from matrix_common.types.mxc_uri import MXCUri
-
 from synapse.api.constants import ProfileFields
 from synapse.api.errors import Codes, SynapseError
 from synapse.handlers.profile import MAX_CUSTOM_FIELD_LEN
@@ -38,8 +36,7 @@ from synapse.http.servlet import (
 )
 from synapse.http.site import SynapseRequest
 from synapse.rest.client._base import client_patterns
-from synapse.storage.databases.main.media_repository import LocalMedia
-from synapse.types import JsonDict, JsonValue, Requester, UserID
+from synapse.types import JsonDict, JsonValue, UserID
 from synapse.util.stringutils import is_namedspaced_grammar
 
 if TYPE_CHECKING:
@@ -114,45 +111,6 @@ class ProfileFieldRestServlet(RestServlet):
         self.auth = hs.get_auth()
         self.enable_restricted_media = hs.config.experimental.msc3911_enabled
         self.media_repository = hs.get_media_repository()
-
-    async def _validate_avatar_url_and_retrieve_media_info(
-        self, avatar_url: str, requester: Requester
-    ) -> LocalMedia:
-        """
-        Validate avatar_url arg and parse the mxc_uri. Then retrieve the media information.
-
-        Args:
-            avatar_url: The raw avatar_url arg of request
-            requester: The user making the request
-
-        Returns:
-            Return the media info, or None if appropriate
-
-        Raises:
-            SynapseError: If any of the media is inappropriate or if the requester was not
-                allowed to attach the media
-        """
-        mxc_uri = MXCUri.from_str(avatar_url)
-        media_info = await self.media_repository.store.get_local_media(mxc_uri.media_id)
-        if media_info is None:
-            raise SynapseError(
-                HTTPStatus.BAD_REQUEST,
-                f"The media attachment request is invalid as the media '{mxc_uri.media_id}' does not exist",
-                Codes.INVALID_PARAM,
-            )
-        if not media_info.restricted:
-            raise SynapseError(
-                HTTPStatus.BAD_REQUEST,
-                f"The media attachment request is invalid as the media '{mxc_uri.media_id}' is not restricted",
-                Codes.INVALID_PARAM,
-            )
-        if media_info.user_id != requester.user.to_string():
-            raise SynapseError(
-                HTTPStatus.BAD_REQUEST,
-                f"The media attachment request is invalid as the media '{mxc_uri.media_id}' does not exist",
-                Codes.INVALID_PARAM,
-            )
-        return media_info
 
     async def on_GET(
         self, request: SynapseRequest, user_id: str, field_name: str
@@ -247,16 +205,13 @@ class ProfileFieldRestServlet(RestServlet):
                 user, requester, new_value, is_admin, propagate=propagate
             )
         elif field_name == ProfileFields.AVATAR_URL:
-            media = new_value
             if self.enable_restricted_media and new_value:
-                validated_media = (
-                    await self._validate_avatar_url_and_retrieve_media_info(
-                        new_value, requester
-                    )
+                validated_media = await self.media_repository.validate_media_url_and_retrieve_media_info(
+                    new_value, requester
                 )
-                media = validated_media.media_id
+                new_value = validated_media.media_id
             await self.profile_handler.set_avatar_url(
-                user, requester, media, is_admin, propagate=propagate
+                user, requester, new_value, is_admin, propagate=propagate
             )
         else:
             await self.profile_handler.set_profile_field(

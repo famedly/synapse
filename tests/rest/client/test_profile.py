@@ -1102,7 +1102,7 @@ class ProfileMediaAttachmentTestCase(unittest.HomeserverTestCase):
             )
         )
         assert user_avatar is not None
-        assert user_avatar in str(mxc_uri)
+        assert "mxc://test/" + user_avatar == str(mxc_uri)
 
         # Remove the media from the user profile.
         channel = self.make_request(

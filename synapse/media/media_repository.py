@@ -23,6 +23,7 @@ import errno
 import logging
 import os
 import shutil
+from http import HTTPStatus
 from io import BytesIO
 from typing import IO, TYPE_CHECKING, Dict, List, Optional, Set, Tuple
 
@@ -532,6 +533,41 @@ class MediaRepository:
             await respond_with_responder(
                 request, responder, media_type, media_length, upload_name
             )
+
+    async def validate_media_url_and_retrieve_media_info(
+        self, media_id: str, requester: Requester
+    ) -> LocalMedia:
+        """
+        Validate media_id arg and parse the mxc_uri. Then retrieve the media information.
+
+        Args:
+            media_id: The raw media_id arg of request
+            requester: The user making the request
+
+        Returns:
+            Return the media info, or None if appropriate
+
+        Raises:
+            SynapseError: If any of the media is inappropriate or if the requester was not
+                allowed to attach the media
+        """
+        if not media_id.startswith("mxc://"):
+            media_id = f"mxc://{media_id}"
+        mxc_uri = MXCUri.from_str(media_id)
+        media_info = await self.store.get_local_media(mxc_uri.media_id)
+        if media_info is None or media_info.user_id != requester.user.to_string():
+            raise SynapseError(
+                HTTPStatus.BAD_REQUEST,
+                f"The media attachment request is invalid as the media '{mxc_uri.media_id}' does not exist",
+                Codes.INVALID_PARAM,
+            )
+        if not media_info.restricted:
+            raise SynapseError(
+                HTTPStatus.BAD_REQUEST,
+                f"The media attachment request is invalid as the media '{mxc_uri.media_id}' is not restricted",
+                Codes.INVALID_PARAM,
+            )
+        return media_info
 
     async def get_remote_media(
         self,
