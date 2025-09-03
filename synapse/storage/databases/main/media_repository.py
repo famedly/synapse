@@ -19,7 +19,6 @@
 # [This file includes modifications made by New Vector Limited]
 #
 #
-import json
 import logging
 from enum import Enum
 from http import HTTPStatus
@@ -47,6 +46,7 @@ from synapse.storage.database import (
     LoggingTransaction,
 )
 from synapse.types import JsonDict, UserID
+from synapse.util import json_encoder
 
 if TYPE_CHECKING:
     from synapse.server import HomeServer
@@ -1163,30 +1163,102 @@ class MediaRepositoryStore(MediaRepositoryBackgroundUpdateStore):
 
         return None
 
-    async def set_media_restrictions(
+    async def set_media_restricted_to_event_id(
         self,
         server_name: str,
         media_id: str,
-        media_restrictions_json: JsonDict,
+        event_id: str,
     ) -> None:
         """
-        Add the media restrictions to the database
+        Add the media restrictions to a given Event ID to the database
 
         Args:
            server_name:
            media_id:
-           media_restrictions_json: The media restrictions as dict
+           event_id: The Event ID to restrict the media to
 
         Raises:
             SynapseError if the media already has restrictions on it
         """
+        await self.db_pool.runInteraction(
+            "set_media_restricted_to_event_id",
+            self.set_media_restricted_to_event_id_txn,
+            server_name=server_name,
+            media_id=media_id,
+            event_id=event_id,
+        )
+
+    def set_media_restricted_to_event_id_txn(
+        self,
+        txn: LoggingTransaction,
+        *,
+        server_name: str,
+        media_id: str,
+        event_id: str,
+    ) -> None:
+        json_object = {"restrictions": {"event_id": event_id}}
         try:
-            await self.db_pool.simple_insert(
+            self.db_pool.simple_insert_txn(
+                txn,
                 "media_attachments",
                 {
                     "server_name": server_name,
                     "media_id": media_id,
-                    "restrictions_json": json.dumps(media_restrictions_json),
+                    "restrictions_json": json_encoder.encode(json_object),
+                },
+            )
+        except self.db_pool.engine.module.IntegrityError:
+            # For sqlite, a unique constraint violation is an integrity error. For
+            # psycopg2, a UniqueViolation is a subclass of IntegrityError, so this
+            # covers both.
+            raise SynapseError(
+                HTTPStatus.BAD_REQUEST,
+                f"This media, '{media_id}' already has restrictions set.",
+                errcode=Codes.INVALID_PARAM,
+            )
+
+    async def set_media_restricted_to_user_profile(
+        self,
+        server_name: str,
+        media_id: str,
+        profile_user_id: str,
+    ) -> None:
+        """
+        Add the media restrictions to a given profile for a User ID to the database
+
+        Args:
+           server_name:
+           media_id:
+           profile_user_id: The User ID's profile to restrict the media to
+
+        Raises:
+            SynapseError if the media already has restrictions on it
+        """
+        await self.db_pool.runInteraction(
+            "set_media_restricted_to_user_profile",
+            self.set_media_restricted_to_user_profile_txn,
+            server_name=server_name,
+            media_id=media_id,
+            profile_user_id=profile_user_id,
+        )
+
+    def set_media_restricted_to_user_profile_txn(
+        self,
+        txn: LoggingTransaction,
+        *,
+        server_name: str,
+        media_id: str,
+        profile_user_id: str,
+    ) -> None:
+        json_object = {"restrictions": {"profile_user_id": profile_user_id}}
+        try:
+            self.db_pool.simple_insert_txn(
+                txn,
+                "media_attachments",
+                {
+                    "server_name": server_name,
+                    "media_id": media_id,
+                    "restrictions_json": json_encoder.encode(json_object),
                 },
             )
         except self.db_pool.engine.module.IntegrityError:

@@ -30,11 +30,10 @@ class MediaAttachmentStorageTestCase(unittest.HomeserverTestCase):
 
     def test_store_and_retrieve_media_restrictions_by_event_id(self) -> None:
         event_id = "$random_event_id"
-        media_restrictions = {"restrictions": {"event_id": event_id}}
         media_id = random_string(24)
         self.get_success_or_raise(
-            self.store.set_media_restrictions(
-                self.server_name, media_id, media_restrictions
+            self.store.set_media_restricted_to_event_id(
+                self.server_name, media_id, event_id
             )
         )
 
@@ -47,11 +46,10 @@ class MediaAttachmentStorageTestCase(unittest.HomeserverTestCase):
 
     def test_store_and_retrieve_media_restrictions_by_profile_user_id(self) -> None:
         user_id = UserID.from_string("@frank:test")
-        media_restrictions = {"restrictions": {"profile_user_id": user_id.to_string()}}
         media_id = random_string(24)
         self.get_success_or_raise(
-            self.store.set_media_restrictions(
-                self.server_name, media_id, media_restrictions
+            self.store.set_media_restricted_to_user_profile(
+                self.server_name, media_id, user_id.to_string()
             )
         )
 
@@ -109,12 +107,11 @@ class MediaPendingAttachmentTestCase(unittest.HomeserverTestCase):
         content_uri: str = upload_result["content_uri"]
         # We can split the content_uri on the last "/" and the rest is the media_id
         media_id = content_uri.rsplit("/", maxsplit=1)[1]
-
         event_id = "$something_hashy_doesnt_matter"
-        media_restrictions = {"restrictions": {"event_id": event_id}}
+
         self.get_success(
-            self.store.set_media_restrictions(
-                self.server_name, media_id, media_restrictions
+            self.store.set_media_restricted_to_event_id(
+                self.server_name, media_id, event_id
             )
         )
 
@@ -127,8 +124,8 @@ class MediaPendingAttachmentTestCase(unittest.HomeserverTestCase):
         assert existing_media_restrictions is not None
 
         self.get_failure(
-            self.store.set_media_restrictions(
-                self.server_name, media_id, media_restrictions
+            self.store.set_media_restricted_to_event_id(
+                self.server_name, media_id, event_id
             ),
             SynapseError,
         )
@@ -176,7 +173,8 @@ class MediaAttachmentFlowTestCase(unittest.HomeserverTestCase):
         # Create media by using create_or_update_content() helper. This will likely be
         # on the new `/create` and `/upload` endpoints for msc3911.
 
-        # set actual restrictions using storage method `set_media_restrictions()`
+        # set actual restrictions using storage methods
+        # `set_media_restricted_to_event_id()` or `set_media_restricted_to_user_profile()`
 
         # use `get_local_media()` to retrieve the data
 
@@ -193,10 +191,10 @@ class MediaAttachmentFlowTestCase(unittest.HomeserverTestCase):
 
         event_id = "$event_id_hash_goes_here"
         self.get_success(
-            self.store.set_media_restrictions(
+            self.store.set_media_restricted_to_event_id(
                 self.server_name,
                 media_id,
-                {"restrictions": {"event_id": event_id}},
+                event_id,
             )
         )
 

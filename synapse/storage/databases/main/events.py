@@ -40,6 +40,7 @@ from typing import (
 )
 
 import attr
+from matrix_common.types.mxc_uri import MXCUri
 from prometheus_client import Counter
 
 import synapse.metrics
@@ -2700,6 +2701,21 @@ class PersistEventsStore:
                 expiry_ts = event.content.get(EventContentFields.SELF_DESTRUCT_AFTER)
                 if type(expiry_ts) is int and not event.is_state():  # noqa: E721
                     self._insert_event_expiry_txn(txn, event.event_id, expiry_ts)
+
+            # Access the 'media_references' object from the event internal metadata.
+            # This will be None if media was not attached during creation of the event.
+            # Part of MSC3911: Linking media to events
+            maybe_media_restrictions_to_set = (
+                event.internal_metadata.media_references or []
+            )
+            for mxc_str in maybe_media_restrictions_to_set:
+                mxc = MXCUri.from_str(mxc_str)
+                self.store.set_media_restricted_to_event_id_txn(
+                    txn,
+                    server_name=mxc.server_name,
+                    media_id=mxc.media_id,
+                    event_id=event.event_id,
+                )
 
         # Insert into the room_memberships table.
         self._store_room_members_txn(
