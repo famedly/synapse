@@ -25,9 +25,10 @@ import logging
 import re
 from enum import Enum
 from http import HTTPStatus
-from typing import TYPE_CHECKING, Awaitable, Dict, List, Optional, Tuple
+from typing import TYPE_CHECKING, Awaitable, Callable, Dict, List, Optional, Tuple
 from urllib import parse as urlparse
 
+from matrix_common.types.mxc_uri import MXCUri
 from prometheus_client.core import Histogram
 
 from twisted.web.server import Request
@@ -69,6 +70,7 @@ from synapse.metrics.background_process_metrics import run_as_background_process
 from synapse.rest.client._base import client_patterns
 from synapse.rest.client.transactions import HttpTransactionCache
 from synapse.state import CREATE_KEY, POWER_KEY
+from synapse.storage.databases.main.media_repository import LocalMedia
 from synapse.streams.config import PaginationConfig
 from synapse.types import JsonDict, Requester, StreamToken, ThirdPartyInstanceID, UserID
 from synapse.types.state import StateFilter
@@ -191,6 +193,75 @@ class RoomCreateRestServlet(TransactionRestServlet):
         return user_supplied_config
 
 
+async def validate_attachment_request_and_retrieve_media_info(
+    requester: Requester,
+    request: SynapseRequest,
+    get_local_media_info_cb: Callable[[str], Awaitable[Optional[LocalMedia]]],
+) -> set[LocalMedia]:
+    """
+    Parse the request args for potential media attachment parameters. Validate those
+    parameters are safe and sane, then retrieve the media information for each.
+
+    Args:
+        requester: The user placing the request, to verify they are allowed
+        request: The request itself that has the parameters for parsing
+        get_local_media_info_cb: The callback on the media repository that will retrieve
+            the media information
+    Returns:
+        Return the media info in a set, or an empty set if appropriate
+
+    Raises:
+        SynapseError: If any of the media is inappropriate or if the requester was not
+            allowed to attach the media
+    """
+    # twisted.web.server.Request.args is incorrectly defined as Optional[Any]
+    args: Dict[bytes, List[bytes]] = request.args  # type: ignore
+    attach_media_list = parse_strings_from_args(
+        args, "org.matrix.msc3911.attach_media", default=[]
+    )
+
+    attach_media_set = set()
+    for unsafe_mxc in attach_media_list:
+        # Deduplicate multiple attach media requests with the same MXC
+        # It may be that the mxc provided does not have the correct scheme
+        # attached, coax it into the correct form
+        if not unsafe_mxc.startswith("mxc://"):
+            unsafe_mxc = f"mxc://{unsafe_mxc}"
+        attach_media_set.add(MXCUri.from_str(unsafe_mxc))
+
+    # Check each mxc passed in and raise 400, INVALID_PARAM for:
+    # * being non-existent
+    # * not being restricted
+    # * being from the wrong user
+
+    # XXX: Do we need to watch for race-y conditions where the local media info
+    #  will have changed between now and when it is persisted in a moment?
+    media_info_for_attachment = set()
+    for mxc_uri in attach_media_set:
+        media_info = await get_local_media_info_cb(
+            mxc_uri.media_id,
+        )
+
+        # Do not expose that it was a different user that uploaded the media. Denial of
+        # metadata leak
+        if media_info is None or media_info.user_id != requester.user.to_string():
+            raise SynapseError(
+                HTTPStatus.BAD_REQUEST,
+                f"The media attachment request is invalid as the media '{mxc_uri.media_id}' does not exist",
+                Codes.INVALID_PARAM,
+            )
+
+        if not media_info.restricted:
+            raise SynapseError(
+                HTTPStatus.BAD_REQUEST,
+                f"The media attachment request is invalid as the media '{mxc_uri.media_id}' is not restricted",
+                Codes.INVALID_PARAM,
+            )
+
+        media_info_for_attachment.add(media_info)
+    return media_info_for_attachment
+
+
 # TODO: Needs unit testing for generic events
 class RoomStateEventRestServlet(RestServlet):
     CATEGORY = "Event sending requests"
@@ -205,6 +276,9 @@ class RoomStateEventRestServlet(RestServlet):
         self.clock = hs.get_clock()
         self._max_event_delay_ms = hs.config.server.max_event_delay_ms
         self._spam_checker_module_callbacks = hs.get_module_api_callbacks().spam_checker
+        self.store = hs.get_datastores().main
+        self.enable_restricted_media = hs.config.experimental.msc3911_enabled
+        self.server_name = hs.config.server.server_name
 
     def register(self, http_server: HttpServer) -> None:
         # /rooms/$roomid/state/$eventtype
@@ -301,6 +375,18 @@ class RoomStateEventRestServlet(RestServlet):
         if txn_id:
             set_tag("txn_id", txn_id)
 
+        media_info_for_attachment: set[LocalMedia] = set()
+        if self.enable_restricted_media:
+            # This will raise if any of the attachment parameters or the requester is
+            # inappropriate
+            media_info_for_attachment = (
+                await validate_attachment_request_and_retrieve_media_info(
+                    requester,
+                    request,
+                    self.store.get_local_media,
+                )
+            )
+
         content = parse_json_object_from_request(request)
 
         is_requester_admin = await self.auth.is_server_admin(requester)
@@ -355,6 +441,7 @@ class RoomStateEventRestServlet(RestServlet):
                     action=membership,
                     content=content,
                     origin_server_ts=origin_server_ts,
+                    media_info_for_attachment=media_info_for_attachment,
                 )
             else:
                 event_dict: JsonDict = {
@@ -374,7 +461,10 @@ class RoomStateEventRestServlet(RestServlet):
                     event,
                     _,
                 ) = await self.event_creation_handler.create_and_send_nonmember_event(
-                    requester, event_dict, txn_id=txn_id
+                    requester,
+                    event_dict,
+                    txn_id=txn_id,
+                    media_info_for_attachment=media_info_for_attachment,
                 )
                 event_id = event.event_id
         except ShadowBanError:
@@ -395,6 +485,9 @@ class RoomSendEventRestServlet(TransactionRestServlet):
         self.delayed_events_handler = hs.get_delayed_events_handler()
         self.auth = hs.get_auth()
         self._max_event_delay_ms = hs.config.server.max_event_delay_ms
+        self.store = hs.get_datastores().main
+        self.enable_restricted_media = hs.config.experimental.msc3911_enabled
+        self.server_name = hs.config.server.server_name
 
     def register(self, http_server: HttpServer) -> None:
         # /rooms/$roomid/send/$event_type[/$txn_id]
@@ -410,6 +503,19 @@ class RoomSendEventRestServlet(TransactionRestServlet):
         txn_id: Optional[str],
     ) -> Tuple[int, JsonDict]:
         content = parse_json_object_from_request(request)
+        # Requirement is only to do this for PUT, but the POST also uses the same
+        # abstraction. It appears the PUT variant includes a txn_id, perhaps use that?
+        media_info_for_attachment: set[LocalMedia] = set()
+        if self.enable_restricted_media:
+            # This will raise if any of the attachment parameters or the requester is
+            # inappropriate
+            media_info_for_attachment = (
+                await validate_attachment_request_and_retrieve_media_info(
+                    requester,
+                    request,
+                    self.store.get_local_media,
+                )
+            )
 
         origin_server_ts = None
         if requester.app_service:
@@ -446,7 +552,10 @@ class RoomSendEventRestServlet(TransactionRestServlet):
                 event,
                 _,
             ) = await self.event_creation_handler.create_and_send_nonmember_event(
-                requester, event_dict, txn_id=txn_id
+                requester,
+                event_dict,
+                txn_id=txn_id,
+                media_info_for_attachment=media_info_for_attachment,
             )
             event_id = event.event_id
         except ShadowBanError:

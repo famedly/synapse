@@ -39,6 +39,8 @@ class EventInternalMetadata:
     """The access token ID of the user who sent this event, if any."""
     device_id: str
     """The device ID of the user who sent this event, if any."""
+    media_references: Optional[List[str]]
+    """The media references that acts as a restriction to this event, if any."""
 
     def get_dict(self) -> JsonDict: ...
     def is_outlier(self) -> bool: ...

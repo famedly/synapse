@@ -25,6 +25,8 @@ import random
 from http import HTTPStatus
 from typing import TYPE_CHECKING, Iterable, List, Optional, Set, Tuple
 
+from matrix_common.types.mxc_uri import MXCUri
+
 from synapse import types
 from synapse.api.constants import (
     AccountDataTypes,
@@ -52,6 +54,7 @@ from synapse.logging import opentracing
 from synapse.metrics import event_processing_positions
 from synapse.metrics.background_process_metrics import run_as_background_process
 from synapse.replication.http.push import ReplicationCopyPusherRestServlet
+from synapse.storage.databases.main.media_repository import LocalMedia
 from synapse.storage.databases.main.state_deltas import StateDelta
 from synapse.storage.invite_rule import InviteRule
 from synapse.types import (
@@ -402,6 +405,7 @@ class RoomMemberHandler(metaclass=abc.ABCMeta):
         require_consent: bool = True,
         outlier: bool = False,
         origin_server_ts: Optional[int] = None,
+        media_info_for_attachment: Optional[set[LocalMedia]] = None,
     ) -> Tuple[str, int]:
         """
         Internal membership update function to get an existing event or create
@@ -434,6 +438,8 @@ class RoomMemberHandler(metaclass=abc.ABCMeta):
                 opposed to being inline with the current DAG.
             origin_server_ts: The origin_server_ts to use if a new event is created. Uses
                 the current timestamp if set to None.
+            media_info_for_attachment: An optional set of LocalMedia objects, for use in
+                restricting media.
 
         Returns:
             Tuple of event ID and stream ordering position
@@ -486,6 +492,13 @@ class RoomMemberHandler(metaclass=abc.ABCMeta):
                     depth=depth,
                     require_consent=require_consent,
                     outlier=outlier,
+                    mxc_restriction_list_for_event=[
+                        MXCUri(self._server_name, local_media.media_id)
+                        for local_media in media_info_for_attachment
+                        if local_media
+                    ]
+                    if media_info_for_attachment is not None
+                    else None,
                 )
                 context = await unpersisted_context.persist(event)
                 prev_state_ids = await context.get_prev_state_ids(
@@ -503,6 +516,7 @@ class RoomMemberHandler(metaclass=abc.ABCMeta):
                             events_and_context=[(event, context)],
                             extra_users=[target],
                             ratelimit=ratelimit,
+                            media_info_for_attachment=media_info_for_attachment,
                         )
                     )
 
@@ -581,6 +595,7 @@ class RoomMemberHandler(metaclass=abc.ABCMeta):
         state_event_ids: Optional[List[str]] = None,
         depth: Optional[int] = None,
         origin_server_ts: Optional[int] = None,
+        media_info_for_attachment: Optional[set[LocalMedia]] = None,
     ) -> Tuple[str, int]:
         """Update a user's membership in a room.
 
@@ -611,6 +626,8 @@ class RoomMemberHandler(metaclass=abc.ABCMeta):
                 based on the prev_events.
             origin_server_ts: The origin_server_ts to use if a new event is created. Uses
                 the current timestamp if set to None.
+            media_info_for_attachment: An optional set of LocalMedia objects, for use in
+                restricting media.
 
         Returns:
             A tuple of the new event ID and stream ID.
@@ -673,6 +690,7 @@ class RoomMemberHandler(metaclass=abc.ABCMeta):
                             state_event_ids=state_event_ids,
                             depth=depth,
                             origin_server_ts=origin_server_ts,
+                            media_info_for_attachment=media_info_for_attachment,
                         )
 
         return result
@@ -695,6 +713,7 @@ class RoomMemberHandler(metaclass=abc.ABCMeta):
         state_event_ids: Optional[List[str]] = None,
         depth: Optional[int] = None,
         origin_server_ts: Optional[int] = None,
+        media_info_for_attachment: Optional[set[LocalMedia]] = None,
     ) -> Tuple[str, int]:
         """Helper for update_membership.
 
@@ -727,6 +746,8 @@ class RoomMemberHandler(metaclass=abc.ABCMeta):
                 based on the prev_events.
             origin_server_ts: The origin_server_ts to use if a new event is created. Uses
                 the current timestamp if set to None.
+            media_info_for_attachment: An optional set of LocalMedia objects, for use in
+                restricting media.
 
         Returns:
             A tuple of the new event ID and stream ID.
@@ -931,6 +952,7 @@ class RoomMemberHandler(metaclass=abc.ABCMeta):
                 require_consent=require_consent,
                 outlier=outlier,
                 origin_server_ts=origin_server_ts,
+                media_info_for_attachment=media_info_for_attachment,
             )
 
         latest_event_ids = await self.store.get_prev_events_for_room(room_id)
@@ -1189,6 +1211,7 @@ class RoomMemberHandler(metaclass=abc.ABCMeta):
             require_consent=require_consent,
             outlier=outlier,
             origin_server_ts=origin_server_ts,
+            media_info_for_attachment=media_info_for_attachment,
         )
 
     async def check_for_any_membership_in_room(
