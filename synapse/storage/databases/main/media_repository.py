@@ -74,41 +74,34 @@ class MediaRestrictions:
     event_id: Optional[str] = None
     profile_user_id: Optional[UserID] = None
 
-
 @attr.s(slots=True, frozen=True, auto_attribs=True)
-class LocalMedia:
+class Media:
+    """Abstract base class for media, either local or remote"""
     media_id: str
     media_type: str
-    media_length: Optional[int]
-    upload_name: str
     created_ts: int
-    url_cache: Optional[str]
     last_access_ts: int
-    quarantined_by: Optional[str]
-    safe_from_quarantine: bool
-    user_id: Optional[str]
     authenticated: Optional[bool]
+    quarantined_by: Optional[str]
     sha256: Optional[str]
     restricted: bool
     attachments: Optional[MediaRestrictions]
 
 
 @attr.s(slots=True, frozen=True, auto_attribs=True)
-class RemoteMedia:
+class LocalMedia(Media):
+    media_length: Optional[int]
+    upload_name: str
+    url_cache: Optional[str]
+    safe_from_quarantine: bool
+    user_id: Optional[str]
+
+@attr.s(slots=True, frozen=True, auto_attribs=True)
+class RemoteMedia(Media):
     media_origin: str
-    media_id: str
-    media_type: str
     media_length: int
     upload_name: Optional[str]
     filesystem_id: str
-    created_ts: int
-    last_access_ts: int
-    quarantined_by: Optional[str]
-    authenticated: Optional[bool]
-    sha256: Optional[str]
-    restricted: bool
-    attachments: Optional[MediaRestrictions]
-
 
 @attr.s(slots=True, frozen=True, auto_attribs=True)
 class UrlCache:
@@ -256,6 +249,7 @@ class MediaRepositoryStore(MediaRepositoryBackgroundUpdateStore):
         Returns:
             None if the media_id doesn't exist.
         """
+        import logging
         row = await self.db_pool.simple_select_one(
             "local_media_repository",
             {"media_id": media_id},
@@ -277,13 +271,17 @@ class MediaRepositoryStore(MediaRepositoryBackgroundUpdateStore):
             desc="get_local_media",
         )
         if row is None:
+            logging.error("🪯 row is None")
             return None
         restriction_info = None
         if bool(row[11]):
+            logging.error("🪯 media is restricted")
             restriction_info = await self.get_media_restrictions(
                 self.server_name, media_id
             )
+            logging.error("🪯 got media restrictions")
 
+        logging.error(f"🪯 returning LocalMedia")
         return LocalMedia(
             media_id=media_id,
             media_type=row[0],
@@ -1156,11 +1154,13 @@ class MediaRepositoryStore(MediaRepositoryBackgroundUpdateStore):
         # There should only ever be a single row. This is enforced by the constraint on
         # the table to only have a single row per server_name/media_id combo
         if row:
-            event_id = row[0][0]
-            # Because the UserID object can be None, the 'to_string()' method may not exist
-            profile_user_id = UserID.from_string(row[0][1]) if row[0][1] else None
-            return MediaRestrictions(event_id=event_id, profile_user_id=profile_user_id)
-
+            try:
+                event_id = row[0][0]
+                # Because the UserID object can be None, the 'to_string()' method may not exist
+                profile_user_id = UserID.from_string(row[0][1]) if row[0][1] else None
+                return MediaRestrictions(event_id=event_id, profile_user_id=profile_user_id)
+            except Exception as e:
+                logging.error(f"Exception: {e}")
         return None
 
     async def set_media_restrictions(
@@ -1198,3 +1198,36 @@ class MediaRepositoryStore(MediaRepositoryBackgroundUpdateStore):
                 f"This media, '{media_id}' already has restrictions set.",
                 errcode=Codes.INVALID_PARAM,
             )
+
+    async def get_restricted(
+        self, server_name: Optional[str], media_id: str
+    ) -> bool:
+        """
+        Retrieve the restricted field on a given media_id. 
+        """
+        sql = """
+        SELECT restricted
+        FROM local_media_repository
+        WHERE server_name = ? AND media_id = ?
+        """
+        if server_name:
+            sql = """
+            SELECT restricted
+            FROM remote_media_cache
+            WHERE server_name = ? AND media_id = ?
+            """
+
+        args = [server_name, media_id]
+        row: List[Tuple[Optional[str], Optional[str]]] = await self.db_pool.execute(
+            "get_media_restrictions_v2", sql, *args
+        )
+
+        # There should only ever be a single row. This is enforced by the constraint on
+        # the table to only have a single row per server_name/media_id combo
+        if row:
+            event_id = row[0][0]
+            # Because the UserID object can be None, the 'to_string()' method may not exist
+            profile_user_id = UserID.from_string(row[0][1]) if row[0][1] else None
+            return MediaRestrictions(event_id=event_id, profile_user_id=profile_user_id)
+
+        return None

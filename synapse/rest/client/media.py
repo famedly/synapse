@@ -141,6 +141,7 @@ class ThumbnailResource(RestServlet):
         self.prevent_media_downloads_from = hs.config.media.prevent_media_downloads_from
         self.thumbnailer = ThumbnailProvider(hs, media_repo, media_storage)
         self.auth = hs.get_auth()
+        self.msc3911_restricted_media = hs.config.experimental.msc3911_enabled
 
     async def on_GET(
         self, request: SynapseRequest, server_name: str, media_id: str
@@ -172,6 +173,7 @@ class ThumbnailResource(RestServlet):
                     m_type,
                     max_timeout_ms,
                     False,
+                    restricted_media_enabled=self.msc3911_restricted_media,
                 )
             else:
                 await self.thumbnailer.respond_local_thumbnail(
@@ -183,6 +185,7 @@ class ThumbnailResource(RestServlet):
                     m_type,
                     max_timeout_ms,
                     False,
+                    restricted_media_enabled=self.msc3911_restricted_media,
                 )
             self.media_repo.mark_recently_accessed(None, media_id)
         else:
@@ -211,6 +214,7 @@ class ThumbnailResource(RestServlet):
                 max_timeout_ms,
                 ip_address,
                 True,
+                restricted_media_enabled=self.msc3911_restricted_media,
             )
             self.media_repo.mark_recently_accessed(server_name, media_id)
 
@@ -227,6 +231,7 @@ class DownloadResource(RestServlet):
         self.media_repo = media_repo
         self._is_mine_server_name = hs.is_mine_server_name
         self.auth = hs.get_auth()
+        self.msc3911_restricted_media = hs.config.experimental.msc3911_enabled
 
     async def on_GET(
         self,
@@ -262,7 +267,7 @@ class DownloadResource(RestServlet):
 
         if self._is_mine_server_name(server_name):
             await self.media_repo.get_local_media(
-                request, media_id, file_name, max_timeout_ms
+                request, media_id, file_name, max_timeout_ms, restricted_media_enabled=True
             )
         else:
             ip_address = request.getClientAddress().host
@@ -274,6 +279,7 @@ class DownloadResource(RestServlet):
                 max_timeout_ms,
                 ip_address,
                 True,
+                restricted_media_enabled=True,
             )
 
 

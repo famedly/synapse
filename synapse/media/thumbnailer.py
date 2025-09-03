@@ -270,6 +270,7 @@ class ThumbnailProvider:
         self.media_storage = media_storage
         self.store = hs.get_datastores().main
         self.dynamic_thumbnails = hs.config.media.dynamic_thumbnails
+        self.server_name = hs.hostname
 
     async def respond_local_thumbnail(
         self,
@@ -282,6 +283,7 @@ class ThumbnailProvider:
         max_timeout_ms: int,
         for_federation: bool,
         allow_authenticated: bool = True,
+        restricted_media_enabled: bool = False,
     ) -> None:
         media_info = await self.media_repo.get_local_media_info(
             request, media_id, max_timeout_ms
@@ -294,6 +296,13 @@ class ThumbnailProvider:
         if self.hs.config.media.enable_authenticated_media and not allow_authenticated:
             if media_info.authenticated:
                 raise NotFoundError()
+
+        if restricted_media_enabled:
+            if media_info.restricted:
+                restrictions = self.store.get_media_restrictions(self.server_name, media_id)
+                if restrictions:
+                    await self.media_repo.validate_media_access(request.requester, restrictions)
+
 
         # Once we've checked auth we can return early if the media is cached on
         # the client
@@ -327,6 +336,7 @@ class ThumbnailProvider:
         max_timeout_ms: int,
         for_federation: bool,
         allow_authenticated: bool = True,
+        restricted_media_enabled: bool = False,
     ) -> None:
         media_info = await self.media_repo.get_local_media_info(
             request, media_id, max_timeout_ms
@@ -339,6 +349,12 @@ class ThumbnailProvider:
         if self.hs.config.media.enable_authenticated_media and not allow_authenticated:
             if media_info.authenticated:
                 raise NotFoundError()
+
+        if restricted_media_enabled:
+            if media_info.restricted:
+                restrictions = self.store.get_media_restrictions(self.server_name, media_id)
+                if restrictions:
+                    await self.media_repo.validate_media_access(request.requester, restrictions)
 
         # Once we've checked auth we can return early if the media is cached on
         # the client
@@ -422,6 +438,7 @@ class ThumbnailProvider:
         ip_address: str,
         use_federation: bool,
         allow_authenticated: bool = True,
+        restricted_media_enabled: bool = False,
     ) -> None:
         media_info = await self.media_repo.get_remote_media_info(
             server_name,
@@ -430,6 +447,7 @@ class ThumbnailProvider:
             ip_address,
             use_federation,
             allow_authenticated,
+            restricted_media_enabled,
         )
         if not media_info:
             respond_404(request)
@@ -504,6 +522,7 @@ class ThumbnailProvider:
         ip_address: str,
         use_federation: bool,
         allow_authenticated: bool = True,
+        restricted_media_enabled: bool = False,
     ) -> None:
         # TODO: Don't download the whole remote file
         # We should proxy the thumbnail from the remote server instead of
@@ -515,6 +534,7 @@ class ThumbnailProvider:
             ip_address,
             use_federation,
             allow_authenticated,
+            restricted_media_enabled,
         )
         if not media_info:
             return

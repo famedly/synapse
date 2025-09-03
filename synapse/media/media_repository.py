@@ -67,7 +67,11 @@ from synapse.media.storage_provider import StorageProviderWrapper
 from synapse.media.thumbnailer import Thumbnailer, ThumbnailError
 from synapse.media.url_previewer import UrlPreviewer
 from synapse.metrics.background_process_metrics import run_as_background_process
-from synapse.storage.databases.main.media_repository import LocalMedia, RemoteMedia
+from synapse.storage.databases.main.media_repository import (
+    LocalMedia,
+    MediaRestrictions,
+    RemoteMedia,
+)
 from synapse.types import Requester, UserID
 from synapse.util.async_helpers import Linearizer
 from synapse.util.retryutils import NotRetryingDestination
@@ -94,6 +98,8 @@ class MediaRepository:
         self.clock = hs.get_clock()
         self.server_name = hs.hostname
         self.store = hs.get_datastores().main
+        self.profile_handler = hs.get_profile_handler()
+        self.event_handler = hs.get_event_handler()
         self.max_upload_size = hs.config.media.max_upload_size
         self.max_image_pixels = hs.config.media.max_image_pixels
         self.unused_expiration_time = hs.config.media.unused_expiration_time
@@ -181,6 +187,9 @@ class MediaRepository:
         self.media_upload_limits = hs.config.media.media_upload_limits
         self.media_upload_limits.sort(
             key=lambda limit: limit.time_period_ms, reverse=True
+        )
+        self.msc3911_restricted_media = (
+            hs.config.experimental.msc3911_enabled
         )
 
     def _start_update_recently_accessed(self) -> Deferred:
@@ -460,6 +469,26 @@ class MediaRepository:
         self.respond_not_yet_uploaded(request)
         return None
 
+
+    async def validate_media_access(self, requester: Requester, restrictions: MediaRestrictions) -> None:
+        """
+        If media is restricted but restriction is empty, the media is in pending state
+        and only creator can see it until it is attached to an event or profile.
+        """
+        import logging
+        if restrictions.profile_user_id:
+            # If shared room restricted profile lookups, it will be restricted
+            # to users that share rooms
+            await self.profile_handler.check_profile_query_allowed(restrictions.profile_user_id, requester.user)
+            return
+        else:
+            # Media is attached to an event. Currently it is not possible to
+            # have restriction types other than profile_user_id or event_id
+            # `get_event` raise error if user does not have access to the event.
+            await self.event_handler.get_event(requester.user, None, restrictions.event_id)
+            # Check the stripped state events conditions
+            return
+
     async def get_local_media(
         self,
         request: SynapseRequest,
@@ -468,6 +497,7 @@ class MediaRepository:
         max_timeout_ms: int,
         allow_authenticated: bool = True,
         federation: bool = False,
+        restricted_media_enabled: bool = False,
     ) -> None:
         """Responds to requests for local media, if exists, or returns 404.
 
@@ -493,19 +523,21 @@ class MediaRepository:
             if media_info.authenticated:
                 raise NotFoundError()
 
-        # MSC3911: If media is restricted but restriction is empty, the media is in
-        # pending state and only creator can see it until it is attached to an event.
-        if media_info.restricted:
-            restrictions = await self.store.get_media_restrictions(
-                self.server_name, media_info.media_id
-            )
-            if not restrictions:
-                if not (
-                    isinstance(request.requester, Requester)
-                    and request.requester.user.to_string() == media_info.user_id
-                ):
-                    respond_404(request)
-                    return
+        if restricted_media_enabled:
+            if media_info.restricted:
+                if not media_info.attachments:
+                    # If media is restricted but restriction is empty, the media is in
+                    # pending state. Only creator can see it until it is attached to
+                    # an event or profile.
+                    if not (
+                        isinstance(request.requester, Requester)
+                        and request.requester.user.to_string() == media_info.user_id
+                    ):
+                        respond_404(request)
+                        return
+                # restrictions exists
+                else:
+                    await self.validate_media_access(request.requester, media_info.attachments)
 
         self.mark_recently_accessed(None, media_id)
 
@@ -543,6 +575,7 @@ class MediaRepository:
         ip_address: str,
         use_federation_endpoint: bool,
         allow_authenticated: bool = True,
+        restricted_media_enabled: bool = False,
     ) -> None:
         """Respond to requests for remote media.
 
@@ -591,6 +624,8 @@ class MediaRepository:
                 ip_address,
                 use_federation_endpoint,
                 allow_authenticated,
+                restricted_media_enabled=restricted_media_enabled,
+                requester=request.requester
             )
 
         # Check if the media is cached on the client, if so return 304. We need
@@ -625,6 +660,7 @@ class MediaRepository:
         ip_address: str,
         use_federation: bool,
         allow_authenticated: bool,
+        restricted_media_enabled: bool = False,
     ) -> RemoteMedia:
         """Gets the media info associated with the remote file, downloading
         if necessary.
@@ -679,6 +715,8 @@ class MediaRepository:
         ip_address: str,
         use_federation_endpoint: bool,
         allow_authenticated: bool,
+        restricted_media_enabled: bool = False,
+        requester: Optional[Requester] = None,
     ) -> Tuple[Optional[Responder], RemoteMedia]:
         """Looks for media in local cache, if not there then attempt to
         download from remote server.
@@ -708,6 +746,12 @@ class MediaRepository:
         # file_id is the ID we use to track the file locally. If we've already
         # seen the file then reuse the existing ID, otherwise generate a new
         # one.
+
+        if restricted_media_enabled:
+            if media_info.restricted:
+                restrictions = self.store.get_media_restrictions(server_name, media_id)
+                if restrictions:
+                    await self.validate_media_access(requester, restrictions)
 
         # If we have an entry in the DB, try and look for it
         if media_info:
@@ -803,6 +847,9 @@ class MediaRepository:
         file_id = random_string(24)
 
         file_info = FileInfo(server_name=server_name, file_id=file_id)
+
+        # TODO: Block download if needed!!
+
 
         async with self.media_storage.store_into_file(file_info) as (f, fname):
             sha256writer = SHA256TransparentIOWriter(f)

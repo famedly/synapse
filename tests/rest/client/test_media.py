@@ -3029,7 +3029,7 @@ class DisableUnrestrictedResourceTestCase(unittest.HomeserverTestCase):
         )
 
 
-class RestrictedResourceTestCase(unittest.HomeserverTestCase):
+class RestrictedResourceUploadTestCase(unittest.HomeserverTestCase):
     """
     Tests restricted media creation and upload endpoints when `msc3911_enabled` is
     configured to be True.
