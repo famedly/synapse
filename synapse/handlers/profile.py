@@ -20,7 +20,10 @@
 #
 import logging
 import random
+from http import HTTPStatus
 from typing import TYPE_CHECKING, List, Optional, Union
+
+from matrix_common.types.mxc_uri import MXCUri
 
 from synapse.api.constants import ProfileFields
 from synapse.api.errors import (
@@ -76,6 +79,11 @@ class ProfileHandler:
         self._is_mine_server_name = hs.is_mine_server_name
 
         self._third_party_rules = hs.get_module_api_callbacks().third_party_event_rules
+
+        self.enable_restricted_media = hs.config.experimental.msc3911_enabled
+        self.disable_unrestricted_media = (
+            hs.config.experimental.msc3911_unrestricted_media_upload_disabled
+        )
 
     async def get_profile(self, user_id: str, ignore_backoff: bool = True) -> JsonDict:
         """
@@ -273,6 +281,56 @@ class ProfileHandler:
 
             return result.get("avatar_url")
 
+    async def validate_avatar_url(self, avatar_url: str, requester: Requester) -> None:
+        """
+        Validate avatar_url to make sure the media is owned by the requester or media
+        is already attached to other event or profile.
+
+        Args:
+            avatar_url: The raw avatar_url arg of request
+            requester: The user making the request
+
+        Returns:
+            Return None when all the validations pass
+
+        Raises:
+            SynapseError: If any of the media is inappropriate or if the requester was not
+                allowed to attach the media
+        """
+        if not avatar_url.startswith("mxc://"):
+            avatar_url = f"mxc://{avatar_url}"
+        mxc_uri = MXCUri.from_str(avatar_url)
+
+        media_info = await self.hs.get_datastores().main.get_local_media(
+            mxc_uri.media_id
+        )
+        if media_info is None or media_info.user_id != requester.user.to_string():
+            raise SynapseError(
+                HTTPStatus.BAD_REQUEST,
+                f"The media attachment request is invalid as the media '{mxc_uri.media_id}' does not exist",
+                Codes.INVALID_PARAM,
+            )
+        if self.disable_unrestricted_media and not media_info.restricted:
+            raise SynapseError(
+                HTTPStatus.BAD_REQUEST,
+                f"The media attachment request is invalid as the media '{mxc_uri.media_id}' is not restricted",
+                Codes.INVALID_PARAM,
+            )
+        if (
+            media_info.restricted
+            and media_info.attachments
+            and (
+                media_info.attachments.event_id
+                or media_info.attachments.profile_user_id
+            )
+        ):
+            raise SynapseError(
+                HTTPStatus.BAD_REQUEST,
+                f"The media attachment request is invalid as the media '{mxc_uri.media_id}' is already attached",
+                Codes.INVALID_PARAM,
+            )
+        return
+
     async def set_avatar_url(
         self,
         target_user: UserID,
@@ -328,6 +386,15 @@ class ProfileHandler:
         if by_admin:
             requester = create_requester(
                 target_user, authenticated_entity=requester.authenticated_entity
+            )
+
+        # msc3911: Update the media restrictions to include the profile user ID
+        if self.enable_restricted_media and avatar_url_to_set:
+            await self.validate_avatar_url(avatar_url_to_set, requester)
+            await self.hs.get_datastores().main.set_media_restricted_to_user_profile(
+                self.hs.config.server.server_name,
+                avatar_url_to_set,
+                str(target_user),
             )
 
         await self.store.set_profile_avatar_url(target_user, avatar_url_to_set)

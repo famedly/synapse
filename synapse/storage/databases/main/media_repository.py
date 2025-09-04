@@ -1227,13 +1227,16 @@ class MediaRepositoryStore(MediaRepositoryBackgroundUpdateStore):
         Add the media restrictions to a given profile for a User ID to the database
 
         Args:
-           server_name:
-           media_id:
+           server_name: The name of the server
+           media_id: The media ID that doesn't contain "mxc://{servername}/"
            profile_user_id: The User ID's profile to restrict the media to
 
         Raises:
             SynapseError if the media already has restrictions on it
         """
+        if "mxc://" in media_id:
+            # parse mxc_uri into media_id
+            media_id = media_id.split("/")[-1]
         await self.db_pool.runInteraction(
             "set_media_restricted_to_user_profile",
             self.set_media_restricted_to_user_profile_txn,

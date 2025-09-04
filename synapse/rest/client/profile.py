@@ -109,6 +109,8 @@ class ProfileFieldRestServlet(RestServlet):
         self.hs = hs
         self.profile_handler = hs.get_profile_handler()
         self.auth = hs.get_auth()
+        self.enable_restricted_media = hs.config.experimental.msc3911_enabled
+        self.media_repository = hs.get_media_repository()
 
     async def on_GET(
         self, request: SynapseRequest, user_id: str, field_name: str
@@ -197,12 +199,20 @@ class ProfileFieldRestServlet(RestServlet):
                 "Updating profile while account is suspended is not allowed.",
                 Codes.USER_ACCOUNT_SUSPENDED,
             )
-
         if field_name == ProfileFields.DISPLAYNAME:
             await self.profile_handler.set_displayname(
                 user, requester, new_value, is_admin, propagate=propagate
             )
         elif field_name == ProfileFields.AVATAR_URL:
+            if self.enable_restricted_media and new_value:
+                current_avatar_url = (
+                    await self.profile_handler.store.get_profile_avatar_url(
+                        requester.user
+                    )
+                )
+                # If new_value is the same as existing one, keep the function idempotent
+                if current_avatar_url and str(current_avatar_url) == new_value:
+                    return 200, {}
             await self.profile_handler.set_avatar_url(
                 user, requester, new_value, is_admin, propagate=propagate
             )
