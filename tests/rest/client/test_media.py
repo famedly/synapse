@@ -24,11 +24,15 @@ import json
 import os
 import re
 import shutil
+import time
+from contextlib import nullcontext
+from http import HTTPStatus
 from typing import Any, BinaryIO, ClassVar, Dict, List, Optional, Sequence, Tuple, Type
 from unittest.mock import MagicMock, Mock, patch
 from urllib import parse
 from urllib.parse import quote, urlencode
 
+from matrix_common.types.mxc_uri import MXCUri
 from parameterized import parameterized, parameterized_class
 from PIL import Image as Image
 
@@ -44,7 +48,12 @@ from twisted.web.http_headers import Headers
 from twisted.web.iweb import UNKNOWN_LENGTH, IResponse
 from twisted.web.resource import Resource
 
-from synapse.api.errors import Codes, HttpResponseException
+from synapse.api.constants import EventTypes, HistoryVisibility, Membership
+from synapse.api.errors import (
+    Codes,
+    HttpResponseException,
+    UnauthorizedRequestAPICallError,
+)
 from synapse.api.ratelimiting import Ratelimiter
 from synapse.config.oembed import OEmbedEndpointConfig
 from synapse.http.client import MultipartResponse
@@ -54,10 +63,11 @@ from synapse.media._base import FileInfo, ThumbnailInfo
 from synapse.media.thumbnailer import ThumbnailProvider
 from synapse.media.url_previewer import IMAGE_CACHE_EXPIRY_MS
 from synapse.rest import admin
-from synapse.rest.client import login, media
+from synapse.rest.client import login, media, room
 from synapse.server import HomeServer
-from synapse.types import JsonDict, UserID
-from synapse.util import Clock
+from synapse.storage.databases.main.media_repository import LocalMedia
+from synapse.types import JsonDict, UserID, create_requester
+from synapse.util import Clock, json_encoder
 from synapse.util.stringutils import parse_and_validate_mxc_uri
 
 from tests import unittest
@@ -3115,7 +3125,7 @@ class RestrictedResourceUploadTestCase(unittest.HomeserverTestCase):
             f"/_matrix/client/v1/media/download/{self.hs.hostname}/{media_id}",
             access_token=self.creator_tok,
         )
-        assert channel.code == 200
+        assert channel.code == 200, channel.json_body
 
         # The other user cannot download the restricted resource in pending state.
         channel = self.make_request(
@@ -3123,7 +3133,7 @@ class RestrictedResourceUploadTestCase(unittest.HomeserverTestCase):
             f"/_matrix/client/v1/media/download/{self.hs.hostname}/{media_id}",
             access_token=self.other_user_tok,
         )
-        assert channel.code == 404
+        assert channel.code == 403, channel.json_body
 
     def test_async_upload_restricted_resource(self) -> None:
         """
@@ -3167,7 +3177,7 @@ class RestrictedResourceUploadTestCase(unittest.HomeserverTestCase):
             f"/_matrix/client/v1/media/download/{self.hs.hostname}/{media_id}",
             access_token=self.creator_tok,
         )
-        assert channel.code == 200
+        assert channel.code == 200, channel.json_body
 
         # The other user cannot download the restricted resource.
         channel = self.make_request(
@@ -3175,7 +3185,7 @@ class RestrictedResourceUploadTestCase(unittest.HomeserverTestCase):
             f"/_matrix/client/v1/media/download/{self.hs.hostname}/{media_id}",
             access_token=self.other_user_tok,
         )
-        assert channel.code == 404
+        assert channel.code == 403, channel.json_body
 
 
 class CopyRestrictedResource(unittest.HomeserverTestCase):
@@ -3319,3 +3329,892 @@ class CopyRestrictedResource(unittest.HomeserverTestCase):
 
         # Check if copied media is unattached to any event or user profile yet.
         assert copied_media.attachments is None
+
+
+class RestrictedMediaVisibilityTestCase(unittest.HomeserverTestCase):
+    servlets = [
+        admin.register_servlets,
+        login.register_servlets,
+        media.register_servlets,
+        room.register_servlets,
+        room.register_deprecated_servlets,
+    ]
+
+    def default_config(self) -> JsonDict:
+        config = super().default_config()
+        config.setdefault("experimental_features", {})
+        config["experimental_features"].update({"msc3911_enabled": True})
+        return config
+
+    def prepare(
+        self, reactor: MemoryReactor, clock: Clock, homeserver: HomeServer
+    ) -> None:
+        self.store = homeserver.get_datastores().main
+        self.server_name = self.hs.config.server.server_name
+        self.media_repo = self.hs.get_media_repository()
+        self.profile_handler = self.hs.get_profile_handler()
+
+        self.alice_user_id = self.register_user("alice", "password")
+        self.alice_tok = self.login("alice", "password")
+
+    def create_resource_dict(self) -> Dict[str, Resource]:
+        resources = super().create_resource_dict()
+        # The old endpoints are not loaded with the register_servlets above
+        resources["/_matrix/media"] = self.hs.get_media_repository_resource()
+        return resources
+
+    def create_restricted_media(self, user: Optional[str] = None) -> MXCUri:
+        mxc_uri = self.get_success(
+            self.media_repo.create_or_update_content(
+                "image/png",
+                "test_png_upload",
+                io.BytesIO(SMALL_PNG),
+                67,
+                UserID.from_string(user or self.alice_user_id),
+                restricted=True,
+            )
+        )
+        return mxc_uri
+
+    def retrieve_media_from_store(self, mxc_uri: MXCUri) -> LocalMedia:
+        local_media_object = self.get_success(
+            self.store.get_local_media(mxc_uri.media_id)
+        )
+        assert local_media_object is not None
+        return local_media_object
+
+    def create_test_room(
+        self,
+        visibility: str,
+        initial_room_avatar_mxc: Optional[MXCUri] = None,
+        invite_list: Optional[List[str]] = None,
+    ) -> str:
+        initial_state_list = [
+            {
+                "type": EventTypes.RoomHistoryVisibility,
+                "state_key": "",
+                "content": {"history_visibility": visibility},
+            }
+        ]
+
+        if initial_room_avatar_mxc:
+            # Simulate the same situation as `create_room()`, placing the room avatar
+            # after the history visibility event.
+            initial_state_list.append(
+                {
+                    "type": EventTypes.RoomAvatar,
+                    "state_key": "",
+                    "content": {
+                        "info": {"h": 1, "mimetype": "image/png", "size": 67, "w": 1},
+                        "url": str(initial_room_avatar_mxc),
+                    },
+                }
+            )
+        extra_content: Dict[str, Any] = {
+            "initial_state": initial_state_list,
+        }
+
+        if invite_list:
+            extra_content.update({"invite": invite_list})
+
+        room_id = self.helper.create_room_as(
+            self.alice_user_id,
+            is_public=True,
+            tok=self.alice_tok,
+            extra_content=extra_content,
+        )
+        assert room_id is not None
+        return room_id
+
+    def send_event_with_attached_media(
+        self, room_id: str, mxc_uri: MXCUri, tok: Optional[str] = None
+    ) -> FakeChannel:
+        txn_id = "m%s" % (str(time.time()))
+
+        channel1 = self.make_request(
+            "PUT",
+            f"/rooms/{room_id}/send/m.room.message/{txn_id}?org.matrix.msc3911.attach_media={str(mxc_uri)}",
+            content={"msgtype": "m.text", "body": "Hi, this is a message"},
+            access_token=tok or self.alice_tok,
+        )
+        return channel1
+
+    def insert_message_with_attached_media(self, room_id: str) -> LocalMedia:
+        mxc_uri = self.create_restricted_media()
+
+        channel = self.send_event_with_attached_media(room_id, mxc_uri)
+        self.assertEqual(channel.code, HTTPStatus.OK, channel.json_body)
+        assert "event_id" in channel.json_body
+        event_id = channel.json_body["event_id"]
+
+        # check restrictions are applied
+        restrictions = self.get_success(
+            self.store.get_media_restrictions(mxc_uri.server_name, mxc_uri.media_id)
+        )
+        assert restrictions is not None, str(restrictions)
+        assert restrictions.event_id == event_id
+        assert restrictions.profile_user_id is None
+
+        # Retrieve the media object for inspection in the test
+        local_media_object = self.retrieve_media_from_store(mxc_uri)
+
+        return local_media_object
+
+    def assert_expected_result(
+        self, target_user: UserID, media_object: LocalMedia, expected_bool: bool
+    ) -> None:
+        # If the expectation is True, it is expected the function is a success
+        # If the expectation is False, it is expected to raise the exception
+        #
+        # It may be easier to think of True and False here as Visible and Not Visible in
+        # the context of this TestCase.
+        if expected_bool:
+            # As a note about nullcontext manager: Support for async context behavior
+            # was added in python 3.10. However, we don't need that even when testing an
+            # async function, as it is wrapped into a sync function('get_success()' and
+            # 'get_success_or_raise()') to pump the reactor.
+            maybe_assert_exception = nullcontext()
+        else:
+            maybe_assert_exception = self.assertRaises(UnauthorizedRequestAPICallError)
+        with maybe_assert_exception:
+            self.get_success_or_raise(
+                self.media_repo.is_media_visible(target_user, media_object)
+            )
+
+    @parameterized.expand(
+        [
+            (HistoryVisibility.WORLD_READABLE, True),
+            (HistoryVisibility.SHARED, True),
+            (HistoryVisibility.JOINED, False),
+            (HistoryVisibility.INVITED, False),
+        ]
+    )
+    def test_message_media_visibility_to_users_not_sharing_room(
+        self, visibility: str, expected_result_bool: bool
+    ) -> None:
+        """
+        Test that a message with restricted media is not visible if appropriate to
+        someone not in that room
+        """
+
+        second_user = self.register_user("second_user_message_test", "password")
+        second_user_id = UserID.from_string(second_user)
+        self.login("second_user_message_test", "password")
+
+        room_id = self.create_test_room(
+            visibility,
+        )
+
+        local_media_object = self.insert_message_with_attached_media(room_id)
+
+        self.assert_expected_result(
+            second_user_id, local_media_object, expected_result_bool
+        )
+
+    @parameterized.expand(
+        [
+            (HistoryVisibility.WORLD_READABLE, True, True),
+            (HistoryVisibility.SHARED, True, True),
+            (HistoryVisibility.INVITED, False, True),
+            (HistoryVisibility.JOINED, False, False),
+        ]
+    )
+    def test_message_media_visibility_to_users_invited_to_room(
+        self,
+        visibility: str,
+        expected_before_result_bool: bool,
+        expected_after_result_bool: bool,
+    ) -> None:
+        """
+        Test that a message with restricted media is visible if appropriate to someone
+        invited to a room
+        """
+
+        invited_user = self.register_user("invited_user_message_test", "password")
+        invited_user_id = UserID.from_string(invited_user)
+        self.login("invited_user_message_test", "password")
+
+        room_id = self.create_test_room(
+            visibility,
+        )
+
+        # We will need two pieces of media: one to check for before the invite and one
+        # for after.
+
+        # Send the first attached media message
+        first_media_object = self.insert_message_with_attached_media(room_id)
+
+        self.assert_expected_result(
+            invited_user_id, first_media_object, expected_before_result_bool
+        )
+
+        # Good, now do the invite and check the second expectation
+        self.helper.invite(
+            room_id, self.alice_user_id, invited_user, tok=self.alice_tok
+        )
+
+        # Send the second attached media message
+        second_media_object = self.insert_message_with_attached_media(room_id)
+
+        self.assert_expected_result(
+            invited_user_id, second_media_object, expected_after_result_bool
+        )
+
+    @parameterized.expand(
+        [
+            (HistoryVisibility.WORLD_READABLE, True, True),
+            (HistoryVisibility.SHARED, True, True),
+            (HistoryVisibility.INVITED, False, True),
+            (HistoryVisibility.JOINED, False, True),
+        ]
+    )
+    def test_message_media_visibility_to_users_joined_to_room(
+        self,
+        visibility: str,
+        expected_before_result_bool: bool,
+        expected_after_result_bool: bool,
+    ) -> None:
+        """
+        Test that a message with restricted media is visible if appropriate to someone
+        joined to a room
+        """
+
+        joining_user = self.register_user("joining_user_message_test", "password")
+        joining_user_id = UserID.from_string(joining_user)
+        joining_user_tok = self.login("joining_user_message_test", "password")
+
+        room_id = self.create_test_room(
+            visibility,
+        )
+
+        # We will need two pieces of media: one to check for before the join and one
+        # for after.
+
+        # Send the first attached media message
+        first_media_object = self.insert_message_with_attached_media(room_id)
+
+        self.assert_expected_result(
+            joining_user_id, first_media_object, expected_before_result_bool
+        )
+
+        # Good, now do the join and check the second expectation
+        self.helper.join(room_id, joining_user, tok=joining_user_tok)
+
+        # Send the second attached media message
+        second_media_object = self.insert_message_with_attached_media(room_id)
+
+        self.assert_expected_result(
+            joining_user_id, second_media_object, expected_after_result_bool
+        )
+
+    @parameterized.expand(
+        [
+            (HistoryVisibility.WORLD_READABLE, True, True),
+            (HistoryVisibility.SHARED, True, True),
+            (HistoryVisibility.INVITED, True, False),
+            (HistoryVisibility.JOINED, True, False),
+        ]
+    )
+    def test_message_media_visibility_to_users_that_left_a_room(
+        self,
+        visibility: str,
+        expected_before_result_bool: bool,
+        expected_after_result_bool: bool,
+    ) -> None:
+        """
+        Test that a message with restricted media is visible if appropriate to someone
+        that left a room
+        """
+        # make another user for this test only. This user will be invited to the room,
+        # but will not actually join.
+        leaving_user = self.register_user("leaving_user_message_test", "password")
+        leaving_user_id = UserID.from_string(leaving_user)
+        leaving_user_tok = self.login("leaving_user_message_test", "password")
+
+        room_id = self.create_test_room(
+            visibility,
+        )
+        # Join the user, or else they can not leave
+        self.helper.join(room_id, leaving_user, tok=leaving_user_tok)
+
+        # We will need two pieces of media: one to check for before the leave and one
+        # for after.
+
+        first_media_object = self.insert_message_with_attached_media(room_id)
+
+        self.assert_expected_result(
+            leaving_user_id, first_media_object, expected_before_result_bool
+        )
+
+        self.helper.leave(room_id, leaving_user, tok=leaving_user_tok)
+
+        # Now that the user has left the room, make sure they can not see anything after
+        second_media_object = self.insert_message_with_attached_media(room_id)
+
+        self.assert_expected_result(
+            leaving_user_id, second_media_object, expected_after_result_bool
+        )
+
+    @parameterized.expand(
+        [
+            HistoryVisibility.WORLD_READABLE,
+            HistoryVisibility.SHARED,
+            HistoryVisibility.INVITED,
+            HistoryVisibility.JOINED,
+        ]
+    )
+    def test_message_media_visibility_for_unknown_restriction(
+        self,
+        visibility: str,
+    ) -> None:
+        """
+        Test that a message with restricted media is not visible if an unknown restriction exists
+        """
+        # Borrow the test setup for joining a room
+        joining_user = self.register_user("joining_user_message_test", "password")
+        joining_user_id = UserID.from_string(joining_user)
+        joining_user_tok = self.login("joining_user_message_test", "password")
+
+        room_id = self.create_test_room(
+            visibility,
+        )
+        # We'll go ahead and join the second user to the room, so the visibility of a
+        # non-originating user can check the media's visibility
+        self.helper.join(room_id, joining_user, tok=joining_user_tok)
+
+        # First, create our piece of media and label it as restricted
+        mxc_uri = self.create_restricted_media()
+
+        # Then add the database row that would normally attach this media to something,
+        # but it is an unknown something.
+        self.get_success(
+            self.store.db_pool.simple_insert(
+                "media_attachments",
+                {
+                    "server_name": mxc_uri.server_name,
+                    "media_id": mxc_uri.media_id,
+                    # "restrictions_json" is a JSONB column, so it expects a string
+                    "restrictions_json": json_encoder.encode({"restrictions": {}}),
+                },
+            )
+        )
+
+        # Retrieve the media info from the data store
+        local_media_object = self.retrieve_media_from_store(mxc_uri)
+
+        assert local_media_object.restricted is True
+        # If attachments was None, we would know it had not been attached yet
+        assert local_media_object.attachments is not None
+
+        # Neither user should be able to see the media
+        self.assert_expected_result(joining_user_id, local_media_object, False)
+        self.assert_expected_result(joining_user_id, local_media_object, False)
+
+    def send_membership_with_attached_media(
+        self, room_id: str, mxc_uri: MXCUri, tok: Optional[str] = None
+    ) -> FakeChannel:
+        channel1 = self.make_request(
+            "PUT",
+            f"/rooms/{room_id}/state/m.room.member/{self.alice_user_id}?org.matrix.msc3911.attach_media={str(mxc_uri)}",
+            {
+                "membership": Membership.JOIN,
+                "avatar_url": str(mxc_uri),
+            },
+            access_token=tok or self.alice_tok,
+        )
+        return channel1
+
+    def insert_membership_with_attached_media(self, room_id: str) -> LocalMedia:
+        mxc_uri = self.create_restricted_media()
+
+        channel = self.send_membership_with_attached_media(room_id, mxc_uri)
+        self.assertEqual(channel.code, HTTPStatus.OK, channel.json_body)
+        assert "event_id" in channel.json_body
+        event_id = channel.json_body["event_id"]
+
+        # check restrictions are applied
+        restrictions = self.get_success(
+            self.store.get_media_restrictions(mxc_uri.server_name, mxc_uri.media_id)
+        )
+        assert restrictions is not None, str(restrictions)
+        assert restrictions.event_id == event_id
+        assert restrictions.profile_user_id is None
+
+        # Retrieve the media object for inspection in the test
+        local_media_object = self.retrieve_media_from_store(mxc_uri)
+
+        return local_media_object
+
+    @parameterized.expand(
+        [
+            (HistoryVisibility.WORLD_READABLE, True),
+            (HistoryVisibility.SHARED, True),
+            (HistoryVisibility.JOINED, False),
+            (HistoryVisibility.INVITED, False),
+        ]
+    )
+    def test_membership_avatar_media_visibility_to_users_not_sharing_room(
+        self, visibility: str, expected_result_bool: bool
+    ) -> None:
+        """
+        Test that a user can not see another user's membership-based avatar if they are
+        not in that room
+        """
+
+        second_user = self.register_user("second_user_membership_test", "password")
+        second_user_id = UserID.from_string(second_user)
+        self.login("second_user_membership_test", "password")
+
+        room_id = self.create_test_room(
+            visibility,
+        )
+
+        local_media_object = self.insert_membership_with_attached_media(room_id)
+
+        self.assert_expected_result(
+            second_user_id, local_media_object, expected_result_bool
+        )
+
+    @parameterized.expand(
+        [
+            (HistoryVisibility.WORLD_READABLE, True, True),
+            (HistoryVisibility.SHARED, True, True),
+            # Because invites are expected to see member's avatars
+            (HistoryVisibility.INVITED, False, True),
+            (HistoryVisibility.JOINED, False, True),
+        ]
+    )
+    def test_membership_avatar_media_visibility_to_users_invited_to_room(
+        self,
+        visibility: str,
+        expected_first_result_bool: bool,
+        expected_second_result_bool: bool,
+    ) -> None:
+        """
+        Test that a user invited to a room can see the membership-based avatar of the
+        inviting user in that room. Do not actually join the room
+
+        This test has two parts:
+        First test an invite sent after setting the alice's membership avatar
+
+        Second, test an invite being sent as part of the room creation, before the
+        membership-based avatar is established
+
+        We will use the `expected_after_result_bool` twice, once for each scenario
+        """
+
+        invited_user = self.register_user("invited_user_membership_test", "password")
+        invited_user_id = UserID.from_string(invited_user)
+        self.login("invited_user_membership_test", "password")
+
+        # Test scenario 1
+        room_id = self.create_test_room(
+            visibility,
+        )
+
+        # Set alice's membership avatar to a specific image
+        first_media_object = self.insert_membership_with_attached_media(room_id)
+
+        self.assert_expected_result(
+            invited_user_id, first_media_object, expected_first_result_bool
+        )
+
+        # Good, now do the invite and check the second expectation.
+        self.helper.invite(
+            room_id, self.alice_user_id, invited_user, tok=self.alice_tok
+        )
+
+        self.assert_expected_result(
+            invited_user_id, first_media_object, expected_second_result_bool
+        )
+
+        # Test scenario 2, invite as part of room creation
+        room_2_id = self.create_test_room(visibility, invite_list=[invited_user])
+
+        # Set alice's membership avatar to a specific image in the second room
+        second_media_object = self.insert_membership_with_attached_media(room_2_id)
+
+        # As it turns out, this should be the same result as the second expectation
+        # above, so just reuse it
+        self.assert_expected_result(
+            invited_user_id, second_media_object, expected_second_result_bool
+        )
+
+    @parameterized.expand(
+        [
+            (HistoryVisibility.WORLD_READABLE, True, True),
+            (HistoryVisibility.SHARED, True, True),
+            (HistoryVisibility.INVITED, False, True),
+            (HistoryVisibility.JOINED, False, True),
+        ]
+    )
+    def test_membership_avatar_media_visibility_to_users_joined_to_room(
+        self,
+        visibility: str,
+        expected_first_result_bool: bool,
+        expected_second_result_bool: bool,
+    ) -> None:
+        """
+        Test that a user joined to a room can see the membership-based avatar of another user
+        """
+
+        joining_user = self.register_user("joining_user_membership_test", "password")
+        joining_user_id = UserID.from_string(joining_user)
+        joining_user_tok = self.login("joining_user_membership_test", "password")
+
+        room_id = self.create_test_room(
+            visibility,
+        )
+
+        # We will need two pieces of media: one to check for before the join and one
+        # for after.
+
+        first_media_object = self.insert_membership_with_attached_media(room_id)
+
+        self.assert_expected_result(
+            joining_user_id, first_media_object, expected_first_result_bool
+        )
+
+        # Then join the room
+        self.helper.join(room_id, joining_user, tok=joining_user_tok)
+
+        # Can the user see it now?
+        self.assert_expected_result(
+            joining_user_id, first_media_object, expected_second_result_bool
+        )
+
+        # Test with a second piece of media that was created after the join
+        second_media_object = self.insert_membership_with_attached_media(room_id)
+
+        self.assert_expected_result(
+            joining_user_id, second_media_object, expected_second_result_bool
+        )
+
+    @parameterized.expand(
+        [
+            (HistoryVisibility.WORLD_READABLE, True, True),
+            (HistoryVisibility.SHARED, True, True),
+            (HistoryVisibility.INVITED, True, False),
+            (HistoryVisibility.JOINED, True, False),
+        ]
+    )
+    def test_membership_avatar_media_visibility_to_users_that_left_room(
+        self,
+        visibility: str,
+        expected_first_result_bool: bool,
+        expected_second_result_bool: bool,
+    ) -> None:
+        """
+        Test that a user leaving a room can not see another user's avatar from that room
+        after they have left
+        """
+
+        leaving_user = self.register_user("leaving_user_membership_test", "password")
+        leaving_user_id = UserID.from_string(leaving_user)
+        leaving_user_tok = self.login("leaving_user_membership_test", "password")
+
+        room_id = self.create_test_room(
+            visibility,
+        )
+        # Join the user, or else they can not leave
+        self.helper.join(room_id, leaving_user, tok=leaving_user_tok)
+
+        # We will need two pieces of media: one to check for before the join and one
+        # for after.
+
+        first_media_object = self.insert_membership_with_attached_media(room_id)
+
+        # This should always succeed, we are in the room after all
+        self.assert_expected_result(leaving_user_id, first_media_object, True)
+
+        # Time to leave
+        self.helper.leave(room_id, leaving_user, tok=leaving_user_tok)
+
+        # Recheck the first media object
+        self.assert_expected_result(
+            leaving_user_id, first_media_object, expected_first_result_bool
+        )
+        # Make another one, to make sure it behaves correctly
+        second_media_object = self.insert_membership_with_attached_media(room_id)
+
+        self.assert_expected_result(
+            leaving_user_id, second_media_object, expected_second_result_bool
+        )
+
+    def send_room_avatar_with_attached_media(
+        self, room_id: str, mxc_uri: MXCUri, tok: Optional[str] = None
+    ) -> FakeChannel:
+        channel1 = self.make_request(
+            "PUT",
+            f"/rooms/{room_id}/state/m.room.avatar?org.matrix.msc3911.attach_media={str(mxc_uri)}",
+            {
+                "info": {"h": 1, "mimetype": "image/png", "size": 67, "w": 1},
+                "url": str(mxc_uri),
+            },
+            access_token=tok or self.alice_tok,
+        )
+        return channel1
+
+    def insert_room_avatar_with_attached_media(self, room_id: str) -> LocalMedia:
+        mxc_uri = self.create_restricted_media()
+
+        channel = self.send_room_avatar_with_attached_media(room_id, mxc_uri)
+        self.assertEqual(channel.code, HTTPStatus.OK, channel.json_body)
+        assert "event_id" in channel.json_body
+        event_id = channel.json_body["event_id"]
+
+        # check restrictions are applied
+        restrictions = self.get_success(
+            self.store.get_media_restrictions(mxc_uri.server_name, mxc_uri.media_id)
+        )
+        assert restrictions is not None, str(restrictions)
+        assert restrictions.event_id == event_id
+        assert restrictions.profile_user_id is None
+
+        # Retrieve the media object for inspection in the test
+        local_media_object = self.retrieve_media_from_store(mxc_uri)
+
+        return local_media_object
+
+    @parameterized.expand(
+        [
+            (HistoryVisibility.WORLD_READABLE, True, True),
+            (HistoryVisibility.SHARED, True, True),
+            (HistoryVisibility.JOINED, False, False),
+            (HistoryVisibility.INVITED, False, False),
+        ]
+    )
+    def test_room_avatar_media_visibility_to_users_not_sharing_room(
+        self,
+        visibility: str,
+        expected_room_creation_result_bool: bool,
+        expected_result_bool: bool,
+    ) -> None:
+        """
+        Test that a user can not see the restricted media room avatar.
+
+        Specifically, test the avatar set as part of room creation and changed/set after
+        """
+
+        second_user = self.register_user("second_user_room_avatar_test", "password")
+        second_user_id = UserID.from_string(second_user)
+        self.login("second_user_room_avatar_test", "password")
+
+        # The room needs to be created with an avatar
+        room_creation_avatar_mxc = self.create_restricted_media()
+        room_id = self.create_test_room(visibility, room_creation_avatar_mxc)
+
+        room_avatar_object = self.retrieve_media_from_store(room_creation_avatar_mxc)
+        self.assert_expected_result(
+            second_user_id, room_avatar_object, expected_room_creation_result_bool
+        )
+
+        # Let's change the avatar, and make sure it acts appropriately
+        local_media_object = self.insert_room_avatar_with_attached_media(room_id)
+
+        self.assert_expected_result(
+            second_user_id, local_media_object, expected_result_bool
+        )
+
+    @parameterized.expand(
+        [
+            (HistoryVisibility.WORLD_READABLE, True, True),
+            (HistoryVisibility.SHARED, True, True),
+            # Because invites are expected to see room avatars
+            (HistoryVisibility.INVITED, False, True),
+            (HistoryVisibility.JOINED, False, True),
+        ]
+    )
+    def test_room_avatar_media_visibility_to_users_invited_to_room(
+        self,
+        visibility: str,
+        expected_before_result_bool: bool,
+        expected_after_result_bool: bool,
+    ) -> None:
+        """
+        Test that a user invited to a room can see the avatar of that room
+        """
+
+        invited_user = self.register_user("invited_user_room_avatar_test", "password")
+        invited_user_id = UserID.from_string(invited_user)
+        self.login("invited_user_room_avatar_test", "password")
+
+        creation_room_avatar_mxc = self.create_restricted_media()
+        room_id = self.create_test_room(visibility, creation_room_avatar_mxc)
+
+        # Retrieve the media info for the room avatar. This will have been set after the
+        # visibility event was created and is therefor governed by it.
+        first_media_object = self.retrieve_media_from_store(creation_room_avatar_mxc)
+
+        self.assert_expected_result(
+            invited_user_id, first_media_object, expected_before_result_bool
+        )
+
+        # Good, now do the invite
+        self.helper.invite(
+            room_id, self.alice_user_id, invited_user, tok=self.alice_tok
+        )
+
+        # Recheck the room avatar made during room creation
+        self.assert_expected_result(
+            invited_user_id, first_media_object, expected_after_result_bool
+        )
+
+    @parameterized.expand(
+        [
+            (HistoryVisibility.WORLD_READABLE, True, True),
+            (HistoryVisibility.SHARED, True, True),
+            (HistoryVisibility.INVITED, False, True),
+            (HistoryVisibility.JOINED, False, True),
+        ]
+    )
+    def test_room_avatar_media_visibility_to_users_joined_to_room(
+        self,
+        visibility: str,
+        expected_before_result_bool: bool,
+        expected_after_result_bool: bool,
+    ) -> None:
+        """
+        Test that a user joined to a room can see the avatar of that room
+        """
+
+        joining_user = self.register_user("joining_user_room_avatar_test", "password")
+        joining_user_id = UserID.from_string(joining_user)
+        joining_user_tok = self.login("joining_user_room_avatar_test", "password")
+
+        # We will need two pieces of media: one to check for before the join and one
+        # for after.
+
+        creation_room_avatar_mxc = self.create_restricted_media()
+        room_id = self.create_test_room(visibility, creation_room_avatar_mxc)
+
+        # Retrieve the media info for the room avatar. This will have been set after the
+        # visibility event was created and is therefore governed by it.
+        first_media_object = self.retrieve_media_from_store(creation_room_avatar_mxc)
+
+        self.assert_expected_result(
+            joining_user_id, first_media_object, expected_before_result_bool
+        )
+
+        # Now we join the room, and examine the media object again
+        self.helper.join(room_id, joining_user, tok=joining_user_tok)
+
+        self.assert_expected_result(
+            joining_user_id, first_media_object, expected_after_result_bool
+        )
+
+        # Do a second one that is definitely after the join
+        second_media_object = self.insert_room_avatar_with_attached_media(room_id)
+
+        self.assert_expected_result(
+            joining_user_id, second_media_object, expected_after_result_bool
+        )
+
+    @parameterized.expand(
+        [
+            (HistoryVisibility.WORLD_READABLE, True, True),
+            (HistoryVisibility.SHARED, True, True),
+            # Since the room avatar is set before the join,
+            # after the leave it is not visible at all
+            (HistoryVisibility.INVITED, False, False),
+            (HistoryVisibility.JOINED, False, False),
+        ]
+    )
+    def test_room_avatar_media_visibility_to_users_that_left_room(
+        self,
+        visibility: str,
+        expected_before_result_bool: bool,
+        expected_after_result_bool: bool,
+    ) -> None:
+        """
+        Test that after leaving a room, a user can not see changes to the room's avatar
+        """
+
+        leaving_user = self.register_user("leaving_user_room_avatar_test", "password")
+        leaving_user_id = UserID.from_string(leaving_user)
+        leaving_user_tok = self.login("leaving_user_room_avatar_test", "password")
+
+        # We will need two pieces of media: one to check for from room creation and then after the leave
+
+        creation_room_avatar_mxc = self.create_restricted_media()
+        room_id = self.create_test_room(visibility, creation_room_avatar_mxc)
+        # Retrieve the media info for the room avatar. This will have been set after the
+        # visibility event was created and is therefore governed by it.
+        first_media_object = self.retrieve_media_from_store(creation_room_avatar_mxc)
+
+        # Join the user, or else they can not leave
+        self.helper.join(room_id, leaving_user, tok=leaving_user_tok)
+
+        # Pretty sure this should always be True, we are already in the room
+        self.assert_expected_result(leaving_user_id, first_media_object, True)
+
+        # Bye bye, user
+        self.helper.leave(room_id, leaving_user, tok=leaving_user_tok)
+
+        # The user has left, which means the media may not be visible anymore
+        self.assert_expected_result(
+            leaving_user_id, first_media_object, expected_before_result_bool
+        )
+
+        # Change the avatar, it should not be different to the prior result
+        second_media_object = self.insert_room_avatar_with_attached_media(room_id)
+
+        self.assert_expected_result(
+            leaving_user_id, second_media_object, expected_after_result_bool
+        )
+
+    def test_global_profile_is_visible(self) -> None:
+        """
+        Test that a profile avatar that is not from a membership event is viewable if not limited
+        """
+        profile_viewing_user = self.register_user("profile_viewing_user", "password")
+        profile_viewing_user_id = UserID.from_string(profile_viewing_user)
+
+        # Just to simply a few spots below where the UserID object is needed
+        alice_user_id = UserID.from_string(self.alice_user_id)
+
+        mxc_uri = self.create_restricted_media()
+
+        # The profile handler function wants a Requester object specifically
+        alice_as_requester = create_requester(self.alice_user_id)
+        self.get_success(
+            self.profile_handler.set_avatar_url(
+                alice_user_id, alice_as_requester, str(mxc_uri)
+            )
+        )
+
+        media_object = self.get_success(self.store.get_local_media(mxc_uri.media_id))
+        assert media_object is not None
+
+        # Should be visible by both users
+        self.assert_expected_result(alice_user_id, media_object, True)
+        self.assert_expected_result(profile_viewing_user_id, media_object, True)
+
+    @override_config({"limit_profile_requests_to_users_who_share_rooms": True})
+    def test_global_profile_is_not_visible_when_not_sharing_a_room_setting_is_enabled(
+        self,
+    ) -> None:
+        """
+        Test that a profile avatar that is not from a membership event is not viewable
+        if limited by the setting "limit_profile_requests_to_users_who_share_rooms"
+        """
+        profile_viewing_user = self.register_user("profile_viewing_user", "password")
+        profile_viewing_user_id = UserID.from_string(profile_viewing_user)
+
+        # Just to simply a few spots below where the UserID object is needed
+        alice_user_id = UserID.from_string(self.alice_user_id)
+
+        mxc_uri = self.create_restricted_media()
+
+        # The profile handler function wants a Requester object specifically
+        alice_as_requester = create_requester(self.alice_user_id)
+        self.get_success(
+            self.profile_handler.set_avatar_url(
+                alice_user_id, alice_as_requester, str(mxc_uri)
+            )
+        )
+
+        media_object = self.get_success(self.store.get_local_media(mxc_uri.media_id))
+        assert media_object is not None
+        self.assert_expected_result(alice_user_id, media_object, True)
+        self.assert_expected_result(profile_viewing_user_id, media_object, False)

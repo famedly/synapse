@@ -378,6 +378,7 @@ class RestHelper:
         expect_code: int = HTTPStatus.OK,
         custom_headers: Optional[Iterable[Tuple[AnyStr, AnyStr]]] = None,
         type: str = "m.room.message",
+        attach_media_mxc: Optional[str] = None,
     ) -> JsonDict:
         if body is None:
             body = "body_text_here"
@@ -392,6 +393,7 @@ class RestHelper:
             tok,
             expect_code,
             custom_headers=custom_headers,
+            attach_media_mxc=attach_media_mxc,
         )
 
     def send_event(
@@ -403,13 +405,22 @@ class RestHelper:
         tok: Optional[str] = None,
         expect_code: int = HTTPStatus.OK,
         custom_headers: Optional[Iterable[Tuple[AnyStr, AnyStr]]] = None,
+        attach_media_mxc: Optional[str] = None,
     ) -> JsonDict:
         if txn_id is None:
             txn_id = "m%s" % (str(time.time()))
 
         path = "/_matrix/client/r0/rooms/%s/send/%s/%s" % (room_id, type, txn_id)
+        url_params: Dict[str, str] = {}
+
         if tok:
-            path = path + "?access_token=%s" % tok
+            url_params["access_token"] = tok
+
+        if attach_media_mxc:
+            url_params["org.matrix.msc3911.attach_media"] = attach_media_mxc
+
+        if url_params:
+            path += "?" + urlencode(url_params)
 
         channel = make_request(
             self.reactor,
@@ -474,6 +485,7 @@ class RestHelper:
         expect_code: int = HTTPStatus.OK,
         state_key: str = "",
         method: str = "GET",
+        attach_media_mxc: Optional[str] = None,
     ) -> JsonDict:
         """Read or write some state from a given room
 
@@ -486,6 +498,8 @@ class RestHelper:
             expect_code: The HTTP code to expect in the response
             state_key:
             method: "GET" or "PUT" for reading or writing state, respectively
+            attach_media_mxc: The MXC to attach to the state event, per msc3911. Only makes
+                sense when "PUT"ting the state
 
         Returns:
             The response body from the server
@@ -498,8 +512,16 @@ class RestHelper:
             event_type,
             state_key,
         )
+        url_params: Dict[str, str] = {}
+
         if tok:
-            path = path + "?access_token=%s" % tok
+            url_params["access_token"] = tok
+
+        if attach_media_mxc:
+            url_params["org.matrix.msc3911.attach_media"] = attach_media_mxc
+
+        if url_params:
+            path += "?" + urlencode(url_params)
 
         # Set request body if provided
         content = b""
@@ -551,6 +573,7 @@ class RestHelper:
         tok: Optional[str] = None,
         expect_code: int = HTTPStatus.OK,
         state_key: str = "",
+        attach_media_mxc: Optional[str] = None,
     ) -> JsonDict:
         """Set some state in a room
 
@@ -561,6 +584,7 @@ class RestHelper:
             tok: The access token to use
             expect_code: The HTTP code to expect in the response
             state_key:
+            attach_media_mxc: The media MXC uri to attach to this state event
 
         Returns:
             The response body from the server
@@ -569,7 +593,14 @@ class RestHelper:
             AssertionError: if expect_code doesn't match the HTTP code we received
         """
         return self._read_write_state(
-            room_id, event_type, body, tok, expect_code, state_key, method="PUT"
+            room_id,
+            event_type,
+            body,
+            tok,
+            expect_code,
+            state_key,
+            method="PUT",
+            attach_media_mxc=attach_media_mxc,
         )
 
     def upload_media(

@@ -159,7 +159,7 @@ class ThumbnailResource(RestServlet):
     ) -> None:
         # Validate the server name, raising if invalid
         parse_and_validate_server_name(server_name)
-        await self.auth.get_user_by_req(request, allow_guest=True)
+        requester = await self.auth.get_user_by_req(request, allow_guest=True)
 
         set_cors_headers(request)
         set_corp_headers(request)
@@ -184,6 +184,7 @@ class ThumbnailResource(RestServlet):
                     m_type,
                     max_timeout_ms,
                     False,
+                    requester,
                 )
             else:
                 await self.thumbnailer.respond_local_thumbnail(
@@ -195,6 +196,7 @@ class ThumbnailResource(RestServlet):
                     m_type,
                     max_timeout_ms,
                     False,
+                    requester,
                 )
             self.media_repo.mark_recently_accessed(None, media_id)
         else:
@@ -223,6 +225,7 @@ class ThumbnailResource(RestServlet):
                 max_timeout_ms,
                 ip_address,
                 True,
+                requester,
             )
             self.media_repo.mark_recently_accessed(server_name, media_id)
 
@@ -250,7 +253,7 @@ class DownloadResource(RestServlet):
         # Validate the server name, raising if invalid
         parse_and_validate_server_name(server_name)
 
-        await self.auth.get_user_by_req(request, allow_guest=True)
+        requester = await self.auth.get_user_by_req(request, allow_guest=True)
 
         set_cors_headers(request)
         set_corp_headers(request)
@@ -274,7 +277,7 @@ class DownloadResource(RestServlet):
 
         if self._is_mine_server_name(server_name):
             await self.media_repo.get_local_media(
-                request, media_id, file_name, max_timeout_ms
+                request, media_id, file_name, max_timeout_ms, requester
             )
         else:
             ip_address = request.getClientAddress().host
@@ -286,6 +289,7 @@ class DownloadResource(RestServlet):
                 max_timeout_ms,
                 ip_address,
                 True,
+                requester,
             )
 
 
