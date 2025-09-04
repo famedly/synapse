@@ -245,6 +245,13 @@ class InvalidAPICallError(SynapseError):
         super().__init__(HTTPStatus.BAD_REQUEST, msg, Codes.BAD_JSON)
 
 
+class UnauthorizedRequestAPICallError(SynapseError):
+    """Error raised when a request was not allowed due to authorization"""
+
+    def __init__(self, msg: str):
+        super().__init__(HTTPStatus.FORBIDDEN, msg, Codes.UNAUTHORIZED)
+
+
 class InvalidProxyCredentialsError(SynapseError):
     """Error raised when the proxy credentials are invalid."""
 
