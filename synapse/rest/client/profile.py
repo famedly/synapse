@@ -110,7 +110,6 @@ class ProfileFieldRestServlet(RestServlet):
         self.profile_handler = hs.get_profile_handler()
         self.auth = hs.get_auth()
         self.enable_restricted_media = hs.config.experimental.msc3911_enabled
-        self.media_repository = hs.get_media_repository()
 
     async def on_GET(
         self, request: SynapseRequest, user_id: str, field_name: str
