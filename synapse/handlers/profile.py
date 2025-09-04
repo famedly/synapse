@@ -332,8 +332,6 @@ class ProfileHandler:
                 target_user, authenticated_entity=requester.authenticated_entity
             )
 
-        await self.store.set_profile_avatar_url(target_user, avatar_url_to_set)
-
         # msc3911: Update the media restrictions to include the profile user ID
         if self.enable_restricted_media and avatar_url_to_set:
             await self.hs.get_datastores().main.set_media_restricted_to_user_profile(
@@ -341,6 +339,8 @@ class ProfileHandler:
                 avatar_url_to_set,
                 str(target_user),
             )
+
+        await self.store.set_profile_avatar_url(target_user, avatar_url_to_set)
 
         profile = await self.store.get_profileinfo(target_user)
         await self.user_directory_handler.handle_local_profile_change(

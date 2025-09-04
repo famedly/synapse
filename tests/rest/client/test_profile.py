@@ -42,6 +42,7 @@ from synapse.util import Clock
 
 from tests import unittest
 from tests.test_utils import SMALL_PNG
+from tests.unittest import override_config
 from tests.utils import USE_POSTGRES_FOR_TESTS
 
 
@@ -979,7 +980,6 @@ class ProfileMediaAttachmentTestCase(unittest.HomeserverTestCase):
         )
         assert channel.code == HTTPStatus.OK
         assert channel.json_body == {}
-
         # Check if the media's restrictions field is updated with the profile_user_id.
         restrictions = self.get_success(
             self.store.get_media_restrictions(mxc_uri.server_name, mxc_uri.media_id)
@@ -1005,9 +1005,9 @@ class ProfileMediaAttachmentTestCase(unittest.HomeserverTestCase):
         assert channel.json_body["errcode"] == Codes.INVALID_PARAM
         assert "does not exist" in channel.json_body["error"]
 
-    def test_attaching_unrestricted_media_to_profile_fails(self) -> None:
+    def test_attaching_unrestricted_media_to_profile(self) -> None:
         """
-        Test that attaching unrestricted media to user profile fails.
+        Test that attaching unrestricted media to user profile also works
         """
         # Create unrestricted media.
         channel = self.make_request(
@@ -1020,6 +1020,41 @@ class ProfileMediaAttachmentTestCase(unittest.HomeserverTestCase):
         )
         assert channel.code == 200, channel.result
         content_uri = MXCUri.from_str(channel.json_body["content_uri"])
+
+        # Check media is unrestricted.
+        media_info = self.get_success(self.store.get_local_media(content_uri.media_id))
+        assert media_info is not None
+        assert not media_info.restricted
+
+        # Try to update user profile with unrestricted media.
+        channel = self.make_request(
+            "PUT",
+            f"/_matrix/client/v3/profile/{self.user}/avatar_url",
+            access_token=self.tok,
+            content={"avatar_url": str(content_uri)},
+        )
+        assert channel.code == 200, channel.result
+
+    @override_config(
+        {"experimental_features": {"msc3911_unrestricted_media_upload_disabled": True}}
+    )
+    def test_attaching_unrestricted_media_to_profile_fails(self) -> None:
+        """
+        Test that attaching unrestricted media to user profile fails when unrestircted
+        media is banned by configuration.
+        """
+        # Create unrestricted media.
+        content = io.BytesIO(SMALL_PNG)
+        content_uri = self.get_success(
+            self.media_repo.create_or_update_content(
+                "image/png",
+                "test_png_upload",
+                content,
+                67,
+                UserID.from_string(self.user),
+                restricted=False,
+            )
+        )
 
         # Check media is unrestricted.
         media_info = self.get_success(self.store.get_local_media(content_uri.media_id))
@@ -1085,7 +1120,7 @@ class ProfileMediaAttachmentTestCase(unittest.HomeserverTestCase):
         )
         assert channel.code == HTTPStatus.BAD_REQUEST, channel.json_body
         assert channel.json_body["errcode"] == Codes.INVALID_PARAM
-        assert "already has restrictions set" in channel.json_body["error"]
+        assert "already attached" in channel.json_body["error"]
 
     def test_attaching_not_owned_media_to_profile_fails(self) -> None:
         """
@@ -1126,7 +1161,7 @@ class ProfileMediaAttachmentTestCase(unittest.HomeserverTestCase):
             )
         )
         assert user_avatar is not None
-        assert "mxc://test/" + user_avatar == str(mxc_uri)
+        assert user_avatar == str(mxc_uri)
 
         # Remove the media from the user profile.
         channel = self.make_request(
