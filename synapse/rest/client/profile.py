@@ -25,8 +25,6 @@ import re
 from http import HTTPStatus
 from typing import TYPE_CHECKING, Tuple
 
-from matrix_common.types.mxc_uri import MXCUri
-
 from synapse.api.constants import ProfileFields
 from synapse.api.errors import Codes, SynapseError
 from synapse.handlers.profile import MAX_CUSTOM_FIELD_LEN
@@ -38,7 +36,7 @@ from synapse.http.servlet import (
 )
 from synapse.http.site import SynapseRequest
 from synapse.rest.client._base import client_patterns
-from synapse.types import JsonDict, JsonValue, Requester, UserID
+from synapse.types import JsonDict, JsonValue, UserID
 from synapse.util.stringutils import is_namedspaced_grammar
 
 if TYPE_CHECKING:
@@ -112,9 +110,6 @@ class ProfileFieldRestServlet(RestServlet):
         self.profile_handler = hs.get_profile_handler()
         self.auth = hs.get_auth()
         self.enable_restricted_media = hs.config.experimental.msc3911_enabled
-        self.disable_unrestricted_media = (
-            hs.config.experimental.msc3911_unrestricted_media_upload_disabled
-        )
         self.media_repository = hs.get_media_repository()
 
     async def on_GET(
@@ -154,54 +149,6 @@ class ProfileFieldRestServlet(RestServlet):
             field_value = await self.profile_handler.get_profile_field(user, field_name)
 
         return 200, {field_name: field_value}
-
-    async def validate_avatar_url(self, avatar_url: str, requester: Requester) -> None:
-        """
-        Validate avatar_url to make sure the media is owned by the requester or media
-        is already attached to other event or profile.
-
-        Args:
-            avatar_url: The raw avatar_url arg of request
-            requester: The user making the request
-
-        Returns:
-            Return None when all the validations pass
-
-        Raises:
-            SynapseError: If any of the media is inappropriate or if the requester was not
-                allowed to attach the media
-        """
-        if not avatar_url.startswith("mxc://"):
-            avatar_url = f"mxc://{avatar_url}"
-        mxc_uri = MXCUri.from_str(avatar_url)
-
-        media_info = await self.media_repository.store.get_local_media(mxc_uri.media_id)
-        if media_info is None or media_info.user_id != requester.user.to_string():
-            raise SynapseError(
-                HTTPStatus.BAD_REQUEST,
-                f"The media attachment request is invalid as the media '{mxc_uri.media_id}' does not exist",
-                Codes.INVALID_PARAM,
-            )
-        if self.disable_unrestricted_media and not media_info.restricted:
-            raise SynapseError(
-                HTTPStatus.BAD_REQUEST,
-                f"The media attachment request is invalid as the media '{mxc_uri.media_id}' is not restricted",
-                Codes.INVALID_PARAM,
-            )
-        if (
-            media_info.restricted
-            and media_info.attachments
-            and (
-                media_info.attachments.event_id
-                or media_info.attachments.profile_user_id
-            )
-        ):
-            raise SynapseError(
-                HTTPStatus.BAD_REQUEST,
-                f"The media attachment request is invalid as the media '{mxc_uri.media_id}' is already attached",
-                Codes.INVALID_PARAM,
-            )
-        return
 
     async def on_PUT(
         self, request: SynapseRequest, user_id: str, field_name: str
@@ -266,7 +213,6 @@ class ProfileFieldRestServlet(RestServlet):
                 # If new_value is the same as existing one, keep the function idempotent
                 if current_avatar_url and str(current_avatar_url) == new_value:
                     return 200, {}
-                await self.validate_avatar_url(new_value, requester)
             await self.profile_handler.set_avatar_url(
                 user, requester, new_value, is_admin, propagate=propagate
             )
