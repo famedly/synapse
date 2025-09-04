@@ -24,7 +24,11 @@ import logging
 import re
 from typing import Optional, Union
 
-from synapse.api.errors import Codes, SynapseError
+from synapse.api.errors import (
+    Codes,
+    NotFoundError,
+    SynapseError,
+)
 from synapse.http.server import (
     HttpServer,
     respond_with_json,
@@ -323,7 +327,7 @@ class CopyResource(RestServlet):
 
         max_upload_size = media_config.get("m.upload.size")
         if max_upload_size and media_info and media_info.media_length:
-            # QUESTION: do we need to also take the already uploaded data amount into account?
+            # We are not counting the amount of media the user uploaded in a previous time period
             if media_info.media_length > max_upload_size:
                 raise SynapseError(400, Codes.RESOURCE_LIMIT_EXCEEDED)
 
@@ -337,34 +341,38 @@ class CopyResource(RestServlet):
         Handles copying a media item referenced by server_name and media_id.
         Returns a new MXC URI for the copied media.
         """
+        max_timeout_ms = parse_integer(
+            request, "timeout_ms", default=DEFAULT_MAX_TIMEOUT_MS
+        )
+        max_timeout_ms = min(max_timeout_ms, MAXIMUM_ALLOWED_MAX_TIMEOUT_MS)
+
         requester = await self.auth.get_user_by_req(request)
 
-        # Optionally parse request body (must be a JSON object, but no required params)
-        # QUESTION: Not sure what information the content is carrying. events info?
-        content = parse_json_object_from_request(request, allow_empty_body=True)  # noqa F841
+        # Optionally parse request body, must be a JSON object, but no required params.
+        _ = parse_json_object_from_request(request, allow_empty_body=True)
 
-        # Check if media exists and get media info
-        local_media = False
         media_info: Union[LocalMedia, RemoteMedia, None] = None
         if self._is_mine_server_name(server_name):
-            local_media = True
             media_info = await self.store.get_local_media(media_id)
         else:
             media_info = await self.media_repo.get_remote_media_info(
                 server_name,
                 media_id,
-                MAXIMUM_ALLOWED_MAX_TIMEOUT_MS,
+                max_timeout_ms,
                 request.getClientAddress().host,
-                False,  # Not sure this is correct value for use_federation
-                True,  # Not sure this is correct value for allow_authenticated
+                use_federation=True,  # Not sure this is correct value for use_federation
+                allow_authenticated=True,
             )
+
+        if not media_info:
+            raise NotFoundError()
+        if media_info.quarantined_by:
+            raise NotFoundError()
+
         await self._validate_user_media_limit(requester, media_info)
 
-        # Creates new copy of media item. (New reference to an existing item)
-        # Storage might be shared in the future (by storing via a content hash)
-        if media_info and local_media:
+        if media_info:
             try:
-                # QUESTION: remote media copies are also stored in local_media_repository?
                 mxc_uri, _ = await self.media_repo.create_media_id(
                     requester.user, restricted=True
                 )
@@ -376,29 +384,17 @@ class CopyResource(RestServlet):
                         media_length=media_info.media_length,
                         user_id=requester.user,
                         sha256=media_info.sha256,
-                        quarantined_by=None,  # QUESTION: Not sure how quarantine media works
+                        quarantined_by=None,
                     )
-
-                # Jetzt media is in pending state.
-
-                # When copying media it should be in the unattached state until the user manually attaches it to a new event.
-                # New Media reference can be attached to a new event. (like uploading a new media)
-                # If attach succeed, response with json object with a required content_uri, giving a new MXC URI referring to the media.
-
-                # TODO: attach to the event logic. where does event info coming from? body param?
-
-                # Respond with the new MXC URI
                 respond_with_json(
                     request,
                     200,
                     {"content_uri": mxc_uri},
                     send_cors=True,
                 )
-
             except Exception as e:
                 logger.error("Failed to copy media: %s", e)
                 respond_with_json(request, 500, {"error": "Failed to copy media"})
-                return
 
 
 def register_servlets(hs: "HomeServer", http_server: HttpServer) -> None:
