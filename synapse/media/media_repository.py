@@ -24,7 +24,7 @@ import logging
 import os
 import shutil
 from io import BytesIO
-from typing import IO, TYPE_CHECKING, Dict, List, Optional, Set, Tuple
+from typing import IO, TYPE_CHECKING, Dict, List, Optional, Set, Tuple, Union
 
 import attr
 from matrix_common.types.mxc_uri import MXCUri
@@ -39,6 +39,7 @@ from synapse.api.errors import (
     NotFoundError,
     RequestSendFailed,
     SynapseError,
+    UnauthorizedRequestAPICallError,
     cs_error,
 )
 from synapse.api.ratelimiting import Ratelimiter
@@ -72,6 +73,7 @@ from synapse.types import Requester, UserID
 from synapse.util.async_helpers import Linearizer
 from synapse.util.retryutils import NotRetryingDestination
 from synapse.util.stringutils import random_string
+from synapse.visibility import filter_events_for_client
 
 if TYPE_CHECKING:
     from synapse.server import HomeServer
@@ -182,6 +184,8 @@ class MediaRepository:
         self.media_upload_limits.sort(
             key=lambda limit: limit.time_period_ms, reverse=True
         )
+
+        self.enable_media_restriction = self.hs.config.experimental.msc3911_enabled
 
     def _start_update_recently_accessed(self) -> Deferred:
         return run_as_background_process(
@@ -459,6 +463,105 @@ class MediaRepository:
         logger.info("Media %s has not yet been uploaded", media_id)
         self.respond_not_yet_uploaded(request)
         return None
+
+    async def is_media_visible(
+        self, requesting_user: UserID, media_info_object: Union[LocalMedia, RemoteMedia]
+    ) -> None:
+        """
+        Verify that media requested for download should be visible to the user making
+        the request
+        """
+
+        if not self.enable_media_restriction:
+            # If media restrictions are not enabled, do not restrict
+            logger.debug("Media restriction is not enabled")
+            return
+
+        if not media_info_object.restricted:
+            logger.debug("Media does not restricted visibility")
+            return
+
+        if not media_info_object.attachments:
+            # When the media has not been attached yet, only the originating user can
+            # see it. But once attachments have been formed, standard other rules apply
+            if isinstance(media_info_object, LocalMedia) and (
+                requesting_user.to_string() == str(media_info_object.user_id)
+            ):
+                return
+
+            logger.debug("Media is restricted, but does not have attachments yet")
+            # It was restricted, but no attachments. Deny
+            # TODO: decide if the server origin needs to be included here
+            raise UnauthorizedRequestAPICallError(
+                f"Media requested ('{media_info_object.media_id}') is restricted"
+            )
+
+        # Should have checked before this function was called if the requester was
+        # the same as the uploader, so we don't do that again.
+        logger.debug("Found attachments for media: %r", media_info_object.attachments)
+        attached_event_id = media_info_object.attachments.event_id
+        attached_profile_user_id = media_info_object.attachments.profile_user_id
+
+        if attached_event_id:
+            logger.debug("Found media attached to event ID: %r", attached_event_id)
+            event_base = await self.store.get_event(attached_event_id)
+            storage_controllers = self.hs.get_storage_controllers()
+
+            # Use the filter_send_to_client=False argument to check that a user can see
+            # the state at a given point. This should work for our purposes.
+            # TODO: check that is the same as stripped state and is appropriate
+            logger.debug("About to check filtering for event id: %r", attached_event_id)
+            filtered_events = await filter_events_for_client(
+                storage_controllers,
+                requesting_user.to_string(),
+                [event_base],
+                # filter_send_to_client=not event_base.is_state(),
+            )
+            logger.debug("Filtered events: %r", filtered_events)
+            if len(filtered_events) > 0:
+                return
+
+        elif attached_profile_user_id:
+            # Can this user see that profile?
+
+            # The error returns here may not be suitable, use the work around below
+            # If shared room restricted profile lookups, it will be restricted
+            # to users that share rooms
+            # await self.profile_handler.check_profile_query_allowed(
+            #     restrictions.profile_user_id, requester.user
+            # )
+            # return
+
+            if self.hs.config.server.limit_profile_requests_to_users_who_share_rooms:
+                # First take care of the case where the requesting user IS the creating
+                # user. The other function below does not handle this.
+                if requesting_user.to_string() == attached_profile_user_id.to_string():
+                    return
+
+                # This call returns a set() that contains which of the "other_user_ids"
+                # share a room. Since we give it only one, if bool(set()) is True, then they
+                # share some room or had at least one invite between them.
+                if not bool(
+                    await self.store.do_users_share_a_room_joined_or_invited(
+                        requesting_user.to_string(),
+                        [attached_profile_user_id.to_string()],
+                    )
+                ):
+                    raise UnauthorizedRequestAPICallError(
+                        f"Media requested ('{media_info_object.media_id}') is restricted"
+                    )
+
+            # check these settings:
+            # * allow_profile_lookup_over_federation
+
+            # If 'limit_profile_requests_to_users_who_share_rooms' is not enabled, all
+            # bets are kinda off
+            return
+
+        # It was a third unknown restriction, or otherwise did not pass inspection
+        raise UnauthorizedRequestAPICallError(
+            f"Media requested ('{media_info_object.media_id}') is restricted"
+        )
 
     async def get_local_media(
         self,
