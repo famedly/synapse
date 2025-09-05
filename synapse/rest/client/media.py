@@ -341,11 +341,6 @@ class CopyResource(RestServlet):
         Handles copying a media item referenced by server_name and media_id.
         Returns a new MXC URI for the copied media.
         """
-        max_timeout_ms = parse_integer(
-            request, "timeout_ms", default=DEFAULT_MAX_TIMEOUT_MS
-        )
-        max_timeout_ms = min(max_timeout_ms, MAXIMUM_ALLOWED_MAX_TIMEOUT_MS)
-
         requester = await self.auth.get_user_by_req(request)
 
         # Optionally parse request body, must be a JSON object, but no required params.
@@ -358,9 +353,9 @@ class CopyResource(RestServlet):
             media_info = await self.media_repo.get_remote_media_info(
                 server_name,
                 media_id,
-                max_timeout_ms,
+                DEFAULT_MAX_TIMEOUT_MS,
                 request.getClientAddress().host,
-                use_federation=True,  # Not sure this is correct value for use_federation
+                use_federation=True,
                 allow_authenticated=True,
             )
 
