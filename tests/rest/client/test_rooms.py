@@ -4525,8 +4525,8 @@ class RoomStateMediaAttachmentTestCase(unittest.HomeserverTestCase):
         self.user = self.register_user("david", "password")
         self.tok = self.login("david", "password")
 
-        self.other_user = self.register_user("mongo", "password")
-        self.other_tok = self.login("mongo", "password")
+        self.other_user = self.register_user("elliott", "password")
+        self.other_tok = self.login("elliott", "password")
 
     def default_config(self) -> JsonDict:
         config = super().default_config()
@@ -4833,8 +4833,8 @@ class RoomSendEventMediaAttachmentTestCase(unittest.HomeserverTestCase):
         self.user = self.register_user("david", "password")
         self.tok = self.login("david", "password")
 
-        self.other_user = self.register_user("mongo", "password")
-        self.other_tok = self.login("mongo", "password")
+        self.other_user = self.register_user("elliott", "password")
+        self.other_tok = self.login("elliott", "password")
 
     def default_config(self) -> JsonDict:
         config = super().default_config()
@@ -5108,3 +5108,160 @@ class RoomSendEventMediaAttachmentTestCase(unittest.HomeserverTestCase):
 
 
 # Sort if need to do annotations and reactions and other m.relates_to stuff here
+
+
+class RoomsCreateMediaAttachmentTestCase(unittest.HomeserverTestCase):
+    servlets = [
+        admin.register_servlets,
+        login.register_servlets,
+        media.register_servlets,
+        room.register_servlets,
+        room.register_deprecated_servlets,
+    ]
+
+    def prepare(
+        self, reactor: MemoryReactor, clock: Clock, homeserver: HomeServer
+    ) -> None:
+        self.store = homeserver.get_datastores().main
+        self.server_name = self.hs.config.server.server_name
+        self.media_repo = self.hs.get_media_repository()
+
+        self.user = self.register_user("david", "password")
+        self.tok = self.login("david", "password")
+
+        self.other_user = self.register_user("elliott", "password")
+        self.other_tok = self.login("elliott", "password")
+
+    def default_config(self) -> JsonDict:
+        config = super().default_config()
+        config.setdefault("experimental_features", {})
+        config["experimental_features"].update({"msc3911_enabled": True})
+        return config
+
+    def create_media_and_set_restricted_flag(
+        self, user_id: Optional[str] = None
+    ) -> MXCUri:
+        """
+        Create media without using an endpoint, and set the restricted flag. This will
+        not add restrictions on its own, as that is the point of this test series
+        """
+        # Allow for testing a different user doing the creation, so can test it errors
+        # when attaching
+        if user_id is None:
+            user_id = self.user
+        content = io.BytesIO(SMALL_PNG)
+        content_uri = self.get_success(
+            self.media_repo.create_or_update_content(
+                "image/png",
+                "test_png_upload",
+                content,
+                67,
+                UserID.from_string(user_id),
+                restricted=True,
+            )
+        )
+        return content_uri
+
+    def create_room_with_avatar(
+        self,
+        avatar_mxc: Optional[Union[MXCUri, str]] = None,
+        creating_user: Optional[str] = None,
+        tok: Optional[str] = None,
+        expected_code: int = HTTPStatus.OK,
+    ) -> Optional[str]:
+        """Create a room with the given avatar"""
+        initial_state_content = []
+        if avatar_mxc == "":
+            # Simulate that an empty string is passed
+            initial_state_content.append(
+                {
+                    "content": {
+                        "url": str(avatar_mxc),
+                    },
+                    "state_key": "",
+                    "type": EventTypes.RoomAvatar,
+                }
+            )
+
+        elif avatar_mxc is not None:
+            initial_state_content.append(
+                {
+                    "content": {
+                        "info": {
+                            "h": 1,
+                            "w": 1,
+                            "mimetype": "image/png",
+                            "size": 67,
+                        },
+                        "url": str(avatar_mxc),
+                    },
+                    "state_key": "",
+                    "type": EventTypes.RoomAvatar,
+                }
+            )
+        return self.helper.create_room_as(
+            creating_user or self.user,
+            extra_content={"initial_state": initial_state_content},
+            tok=tok or self.tok,
+            expect_code=expected_code,
+        )
+
+    def test_create_room_can_attach_media(self) -> None:
+        """
+        Basic functionality test that restricted media being enabled sets a provide
+        room avatar as restricted
+        """
+        test_mxc = self.create_media_and_set_restricted_flag()
+        room_id = self.create_room_with_avatar(avatar_mxc=test_mxc)
+        assert room_id is not None
+
+    def test_create_room_does_not_error_when_no_avatar(self) -> None:
+        """
+        Test that creating a room with no room avatar does not break when msc3911 is
+        enabled. Basically making sure while the config is enabled that it doesn't break
+        """
+        room_id = self.create_room_with_avatar(avatar_mxc=None)
+        assert room_id is not None
+
+    def test_create_room_does_not_error_avatar_initially_set_empty(self) -> None:
+        """
+        Test that creating a room with a room avatar that contains an empty string for
+        the 'url' gracefully is ignored
+        """
+        room_id = self.create_room_with_avatar(avatar_mxc="")
+        assert room_id is not None
+
+    def test_create_room_fails_with_invalid_request_wrong_user(self) -> None:
+        """Test that a room creator must have uploaded the media"""
+        test_mxc = self.create_media_and_set_restricted_flag(self.other_user)
+        room_id = self.create_room_with_avatar(avatar_mxc=test_mxc, expected_code=400)
+        assert room_id is None
+
+    def test_create_room_fails_with_already_attached_media(self) -> None:
+        """
+        Test that a creating a room with an avatar that is already attached somewhere
+        else fails
+        """
+        test_mxc = self.create_media_and_set_restricted_flag()
+        self.get_success(
+            self.store.set_media_restricted_to_event_id(
+                test_mxc.server_name, test_mxc.media_id, "$junk_event_id"
+            )
+        )
+        room_id = self.create_room_with_avatar(avatar_mxc=test_mxc, expected_code=400)
+        assert room_id is None
+
+    def test_create_room_with_unknown_media_avatar_succeeds(self) -> None:
+        """Test that room creation with unknown media as room avatar doesn't fail"""
+        test_mxc = MXCUri.from_str(f"mxc://somewhere.else/{time.time_ns()}")
+        room_id = self.create_room_with_avatar(
+            creating_user=self.other_user,
+            avatar_mxc=test_mxc,
+            tok=self.other_tok,
+        )
+        assert room_id is not None
+
+    def test_create_room_fails_with_malformed_room_avatar_url(self) -> None:
+        """Test that a malformed room avatar url fails the room creation"""
+        room_id = self.create_room_with_avatar(avatar_mxc="junk", expected_code=400)
+        assert room_id is None

@@ -41,6 +41,7 @@ from typing import (
 )
 
 import attr
+from matrix_common.types.mxc_uri import MXCUri
 
 import synapse.events.snapshot
 from synapse.api.constants import (
@@ -1498,6 +1499,58 @@ class RoomCreationHandler:
             event_dict.update(event_keys)
             event_dict.update(kwargs)
 
+            mxc_restrictions = None
+            if (
+                self.config.experimental.msc3911_enabled
+                and etype == EventTypes.RoomAvatar
+            ):
+                # this should be an mxc, but the spec does not specifically say it has to be
+                extracted_media_id: Optional[str] = content.get("url")
+                # It may be that "url" is set to either an empty string or None. Accept
+                # this gracefully, to account for backwards compatible behavior
+                if extracted_media_id:
+                    try:
+                        mxc_uri = MXCUri.from_str(extracted_media_id)
+                    except ValueError:
+                        raise SynapseError(
+                            HTTPStatus.BAD_REQUEST,
+                            f"Room avatar MXC Uri ('{extracted_media_id}') is malformed",
+                            Codes.INVALID_PARAM,
+                        )
+                    # If there is a media item, check for existing restrictions
+                    local_media_data = await self.store.get_local_media(
+                        mxc_uri.media_id
+                    )
+
+                    # Non-existent media is to be handled by the download media endpoint
+                    # so ignore it for now and allow proceeding. It will just not attach
+                    # the media
+                    if local_media_data is not None and local_media_data.restricted:
+                        if not local_media_data.attachments:
+                            if creator.user.to_string() != local_media_data.user_id:
+                                # A different user created a room compared to who
+                                # uploaded the media. Just like with the '/state/' and
+                                # '/send/ endpoints, do not leak the metadata
+                                raise SynapseError(
+                                    HTTPStatus.BAD_REQUEST,
+                                    f"The media requested for a room avatar is invalid as the media '{mxc_uri.media_id}' does not exist",
+                                    Codes.INVALID_PARAM,
+                                )
+                            # The media is not already attached to anything, proceed
+                            mxc_restrictions = [
+                                MXCUri(self.server_name, local_media_data.media_id)
+                            ]
+                        else:
+                            # This media is already attached. If it was a prior attempt
+                            # to create a room, the atomic handling of the room creation
+                            # means it will not be attached, so if this exists it
+                            # succeeded somewhere else.
+                            raise SynapseError(
+                                HTTPStatus.BAD_REQUEST,
+                                f"The media requested for a room avatar is invalid as the media '{mxc_uri.media_id}' does not exist",
+                                Codes.INVALID_PARAM,
+                            )
+
             (
                 new_event,
                 new_unpersisted_context,
@@ -1510,6 +1563,7 @@ class RoomCreationHandler:
                 # state_map since it is modified below.
                 state_map=dict(state_map),
                 for_batch=for_batch,
+                mxc_restriction_list_for_event=mxc_restrictions,
             )
 
             depth += 1
