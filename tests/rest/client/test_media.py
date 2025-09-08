@@ -3388,14 +3388,14 @@ class RestrictedMediaVisibilityTestCase(unittest.HomeserverTestCase):
         initial_room_avatar_mxc: Optional[MXCUri] = None,
         invite_list: Optional[List[str]] = None,
     ) -> str:
-        initial_state_list = []
-        initial_state_list.append(
+        initial_state_list = [
             {
                 "type": EventTypes.RoomHistoryVisibility,
                 "state_key": "",
                 "content": {"history_visibility": visibility},
             }
-        )
+        ]
+
         if initial_room_avatar_mxc:
             # Because of the order that room events are created in, if the room avatar
             # does not come before the history visibility event, it will not be visible
