@@ -3125,7 +3125,7 @@ class RestrictedResourceUploadTestCase(unittest.HomeserverTestCase):
             f"/_matrix/client/v1/media/download/{self.hs.hostname}/{media_id}",
             access_token=self.creator_tok,
         )
-        assert channel.code == 200
+        assert channel.code == 200, channel.json_body
 
         # The other user cannot download the restricted resource in pending state.
         channel = self.make_request(
@@ -3133,7 +3133,7 @@ class RestrictedResourceUploadTestCase(unittest.HomeserverTestCase):
             f"/_matrix/client/v1/media/download/{self.hs.hostname}/{media_id}",
             access_token=self.other_user_tok,
         )
-        assert channel.code == 404
+        assert channel.code == 403, channel.json_body
 
     def test_async_upload_restricted_resource(self) -> None:
         """
@@ -3177,7 +3177,7 @@ class RestrictedResourceUploadTestCase(unittest.HomeserverTestCase):
             f"/_matrix/client/v1/media/download/{self.hs.hostname}/{media_id}",
             access_token=self.creator_tok,
         )
-        assert channel.code == 200
+        assert channel.code == 200, channel.json_body
 
         # The other user cannot download the restricted resource.
         channel = self.make_request(
@@ -3185,7 +3185,7 @@ class RestrictedResourceUploadTestCase(unittest.HomeserverTestCase):
             f"/_matrix/client/v1/media/download/{self.hs.hostname}/{media_id}",
             access_token=self.other_user_tok,
         )
-        assert channel.code == 404
+        assert channel.code == 403, channel.json_body
 
 
 class CopyRestrictedResource(unittest.HomeserverTestCase):
