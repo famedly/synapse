@@ -270,6 +270,7 @@ class ThumbnailProvider:
         self.media_storage = media_storage
         self.store = hs.get_datastores().main
         self.dynamic_thumbnails = hs.config.media.dynamic_thumbnails
+        self.msc3911_enabled = hs.config.experimental.msc3911_enabled
 
     async def respond_local_thumbnail(
         self,
@@ -288,6 +289,13 @@ class ThumbnailProvider:
         )
         if not media_info:
             return
+
+        restrictions = None
+        if self.msc3911_enabled:
+            restrictions = await self.media_repo.validate_media_restriction(
+                request, media_info, None, for_federation
+            )
+        restrictions_json = restrictions.to_dict() if restrictions else {}
 
         # if the media the thumbnail is generated from is authenticated, don't serve the
         # thumbnail over an unauthenticated endpoint
@@ -314,6 +322,7 @@ class ThumbnailProvider:
             server_name=None,
             for_federation=for_federation,
             media_info=media_info,
+            json_response=restrictions_json,
         )
 
     async def select_or_generate_local_thumbnail(
@@ -346,6 +355,13 @@ class ThumbnailProvider:
             return
 
         thumbnail_infos = await self.store.get_local_media_thumbnails(media_id)
+        restrictions = None
+        if self.msc3911_enabled:
+            restrictions = await self.media_repo.validate_media_restriction(
+                request, None, media_id, for_federation
+            )
+
+        restrictions_json = restrictions.to_dict() if restrictions else {}
         for info in thumbnail_infos:
             t_w = info.width == desired_width
             t_h = info.height == desired_height
@@ -370,8 +386,10 @@ class ThumbnailProvider:
                             info.type,
                             info.length,
                             None,
+                            json_response=restrictions_json,
                         )
                         return
+
                     else:
                         await respond_with_responder(
                             request, responder, info.type, info.length
@@ -402,6 +420,7 @@ class ThumbnailProvider:
                     file_info.thumbnail.type,
                     file_info.thumbnail.length,
                     None,
+                    json_response=restrictions_json,
                 )
             else:
                 await respond_with_file(self.hs, request, desired_type, file_path)
@@ -560,6 +579,7 @@ class ThumbnailProvider:
         for_federation: bool,
         media_info: Optional[LocalMedia] = None,
         server_name: Optional[str] = None,
+        json_response: Optional[dict] = None,
     ) -> None:
         """
         Respond to a request with an appropriate thumbnail from the previously generated thumbnails.
@@ -620,6 +640,7 @@ class ThumbnailProvider:
                         file_info.thumbnail.type,
                         file_info.thumbnail.length,
                         None,
+                        json_response=json_response,
                     )
                     return
                 else:
@@ -679,6 +700,7 @@ class ThumbnailProvider:
                     file_info.thumbnail.type,
                     file_info.thumbnail.length,
                     None,
+                    json_response=json_response,
                 )
             else:
                 await respond_with_responder(

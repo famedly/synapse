@@ -74,6 +74,13 @@ class MediaRestrictions:
     event_id: Optional[str] = None
     profile_user_id: Optional[UserID] = None
 
+    def to_dict(self) -> dict:
+        if self.event_id:
+            return {"restrictions": {"event_id": str(self.event_id)}}
+        if self.profile_user_id:
+            return {"restrictions": {"profile_user_id": str(self.profile_user_id)}}
+        return {}
+
 
 @attr.s(slots=True, frozen=True, auto_attribs=True)
 class LocalMedia:

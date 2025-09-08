@@ -23,6 +23,7 @@ import errno
 import logging
 import os
 import shutil
+from http import HTTPStatus
 from io import BytesIO
 from typing import IO, TYPE_CHECKING, Dict, List, Optional, Set, Tuple
 
@@ -67,7 +68,11 @@ from synapse.media.storage_provider import StorageProviderWrapper
 from synapse.media.thumbnailer import Thumbnailer, ThumbnailError
 from synapse.media.url_previewer import UrlPreviewer
 from synapse.metrics.background_process_metrics import run_as_background_process
-from synapse.storage.databases.main.media_repository import LocalMedia, RemoteMedia
+from synapse.storage.databases.main.media_repository import (
+    LocalMedia,
+    MediaRestrictions,
+    RemoteMedia,
+)
 from synapse.types import Requester, UserID
 from synapse.util.async_helpers import Linearizer
 from synapse.util.retryutils import NotRetryingDestination
@@ -182,6 +187,7 @@ class MediaRepository:
         self.media_upload_limits.sort(
             key=lambda limit: limit.time_period_ms, reverse=True
         )
+        self.msc3911_enabled = hs.config.experimental.msc3911_enabled
 
     def _start_update_recently_accessed(self) -> Deferred:
         return run_as_background_process(
@@ -493,19 +499,12 @@ class MediaRepository:
             if media_info.authenticated:
                 raise NotFoundError()
 
-        # MSC3911: If media is restricted but restriction is empty, the media is in
-        # pending state and only creator can see it until it is attached to an event.
-        if media_info.restricted:
-            restrictions = await self.store.get_media_restrictions(
-                self.server_name, media_info.media_id
+        restrictions = None
+        if self.msc3911_enabled:
+            restrictions = await self.validate_media_restriction(
+                request, media_info, None, federation
             )
-            if not restrictions:
-                if not (
-                    isinstance(request.requester, Requester)
-                    and request.requester.user.to_string() == media_info.user_id
-                ):
-                    respond_404(request)
-                    return
+        restrictions_json = restrictions.to_dict() if restrictions else {}
 
         self.mark_recently_accessed(None, media_id)
 
@@ -526,7 +525,13 @@ class MediaRepository:
         responder = await self.media_storage.fetch_media(file_info)
         if federation:
             await respond_with_multipart_responder(
-                self.clock, request, responder, media_type, media_length, upload_name
+                self.clock,
+                request,
+                responder,
+                media_type,
+                media_length,
+                upload_name,
+                restrictions_json,
             )
         else:
             await respond_with_responder(
@@ -1568,3 +1573,68 @@ class MediaRepository:
             removed_media.append(media_id)
 
         return removed_media, len(removed_media)
+
+    async def validate_media_restriction(
+        self,
+        request: SynapseRequest,
+        media_info: Optional[LocalMedia],
+        media_id: Optional[str],
+        is_federation: bool = False,
+    ) -> Optional[MediaRestrictions]:
+        """
+        MSC3911: If media is restricted but restriction is empty, the media is in
+        pending state and only creator can see it until it is attached to an event. If
+        there is a restriction return MediaRestrictions after validation.
+
+        Args:
+            request: The incoming request.
+            media_info: Optional, the media information.
+            media_id: Optional, the media ID to validate.
+
+        Returns:
+            MediaRestrictions if there is one set, otherwise raise SynapseError.
+        """
+        if not media_info and media_id:
+            media_info = await self.store.get_local_media(media_id)
+        if not media_info:
+            return None
+        restricted = media_info.restricted
+        if not restricted:
+            return None
+        attachments: Optional[MediaRestrictions] = media_info.attachments
+        # for both federation and client endpoints
+        if attachments:
+            # Only one of event_id or profile_user_id must be set, not both, not neither
+            if attachments.event_id is None and attachments.profile_user_id is None:
+                raise SynapseError(
+                    HTTPStatus.FORBIDDEN,
+                    "MediaRestrictions must have exactly one of event_id or profile_user_id set.",
+                    errcode=Codes.FORBIDDEN,
+                )
+            if bool(attachments.event_id) == bool(attachments.profile_user_id):
+                raise SynapseError(
+                    HTTPStatus.FORBIDDEN,
+                    "MediaRestrictions must have exactly one of event_id or profile_user_id set.",
+                    errcode=Codes.FORBIDDEN,
+                )
+
+        if not attachments and is_federation:
+            raise SynapseError(
+                HTTPStatus.NOT_FOUND,
+                "Not found '%s'" % (request.path.decode(),),
+                errcode=Codes.NOT_FOUND,
+            )
+
+        if not attachments and not is_federation:
+            if (
+                isinstance(request.requester, Requester)
+                and request.requester.user.to_string() != media_info.user_id
+            ):
+                raise SynapseError(
+                    HTTPStatus.NOT_FOUND,
+                    "Not found '%s'" % (request.path.decode(),),
+                    errcode=Codes.NOT_FOUND,
+                )
+            else:
+                return None
+        return attachments
