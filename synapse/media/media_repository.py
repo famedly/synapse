@@ -598,20 +598,12 @@ class MediaRepository:
         if self.hs.config.media.enable_authenticated_media and not allow_authenticated:
             if media_info.authenticated:
                 raise NotFoundError()
+        # if MSC3911 is enabled, check visibility of the media for the user
+        if self.enable_media_restriction and requester is not None:
+            user_id = requester.user
 
-        # MSC3911: If media is restricted but restriction is empty, the media is in
-        # pending state and only creator can see it until it is attached to an event.
-        if media_info.restricted:
-            restrictions = await self.store.get_media_restrictions(
-                self.server_name, media_info.media_id
-            )
-            if not restrictions:
-                if not (
-                    isinstance(request.requester, Requester)
-                    and request.requester.user.to_string() == media_info.user_id
-                ):
-                    respond_404(request)
-                    return
+            # This will raise directly back to the client if not visible
+            await self.is_media_visible(user_id, media_info)
 
         self.mark_recently_accessed(None, media_id)
 
@@ -823,12 +815,21 @@ class MediaRepository:
             if not media_info or media_info.authenticated:
                 raise NotFoundError()
 
-        # file_id is the ID we use to track the file locally. If we've already
-        # seen the file then reuse the existing ID, otherwise generate a new
-        # one.
-
         # If we have an entry in the DB, try and look for it
         if media_info:
+            # if MSC3911 is enabled, check visibility of the media for the user. This
+            # check exists twice in this function, once up here for when it already
+            # exists in the local database and again further down for after it was
+            # retrieved from the remote.
+            if self.enable_media_restriction and requester is not None:
+                user_id = requester.user
+
+                # This will raise directly back to the client if not visible
+                await self.is_media_visible(user_id, media_info)
+
+            # file_id is the ID we use to track the file locally. If we've already
+            # seen the file then reuse the existing ID, otherwise generate a new
+            # one.
             file_id = media_info.filesystem_id
             file_info = FileInfo(server_name, file_id)
 
@@ -873,6 +874,19 @@ class MediaRepository:
             media_info = await self.store.get_cached_remote_media(server_name, media_id)
             if not media_info:
                 raise e
+
+        # if MSC3911 is enabled, check visibility of the media for the user. Recall that
+        # restricted media requires authentication be enabled
+        if (
+            self.hs.config.media.enable_authenticated_media
+            and self.enable_media_restriction
+            and requester is not None
+        ):
+            # should still have user_id defined from earlier, although mypy disagrees
+            user_id = requester.user
+
+            # This will raise directly back to the client if not visible
+            await self.is_media_visible(user_id, media_info)
 
         file_id = media_info.filesystem_id
         if not media_info.media_type:
