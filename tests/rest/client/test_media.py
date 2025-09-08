@@ -3029,7 +3029,7 @@ class DisableUnrestrictedResourceTestCase(unittest.HomeserverTestCase):
         )
 
 
-class RestrictedResourceTestCase(unittest.HomeserverTestCase):
+class RestrictedResourceUploadTestCase(unittest.HomeserverTestCase):
     """
     Tests restricted media creation and upload endpoints when `msc3911_enabled` is
     configured to be True.
@@ -3176,3 +3176,146 @@ class RestrictedResourceTestCase(unittest.HomeserverTestCase):
             access_token=self.other_user_tok,
         )
         assert channel.code == 404
+
+
+class CopyRestrictedResource(unittest.HomeserverTestCase):
+    """
+    Tests copy API when `msc3911_enabled` is configured to be True.
+    """
+
+    extra_config = {
+        "experimental_features": {"msc3911_enabled": True},
+    }
+
+    servlets = [
+        media.register_servlets,
+        login.register_servlets,
+        admin.register_servlets,
+    ]
+
+    def make_homeserver(self, reactor: MemoryReactor, clock: Clock) -> HomeServer:
+        config = self.default_config()
+        config.update(self.extra_config)
+        return self.setup_test_homeserver(config=config)
+
+    def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
+        self.media_repo = hs.get_media_repository()
+        self.user = self.register_user("user", "testpass")
+        self.user_tok = self.login("user", "testpass")
+        self.other_user = self.register_user("other", "testpass")
+        self.other_user_tok = self.login("other", "testpass")
+
+    def create_resource_dict(self) -> dict[str, Resource]:
+        resources = super().create_resource_dict()
+        resources["/_matrix/media"] = self.hs.get_media_repository_resource()
+        return resources
+
+    def test_copy_local_restricted_resource(self) -> None:
+        """
+        Tests that the new copy endpoint creates a new mxc uri for restricted resource.
+        """
+        # The media is created with user_tok
+        content = io.BytesIO(SMALL_PNG)
+        content_uri = self.get_success(
+            self.media_repo.create_or_update_content(
+                "image/png",
+                "test_png_upload",
+                content,
+                67,
+                UserID.from_string(self.user),
+                restricted=True,
+            )
+        )
+        media_id = content_uri.media_id
+
+        # The other_user copies the media from local server
+        channel = self.make_request(
+            "POST",
+            f"/_matrix/client/unstable/org.matrix.msc3911/media/copy/{self.hs.hostname}/{media_id}",
+            access_token=self.other_user_tok,
+        )
+        self.assertEqual(channel.code, 200)
+        self.assertIn("content_uri", channel.json_body)
+        new_media_id = channel.json_body["content_uri"].split("/")[-1]
+        assert new_media_id != media_id
+
+        # Check if the original media there.
+        original_media = self.get_success(
+            self.hs.get_datastores().main.get_local_media(media_id)
+        )
+        assert original_media is not None
+        assert original_media.user_id == self.user
+
+        # Check the copied media.
+        copied_media = self.get_success(
+            self.hs.get_datastores().main.get_local_media(new_media_id)
+        )
+        assert copied_media is not None
+        assert copied_media.user_id == self.other_user
+
+        # Check if they are referencing the same image.
+        assert original_media.sha256 == copied_media.sha256
+
+        # Check if media is unattached to any event or user profile yet.
+        assert copied_media.attachments is None
+
+    def test_copy_remote_restricted_resource(self) -> None:
+        """
+        Tests that the new copy endpoint creates a new mxc uri for restricted resource.
+        """
+        # create remote media
+        remote_server = "remoteserver.com"
+        remote_file_id = "remote1"
+        file_info = FileInfo(server_name=remote_server, file_id=remote_file_id)
+
+        media_storage = self.hs.get_media_repository().media_storage
+        ctx = media_storage.store_into_file(file_info)
+        (f, _) = self.get_success(ctx.__aenter__())
+        f.write(SMALL_PNG)
+        self.get_success(ctx.__aexit__(None, None, None))
+        media_id = "remotemedia"
+        self.get_success(
+            self.hs.get_datastores().main.store_cached_remote_media(
+                origin=remote_server,
+                media_id=media_id,
+                media_type="image/png",
+                media_length=1,
+                time_now_ms=self.clock.time_msec(),
+                upload_name="test.png",
+                filesystem_id=remote_file_id,
+                sha256=remote_file_id,
+            )
+        )
+
+        # The other_user copies the media from remote server
+        channel = self.make_request(
+            "POST",
+            f"/_matrix/client/unstable/org.matrix.msc3911/media/copy/{remote_server}/{media_id}",
+            access_token=self.other_user_tok,
+        )
+        self.assertEqual(channel.code, 200)
+        self.assertIn("content_uri", channel.json_body)
+        new_media_id = channel.json_body["content_uri"].split("/")[-1]
+        assert new_media_id != media_id
+
+        # Check if the original media there.
+        original_media = self.get_success(
+            self.hs.get_datastores().main.get_cached_remote_media(
+                remote_server, media_id
+            )
+        )
+        assert original_media is not None
+        assert original_media.upload_name == "test.png"
+
+        # Check the copied media.
+        copied_media = self.get_success(
+            self.hs.get_datastores().main.get_local_media(new_media_id)
+        )
+        assert copied_media is not None
+        assert copied_media.user_id == self.other_user
+
+        # Check if they are referencing the same image.
+        assert original_media.sha256 == copied_media.sha256
+
+        # Check if copied media is unattached to any event or user profile yet.
+        assert copied_media.attachments is None

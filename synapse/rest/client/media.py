@@ -22,8 +22,13 @@
 
 import logging
 import re
-from typing import Optional
+from typing import Optional, Union
 
+from synapse.api.errors import (
+    Codes,
+    NotFoundError,
+    SynapseError,
+)
 from synapse.http.server import (
     HttpServer,
     respond_with_json,
@@ -31,7 +36,12 @@ from synapse.http.server import (
     set_corp_headers,
     set_cors_headers,
 )
-from synapse.http.servlet import RestServlet, parse_integer, parse_string
+from synapse.http.servlet import (
+    RestServlet,
+    parse_integer,
+    parse_json_object_from_request,
+    parse_string,
+)
 from synapse.http.site import SynapseRequest
 from synapse.media._base import (
     DEFAULT_MAX_TIMEOUT_MS,
@@ -44,6 +54,8 @@ from synapse.media.thumbnailer import ThumbnailProvider
 from synapse.rest.media.create_resource import CreateResource
 from synapse.rest.media.upload_resource import UploadRestrictedResource
 from synapse.server import HomeServer
+from synapse.storage.databases.main.media_repository import LocalMedia, RemoteMedia
+from synapse.types import Requester
 from synapse.util.stringutils import parse_and_validate_server_name
 
 logger = logging.getLogger(__name__)
@@ -277,6 +289,109 @@ class DownloadResource(RestServlet):
             )
 
 
+class CopyResource(RestServlet):
+    """
+    MSC3911: This is an unstable endpoint that is introduced in msc3911 scope. This
+    "copy" api is to be used by clients when forwarding events with media attachments.
+    Rather than just allowing clients to attach media to multiple events, this ensures
+    that the list of events attached to a media does not grow over time, so that servers
+    can reliably cache media and impose the correct access restrictions.
+    """
+
+    # Stable: /_matrix/client/v1/media/copy/{serverName}/{mediaId}
+    PATTERNS = [
+        re.compile(
+            "/_matrix/client/unstable/org.matrix.msc3911/media/copy/(?P<server_name>[^/]*)/(?P<media_id>[^/]*)"
+        )
+    ]
+
+    def __init__(self, hs: "HomeServer", media_repo: "MediaRepository"):
+        super().__init__()
+        self.store = hs.get_datastores().main
+        self.media_repo = media_repo
+        self.auth = hs.get_auth()
+        self._is_mine_server_name = hs.is_mine_server_name
+        self.limits_dict = {"m.upload.size": hs.config.media.max_upload_size}
+        self.media_repository_callbacks = hs.get_module_api_callbacks().media_repository
+        self.clock = hs.get_clock()
+
+    async def _validate_user_media_limit(
+        self, requester: Requester, media_info: Union[LocalMedia, RemoteMedia, None]
+    ) -> None:
+        """Check if the request exceeds the user's media limits."""
+        media_config = await self.media_repository_callbacks.get_media_config_for_user(
+            requester.user.to_string(),
+        )
+        if not media_config:
+            media_config = self.limits_dict
+
+        max_upload_size = media_config.get("m.upload.size")
+        if max_upload_size and media_info and media_info.media_length:
+            # We are not counting the amount of media the user uploaded in a previous time period
+            if media_info.media_length > max_upload_size:
+                raise SynapseError(400, Codes.RESOURCE_LIMIT_EXCEEDED)
+
+    async def on_POST(
+        self,
+        request: SynapseRequest,
+        server_name: str,
+        media_id: str,
+    ) -> None:
+        """
+        Handles copying a media item referenced by server_name and media_id.
+        Returns a new MXC URI for the copied media.
+        """
+        requester = await self.auth.get_user_by_req(request)
+
+        # Optionally parse request body, must be a JSON object, but no required params.
+        _ = parse_json_object_from_request(request, allow_empty_body=True)
+
+        media_info: Union[LocalMedia, RemoteMedia, None] = None
+        if self._is_mine_server_name(server_name):
+            media_info = await self.store.get_local_media(media_id)
+        else:
+            media_info = await self.media_repo.get_remote_media_info(
+                server_name,
+                media_id,
+                DEFAULT_MAX_TIMEOUT_MS,
+                request.getClientAddress().host,
+                use_federation=True,
+                allow_authenticated=True,
+            )
+
+        if not media_info:
+            raise NotFoundError()
+        if media_info.quarantined_by:
+            raise NotFoundError()
+
+        await self._validate_user_media_limit(requester, media_info)
+
+        if media_info:
+            try:
+                mxc_uri, _ = await self.media_repo.create_media_id(
+                    requester.user, restricted=True
+                )
+                if media_info.media_length and media_info.sha256:
+                    await self.store.update_local_media(
+                        media_id=mxc_uri.split("/")[-1],
+                        media_type=media_info.media_type,
+                        upload_name=media_info.upload_name,
+                        media_length=media_info.media_length,
+                        user_id=requester.user,
+                        sha256=media_info.sha256,
+                        quarantined_by=None,
+                    )
+                respond_with_json(
+                    request,
+                    200,
+                    {"content_uri": mxc_uri},
+                    send_cors=True,
+                )
+            except Exception as e:
+                logger.error("Failed to copy media: %s", e)
+                respond_with_json(request, 500, {"error": "Failed to copy media"})
+
+
 def register_servlets(hs: "HomeServer", http_server: HttpServer) -> None:
     media_repo = hs.get_media_repository()
     if hs.config.media.url_preview_enabled:
@@ -289,3 +404,4 @@ def register_servlets(hs: "HomeServer", http_server: HttpServer) -> None:
     if hs.config.experimental.msc3911_enabled:
         CreateResource(hs, media_repo, restricted=True).register(http_server)
         UploadRestrictedResource(hs, media_repo).register(http_server)
+        CopyResource(hs, media_repo).register(http_server)
