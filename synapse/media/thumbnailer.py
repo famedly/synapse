@@ -42,6 +42,7 @@ from synapse.media._base import (
 )
 from synapse.media.media_storage import FileResponder, MediaStorage
 from synapse.storage.databases.main.media_repository import LocalMedia
+from synapse.types import Requester
 
 if TYPE_CHECKING:
     from synapse.media.media_repository import MediaRepository
@@ -281,6 +282,7 @@ class ThumbnailProvider:
         m_type: str,
         max_timeout_ms: int,
         for_federation: bool,
+        requester: Optional[Requester] = None,
         allow_authenticated: bool = True,
     ) -> None:
         media_info = await self.media_repo.get_local_media_info(
@@ -326,6 +328,7 @@ class ThumbnailProvider:
         desired_type: str,
         max_timeout_ms: int,
         for_federation: bool,
+        requester: Optional[Requester] = None,
         allow_authenticated: bool = True,
     ) -> None:
         media_info = await self.media_repo.get_local_media_info(
@@ -421,6 +424,7 @@ class ThumbnailProvider:
         max_timeout_ms: int,
         ip_address: str,
         use_federation: bool,
+        requester: Optional[Requester] = None,
         allow_authenticated: bool = True,
     ) -> None:
         media_info = await self.media_repo.get_remote_media_info(
@@ -430,6 +434,7 @@ class ThumbnailProvider:
             ip_address,
             use_federation,
             allow_authenticated,
+            requester,
         )
         if not media_info:
             respond_404(request)
@@ -503,6 +508,7 @@ class ThumbnailProvider:
         max_timeout_ms: int,
         ip_address: str,
         use_federation: bool,
+        requester: Optional[Requester] = None,
         allow_authenticated: bool = True,
     ) -> None:
         # TODO: Don't download the whole remote file
@@ -515,6 +521,7 @@ class ThumbnailProvider:
             ip_address,
             use_federation,
             allow_authenticated,
+            requester,
         )
         if not media_info:
             return

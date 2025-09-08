@@ -569,6 +569,7 @@ class MediaRepository:
         media_id: str,
         name: Optional[str],
         max_timeout_ms: int,
+        requester: Optional[Requester] = None,
         allow_authenticated: bool = True,
         federation: bool = False,
     ) -> None:
@@ -582,6 +583,8 @@ class MediaRepository:
                 the filename in the Content-Disposition header of the response.
             max_timeout_ms: the maximum number of milliseconds to wait for the
                 media to be uploaded.
+            requester: The user making the request, to verify restricted media. Only
+                used for local users, not over federation
             allow_authenticated: whether media marked as authenticated may be served to this request
             federation: whether the local media being fetched is for a federation request
 
@@ -645,6 +648,7 @@ class MediaRepository:
         max_timeout_ms: int,
         ip_address: str,
         use_federation_endpoint: bool,
+        requester: Optional[Requester] = None,
         allow_authenticated: bool = True,
     ) -> None:
         """Respond to requests for remote media.
@@ -660,6 +664,8 @@ class MediaRepository:
             ip_address: the IP address of the requester
             use_federation_endpoint: whether to request the remote media over the new
                 federation `/download` endpoint
+            requester: The user making the request, to verify restricted media. Only
+                used for local users, not over federation
             allow_authenticated: whether media marked as authenticated may be served to this
                 request
 
@@ -694,6 +700,7 @@ class MediaRepository:
                 ip_address,
                 use_federation_endpoint,
                 allow_authenticated,
+                requester,
             )
 
         # Check if the media is cached on the client, if so return 304. We need
@@ -728,6 +735,7 @@ class MediaRepository:
         ip_address: str,
         use_federation: bool,
         allow_authenticated: bool,
+        requester: Optional[Requester] = None,
     ) -> RemoteMedia:
         """Gets the media info associated with the remote file, downloading
         if necessary.
@@ -742,6 +750,8 @@ class MediaRepository:
                 over the federation `/download` endpoint
             allow_authenticated: whether media marked as authenticated may be served to this
                 request
+            requester: The user making the request, to verify restricted media. Only
+                used for local users, not over federation
 
         Returns:
             The media info of the file
@@ -764,6 +774,7 @@ class MediaRepository:
                 ip_address,
                 use_federation,
                 allow_authenticated,
+                requester,
             )
 
         # Ensure we actually use the responder so that it releases resources
@@ -782,6 +793,7 @@ class MediaRepository:
         ip_address: str,
         use_federation_endpoint: bool,
         allow_authenticated: bool,
+        requester: Optional[Requester] = None,
     ) -> Tuple[Optional[Responder], RemoteMedia]:
         """Looks for media in local cache, if not there then attempt to
         download from remote server.
@@ -797,6 +809,9 @@ class MediaRepository:
             ip_address: the IP address of the requester
             use_federation_endpoint: whether to request the remote media over the new federation
             /download endpoint
+            allow_authenticated:
+            requester: The user making the request, to verify restricted media. Only
+                used for local users, not over federation
 
         Returns:
             A tuple of responder and the media info of the file.
