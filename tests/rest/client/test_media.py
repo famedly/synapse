@@ -3655,8 +3655,6 @@ class RestrictedMediaVisibilityTestCase(unittest.HomeserverTestCase):
     def send_membership_with_attached_media(
         self, room_id: str, mxc_uri: MXCUri, tok: Optional[str] = None
     ) -> FakeChannel:
-        # TODO: maybe switch this to direct database injection? We are not here to test
-        #  endpoints directly, just logic
         channel1 = self.make_request(
             "PUT",
             f"/rooms/{room_id}/state/m.room.member/{self.alice_user_id}?org.matrix.msc3911.attach_media={str(mxc_uri)}",
