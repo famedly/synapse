@@ -473,12 +473,9 @@ class MediaRepository:
         """
 
         if not self.enable_media_restriction:
-            # If media restrictions are not enabled, do not restrict
-            logger.debug("Media restriction is not enabled")
             return
 
         if not media_info_object.restricted:
-            logger.debug("Media does not restricted visibility")
             return
 
         if not media_info_object.attachments:
@@ -489,35 +486,24 @@ class MediaRepository:
             ):
                 return
 
-            logger.debug("Media is restricted, but does not have attachments yet")
             # It was restricted, but no attachments. Deny
-            # TODO: decide if the server origin needs to be included here
             raise UnauthorizedRequestAPICallError(
                 f"Media requested ('{media_info_object.media_id}') is restricted"
             )
 
-        # Should have checked before this function was called if the requester was
-        # the same as the uploader, so we don't do that again.
-        logger.debug("Found attachments for media: %r", media_info_object.attachments)
         attached_event_id = media_info_object.attachments.event_id
         attached_profile_user_id = media_info_object.attachments.profile_user_id
 
         if attached_event_id:
-            logger.debug("Found media attached to event ID: %r", attached_event_id)
             event_base = await self.store.get_event(attached_event_id)
             storage_controllers = self.hs.get_storage_controllers()
 
-            # Use the filter_send_to_client=False argument to check that a user can see
-            # the state at a given point. This should work for our purposes.
-            # TODO: check that is the same as stripped state and is appropriate
-            logger.debug("About to check filtering for event id: %r", attached_event_id)
             filtered_events = await filter_events_for_client(
                 storage_controllers,
                 requesting_user.to_string(),
                 [event_base],
                 # filter_send_to_client=not event_base.is_state(),
             )
-            logger.debug("Filtered events: %r", filtered_events)
             if len(filtered_events) > 0:
                 return
 
