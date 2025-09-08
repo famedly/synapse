@@ -271,6 +271,7 @@ class ThumbnailProvider:
         self.media_storage = media_storage
         self.store = hs.get_datastores().main
         self.dynamic_thumbnails = hs.config.media.dynamic_thumbnails
+        self.enable_media_restriction = self.hs.config.experimental.msc3911_enabled
 
     async def respond_local_thumbnail(
         self,
@@ -296,6 +297,12 @@ class ThumbnailProvider:
         if self.hs.config.media.enable_authenticated_media and not allow_authenticated:
             if media_info.authenticated:
                 raise NotFoundError()
+
+        # if MSC3911 is enabled, check visibility of the media for the user
+        if self.enable_media_restriction and requester is not None:
+            user_id = requester.user
+            # This will raise directly back to the client if not visible
+            await self.media_repo.is_media_visible(user_id, media_info)
 
         # Once we've checked auth we can return early if the media is cached on
         # the client
@@ -342,6 +349,12 @@ class ThumbnailProvider:
         if self.hs.config.media.enable_authenticated_media and not allow_authenticated:
             if media_info.authenticated:
                 raise NotFoundError()
+
+        # if MSC3911 is enabled, check visibility of the media for the user
+        if self.enable_media_restriction and requester is not None:
+            user_id = requester.user
+            # This will raise directly back to the client if not visible
+            await self.media_repo.is_media_visible(user_id, media_info)
 
         # Once we've checked auth we can return early if the media is cached on
         # the client
@@ -447,6 +460,12 @@ class ThumbnailProvider:
                 respond_404(request)
                 return
 
+        # if MSC3911 is enabled, check visibility of the media for the user
+        if self.enable_media_restriction and requester is not None:
+            user_id = requester.user
+            # This will raise directly back to the client if not visible
+            await self.media_repo.is_media_visible(user_id, media_info)
+
         # Check if the media is cached on the client, if so return 304.
         if check_for_cached_entry_and_respond(request):
             return
@@ -531,6 +550,12 @@ class ThumbnailProvider:
         if self.hs.config.media.enable_authenticated_media and not allow_authenticated:
             if media_info.authenticated:
                 raise NotFoundError()
+
+        # if MSC3911 is enabled, check visibility of the media for the user
+        if self.enable_media_restriction and requester is not None:
+            user_id = requester.user
+            # This will raise directly back to the client if not visible
+            await self.media_repo.is_media_visible(user_id, media_info)
 
         # Check if the media is cached on the client, if so return 304.
         if check_for_cached_entry_and_respond(request):
