@@ -66,7 +66,7 @@ from synapse.rest import admin
 from synapse.rest.client import login, media, room
 from synapse.server import HomeServer
 from synapse.storage.databases.main.media_repository import LocalMedia
-from synapse.types import JsonDict, UserID
+from synapse.types import JsonDict, UserID, create_requester
 from synapse.util import Clock
 from synapse.util.stringutils import parse_and_validate_mxc_uri
 
@@ -3352,6 +3352,7 @@ class RestrictedMediaVisibilityTestCase(unittest.HomeserverTestCase):
         self.store = homeserver.get_datastores().main
         self.server_name = self.hs.config.server.server_name
         self.media_repo = self.hs.get_media_repository()
+        self.profile_handler = self.hs.get_profile_handler()
 
         self.alice_user_id = self.register_user("alice", "password")
         self.alice_tok = self.login("alice", "password")
@@ -4100,10 +4101,57 @@ class RestrictedMediaVisibilityTestCase(unittest.HomeserverTestCase):
     # TODO: Test redactions too
 
     def test_global_profile_is_visible(self) -> None:
-        self.skipTest("Not Implemented")
+        """
+        Test that a profile avatar that is not from a membership event is viewable if not limited
+        """
+        profile_viewing_user = self.register_user("profile_viewing_user", "password")
+        profile_viewing_user_id = UserID.from_string(profile_viewing_user)
+
+        # Just to simply a few spots below where the UserID object is needed
+        alice_user_id = UserID.from_string(self.alice_user_id)
+
+        mxc_uri = self.create_restricted_media()
+
+        # The profile handler function wants a Requester object specifically
+        alice_as_requester = create_requester(self.alice_user_id)
+        self.get_success(
+            self.profile_handler.set_avatar_url(
+                alice_user_id, alice_as_requester, str(mxc_uri)
+            )
+        )
+
+        media_object = self.get_success(self.store.get_local_media(mxc_uri.media_id))
+        assert media_object is not None
+
+        # Should be visible by both users
+        self.assert_expected_result(alice_user_id, media_object, True)
+        self.assert_expected_result(profile_viewing_user_id, media_object, True)
 
     @override_config({"limit_profile_requests_to_users_who_share_rooms": True})
     def test_global_profile_is_not_visible_when_not_sharing_a_room_setting_is_enabled(
         self,
     ) -> None:
-        self.skipTest("Not Implemented")
+        """
+        Test that a profile avatar that is not from a membership event is not viewable
+        if limited by the setting "limit_profile_requests_to_users_who_share_rooms"
+        """
+        profile_viewing_user = self.register_user("profile_viewing_user", "password")
+        profile_viewing_user_id = UserID.from_string(profile_viewing_user)
+
+        # Just to simply a few spots below where the UserID object is needed
+        alice_user_id = UserID.from_string(self.alice_user_id)
+
+        mxc_uri = self.create_restricted_media()
+
+        # The profile handler function wants a Requester object specifically
+        alice_as_requester = create_requester(self.alice_user_id)
+        self.get_success(
+            self.profile_handler.set_avatar_url(
+                alice_user_id, alice_as_requester, str(mxc_uri)
+            )
+        )
+
+        media_object = self.get_success(self.store.get_local_media(mxc_uri.media_id))
+        assert media_object is not None
+        self.assert_expected_result(alice_user_id, media_object, True)
+        self.assert_expected_result(profile_viewing_user_id, media_object, False)
