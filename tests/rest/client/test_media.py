@@ -3362,19 +3362,18 @@ class RestrictedMediaVisibilityTestCase(unittest.HomeserverTestCase):
         resources["/_matrix/media"] = self.hs.get_media_repository_resource()
         return resources
 
-    def upload_restricted_media(self, tok: Optional[str] = None) -> MXCUri:
-        channel = self.make_request(
-            "POST",
-            "/_matrix/client/unstable/org.matrix.msc3911/media/upload?filename=test_png_upload",
-            content=SMALL_PNG,
-            content_type=b"image/png",
-            access_token=tok or self.alice_tok,
-            custom_headers=[("Content-Length", str(67))],
+    def create_restricted_media(self, user: Optional[str] = None) -> MXCUri:
+        mxc_uri = self.get_success(
+            self.media_repo.create_or_update_content(
+                "image/png",
+                "test_png_upload",
+                io.BytesIO(SMALL_PNG),
+                67,
+                UserID.from_string(user or self.alice_user_id),
+                restricted=True,
+            )
         )
-        self.assertEqual(channel.code, 200)
-        self.assertIn("content_uri", channel.json_body)
-        media_id = channel.json_body["content_uri"].split("/")[-1]
-        return MXCUri.from_str(f"mxc://{self.server_name}/{media_id}")
+        return mxc_uri
 
     def retrieve_media_from_store(self, mxc_uri: MXCUri) -> LocalMedia:
         local_media_object = self.get_success(
@@ -3440,7 +3439,7 @@ class RestrictedMediaVisibilityTestCase(unittest.HomeserverTestCase):
         return channel1
 
     def insert_message_with_attached_media(self, room_id: str) -> LocalMedia:
-        mxc_uri = self.upload_restricted_media()
+        mxc_uri = self.create_restricted_media()
 
         channel = self.send_event_with_attached_media(room_id, mxc_uri)
         self.assertEqual(channel.code, HTTPStatus.OK, channel.json_body)
@@ -3669,7 +3668,7 @@ class RestrictedMediaVisibilityTestCase(unittest.HomeserverTestCase):
         return channel1
 
     def insert_membership_with_attached_media(self, room_id: str) -> LocalMedia:
-        mxc_uri = self.upload_restricted_media()
+        mxc_uri = self.create_restricted_media()
 
         channel = self.send_membership_with_attached_media(room_id, mxc_uri)
         self.assertEqual(channel.code, HTTPStatus.OK, channel.json_body)
@@ -3899,7 +3898,7 @@ class RestrictedMediaVisibilityTestCase(unittest.HomeserverTestCase):
         return channel1
 
     def insert_room_avatar_with_attached_media(self, room_id: str) -> LocalMedia:
-        mxc_uri = self.upload_restricted_media()
+        mxc_uri = self.create_restricted_media()
 
         channel = self.send_room_avatar_with_attached_media(room_id, mxc_uri)
         self.assertEqual(channel.code, HTTPStatus.OK, channel.json_body)
@@ -3944,7 +3943,7 @@ class RestrictedMediaVisibilityTestCase(unittest.HomeserverTestCase):
         self.login("second_user_room_avatar_test", "password")
 
         # The room needs to be created with an avatar
-        room_creation_avatar_mxc = self.upload_restricted_media()
+        room_creation_avatar_mxc = self.create_restricted_media()
         room_id = self.create_test_room(visibility, room_creation_avatar_mxc)
 
         room_avatar_object = self.retrieve_media_from_store(room_creation_avatar_mxc)
