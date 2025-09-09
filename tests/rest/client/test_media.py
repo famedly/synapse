@@ -3465,6 +3465,9 @@ class RestrictedMediaVisibilityTestCase(unittest.HomeserverTestCase):
     ) -> None:
         # If the expectation is True, it is expected the function is a success
         # If the expectation is False, it is expected to raise the exception
+        #
+        # It may be easier to think of True and False here as Visible and Not Visible in
+        # the context of this TestCase.
         if expected_bool:
             # As a note about nullcontext manager: Support for async context behavior
             # was added in python 3.10. However, we don't need that even when testing an
