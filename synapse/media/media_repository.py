@@ -445,6 +445,8 @@ class MediaRepository:
 
             # The file has been uploaded, so stop looping
             if media_info.media_length is not None:
+                if isinstance(request.requester, Requester):
+                    await self.is_media_visible(request.requester.user, media_info)
                 return media_info
 
             # Check if the media ID has expired and still hasn't been uploaded to.

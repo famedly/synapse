@@ -349,18 +349,25 @@ class CopyResource(RestServlet):
 
         # Optionally parse request body, must be a JSON object, but no required params.
         _ = parse_json_object_from_request(request, allow_empty_body=True)
+        max_timeout_ms = parse_integer(
+            request, "timeout_ms", default=DEFAULT_MAX_TIMEOUT_MS
+        )
+        max_timeout_ms = min(max_timeout_ms, MAXIMUM_ALLOWED_MAX_TIMEOUT_MS)
 
         media_info: Union[LocalMedia, RemoteMedia, None] = None
         if self._is_mine_server_name(server_name):
-            media_info = await self.store.get_local_media(media_id)
+            media_info = await self.media_repo.get_local_media_info(
+                request, media_id, max_timeout_ms
+            )
         else:
             media_info = await self.media_repo.get_remote_media_info(
                 server_name,
                 media_id,
-                DEFAULT_MAX_TIMEOUT_MS,
+                max_timeout_ms,
                 request.getClientAddress().host,
                 use_federation=True,
                 allow_authenticated=True,
+                requester=requester,
             )
 
         if not media_info:

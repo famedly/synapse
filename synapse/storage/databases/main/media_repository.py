@@ -757,7 +757,8 @@ class MediaRepositoryStore(MediaRepositoryBackgroundUpdateStore):
         if row is None:
             return row
         restriction_info = None
-        if row[9] is not None and row[9] is True:
+
+        if row[9] is not None and row[9]:
             restriction_info = await self.get_media_restrictions(origin, media_id)
 
         return RemoteMedia(

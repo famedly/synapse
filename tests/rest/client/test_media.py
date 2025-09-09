@@ -3201,6 +3201,7 @@ class CopyRestrictedResource(unittest.HomeserverTestCase):
         media.register_servlets,
         login.register_servlets,
         admin.register_servlets,
+        room.register_servlets,
     ]
 
     def make_homeserver(self, reactor: MemoryReactor, clock: Clock) -> HomeServer:
@@ -3210,6 +3211,7 @@ class CopyRestrictedResource(unittest.HomeserverTestCase):
 
     def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
         self.media_repo = hs.get_media_repository()
+        self.profile_handler = self.hs.get_profile_handler()
         self.user = self.register_user("user", "testpass")
         self.user_tok = self.login("user", "testpass")
         self.other_user = self.register_user("other", "testpass")
@@ -3224,6 +3226,25 @@ class CopyRestrictedResource(unittest.HomeserverTestCase):
         """
         Tests that the new copy endpoint creates a new mxc uri for restricted resource.
         """
+        # Create a private room
+        room_id = self.helper.create_room_as(
+            self.user,
+            is_public=False,
+            tok=self.user_tok,
+            extra_content={
+                "initial_state": [
+                    {
+                        "type": EventTypes.RoomHistoryVisibility,
+                        "state_key": "",
+                        "content": {"history_visibility": HistoryVisibility.JOINED},
+                    },
+                ]
+            },
+        )
+        # Invite the other user
+        self.helper.invite(room_id, self.user, self.other_user, tok=self.user_tok)
+        self.helper.join(room_id, self.other_user, tok=self.other_user_tok)
+
         # The media is created with user_tok
         content = io.BytesIO(SMALL_PNG)
         content_uri = self.get_success(
@@ -3237,6 +3258,24 @@ class CopyRestrictedResource(unittest.HomeserverTestCase):
             )
         )
         media_id = content_uri.media_id
+
+        # User sends a message with media
+        channel = self.make_request(
+            "PUT",
+            f"/rooms/{room_id}/send/m.room.message/{str(time.time())}?org.matrix.msc3911.attach_media={str(content_uri)}",
+            content={"msgtype": "m.text", "body": "Hi, this is a message"},
+            access_token=self.user_tok,
+        )
+        self.assertEqual(channel.code, HTTPStatus.OK, channel.json_body)
+        assert "event_id" in channel.json_body
+        event_id = channel.json_body["event_id"]
+        restrictions = self.get_success(
+            self.hs.get_datastores().main.get_media_restrictions(
+                content_uri.server_name, content_uri.media_id
+            )
+        )
+        assert restrictions is not None, str(restrictions)
+        assert restrictions.event_id == event_id
 
         # The other_user copies the media from local server
         channel = self.make_request(
@@ -3269,6 +3308,103 @@ class CopyRestrictedResource(unittest.HomeserverTestCase):
         # Check if media is unattached to any event or user profile yet.
         assert copied_media.attachments is None
 
+    def test_copy_local_restricted_resource_fails_when_requester_does_not_have_access(
+        self,
+    ) -> None:
+        """
+        Tests that the new copy endpoint performs permission checks and it prevents the
+        copy when the requester does not have access to the original media.
+        """
+        # Create a private room
+        room_id = self.helper.create_room_as(
+            self.user,
+            is_public=False,
+            tok=self.user_tok,
+            extra_content={
+                "initial_state": [
+                    {
+                        "type": EventTypes.RoomHistoryVisibility,
+                        "state_key": "",
+                        "content": {"history_visibility": HistoryVisibility.JOINED},
+                    },
+                ]
+            },
+        )
+
+        # Create the media content
+        content_uri = self.get_success(
+            self.media_repo.create_or_update_content(
+                "image/png",
+                "test_png_upload",
+                io.BytesIO(SMALL_PNG),
+                67,
+                UserID.from_string(self.user),
+                restricted=True,
+            )
+        )
+        # User sends a message with media
+        channel = self.make_request(
+            "PUT",
+            f"/rooms/{room_id}/send/m.room.message/{str(time.time())}?org.matrix.msc3911.attach_media={str(content_uri)}",
+            content={"msgtype": "m.text", "body": "Hi, this is a message"},
+            access_token=self.user_tok,
+        )
+        self.assertEqual(channel.code, HTTPStatus.OK, channel.json_body)
+        assert "event_id" in channel.json_body
+        event_id = channel.json_body["event_id"]
+        restrictions = self.get_success(
+            self.hs.get_datastores().main.get_media_restrictions(
+                content_uri.server_name, content_uri.media_id
+            )
+        )
+        assert restrictions is not None, str(restrictions)
+        assert restrictions.event_id == event_id
+
+        # Invite the other user
+        self.helper.invite(room_id, self.user, self.other_user, tok=self.user_tok)
+        self.helper.join(room_id, self.other_user, tok=self.other_user_tok)
+
+        # User who does not have access to the media tries to copy it.
+        channel = self.make_request(
+            "POST",
+            f"/_matrix/client/unstable/org.matrix.msc3911/media/copy/{self.hs.hostname}/{content_uri.media_id}",
+            access_token=self.other_user_tok,
+        )
+        self.assertEqual(channel.code, 403)
+
+    @override_config(
+        {
+            "limit_profile_requests_to_users_who_share_rooms": True,
+        }
+    )
+    def test_copy_local_restricted_resource_fails_when_profile_lookup_is_not_allowed(
+        self,
+    ) -> None:
+        # User setup a profile
+        content_uri = self.get_success(
+            self.media_repo.create_or_update_content(
+                "image/png",
+                "test_png_upload",
+                io.BytesIO(SMALL_PNG),
+                67,
+                UserID.from_string(self.user),
+                restricted=True,
+            )
+        )
+        user_id = UserID.from_string(self.user)
+        self.get_success(
+            self.profile_handler.set_avatar_url(
+                user_id, create_requester(user_id), str(content_uri)
+            )
+        )
+        # The users do not share any rooms, and other user tries to copy the profile picture
+        channel = self.make_request(
+            "POST",
+            f"/_matrix/client/unstable/org.matrix.msc3911/media/copy/{self.hs.hostname}/{content_uri.media_id}",
+            access_token=self.other_user_tok,
+        )
+        self.assertEqual(channel.code, 403)
+
     def test_copy_remote_restricted_resource(self) -> None:
         """
         Tests that the new copy endpoint creates a new mxc uri for restricted resource.
@@ -3294,8 +3430,25 @@ class CopyRestrictedResource(unittest.HomeserverTestCase):
                 upload_name="test.png",
                 filesystem_id=remote_file_id,
                 sha256=remote_file_id,
+                restricted=True,
             )
         )
+
+        # Remote media is attached to a user profile
+        remote_user_id = f"@remote-user:{remote_server}"
+        self.get_success(
+            self.hs.get_datastores().main.set_media_restricted_to_user_profile(
+                remote_server, media_id, remote_user_id
+            )
+        )
+        remote_media = self.get_success(
+            self.hs.get_datastores().main.get_cached_remote_media(
+                remote_server, media_id
+            )
+        )
+        assert remote_media is not None
+        assert remote_media.attachments is not None
+        assert str(remote_media.attachments.profile_user_id) == remote_user_id
 
         # The other_user copies the media from remote server
         channel = self.make_request(
@@ -3329,6 +3482,64 @@ class CopyRestrictedResource(unittest.HomeserverTestCase):
 
         # Check if copied media is unattached to any event or user profile yet.
         assert copied_media.attachments is None
+
+    @override_config(
+        {
+            "limit_profile_requests_to_users_who_share_rooms": True,
+        }
+    )
+    def test_copy_remote_restricted_resource_fails_when_requester_does_not_have_access(
+        self,
+    ) -> None:
+        # Create remote media
+        remote_server = "remoteserver.com"
+        remote_file_id = "remote1"
+        file_info = FileInfo(server_name=remote_server, file_id=remote_file_id)
+
+        media_storage = self.hs.get_media_repository().media_storage
+        ctx = media_storage.store_into_file(file_info)
+        (f, _) = self.get_success(ctx.__aenter__())
+        f.write(SMALL_PNG)
+        self.get_success(ctx.__aexit__(None, None, None))
+        media_id = "remotemedia"
+        self.get_success(
+            self.hs.get_datastores().main.store_cached_remote_media(
+                origin=remote_server,
+                media_id=media_id,
+                media_type="image/png",
+                media_length=1,
+                time_now_ms=self.clock.time_msec(),
+                upload_name="test.png",
+                filesystem_id=remote_file_id,
+                sha256=remote_file_id,
+                restricted=True,
+            )
+        )
+
+        # Media is attached to a user profile
+        remote_user_id = f"@remote-user:{remote_server}"
+        self.get_success(
+            self.hs.get_datastores().main.set_media_restricted_to_user_profile(
+                remote_server, media_id, remote_user_id
+            )
+        )
+        remote_media = self.get_success(
+            self.hs.get_datastores().main.get_cached_remote_media(
+                remote_server, media_id
+            )
+        )
+        assert remote_media is not None
+        assert remote_media.attachments is not None
+        assert str(remote_media.attachments.profile_user_id) == remote_user_id
+
+        # The other user tries to copy that media from remote server, but fails because
+        # user does not have the access to the profile_user_id
+        channel = self.make_request(
+            "POST",
+            f"/_matrix/client/unstable/org.matrix.msc3911/media/copy/{remote_server}/{media_id}",
+            access_token=self.other_user_tok,
+        )
+        self.assertEqual(channel.code, 403)
 
 
 class RestrictedMediaVisibilityTestCase(unittest.HomeserverTestCase):
