@@ -4096,8 +4096,6 @@ class RestrictedMediaVisibilityTestCase(unittest.HomeserverTestCase):
             leaving_user_id, second_media_object, expected_after_result_bool
         )
 
-    # TODO: Test redactions too
-
     def test_global_profile_is_visible(self) -> None:
         """
         Test that a profile avatar that is not from a membership event is viewable if not limited
