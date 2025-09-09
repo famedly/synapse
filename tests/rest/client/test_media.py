@@ -67,7 +67,7 @@ from synapse.rest.client import login, media, room
 from synapse.server import HomeServer
 from synapse.storage.databases.main.media_repository import LocalMedia
 from synapse.types import JsonDict, UserID, create_requester
-from synapse.util import Clock
+from synapse.util import Clock, json_encoder
 from synapse.util.stringutils import parse_and_validate_mxc_uri
 
 from tests import unittest
@@ -3654,6 +3654,61 @@ class RestrictedMediaVisibilityTestCase(unittest.HomeserverTestCase):
         self.assert_expected_result(
             leaving_user_id, second_media_object, expected_after_result_bool
         )
+
+    @parameterized.expand(
+        [
+            HistoryVisibility.WORLD_READABLE,
+            HistoryVisibility.SHARED,
+            HistoryVisibility.INVITED,
+            HistoryVisibility.JOINED,
+        ]
+    )
+    def test_message_media_visibility_for_unknown_restriction(
+        self,
+        visibility: str,
+    ) -> None:
+        """
+        Test that a message with restricted media is not visible if an unknown restriction exists
+        """
+        # Borrow the test setup for joining a room
+        joining_user = self.register_user("joining_user_message_test", "password")
+        joining_user_id = UserID.from_string(joining_user)
+        joining_user_tok = self.login("joining_user_message_test", "password")
+
+        room_id = self.create_test_room(
+            visibility,
+        )
+        # We'll go ahead and join the second user to the room, so the visibility of a
+        # non-originating user can check the media's visibility
+        self.helper.join(room_id, joining_user, tok=joining_user_tok)
+
+        # First, create our piece of media and label it as restricted
+        mxc_uri = self.create_restricted_media()
+
+        # Then add the database row that would normally attach this media to something,
+        # but it is an unknown something.
+        self.get_success(
+            self.store.db_pool.simple_insert(
+                "media_attachments",
+                {
+                    "server_name": mxc_uri.server_name,
+                    "media_id": mxc_uri.media_id,
+                    # "restrictions_json" is a JSONB column, so it expects a string
+                    "restrictions_json": json_encoder.encode({"restrictions": {}}),
+                },
+            )
+        )
+
+        # Retrieve the media info from the data store
+        local_media_object = self.retrieve_media_from_store(mxc_uri)
+
+        assert local_media_object.restricted is True
+        # If attachments was None, we would know it had not been attached yet
+        assert local_media_object.attachments is not None
+
+        # Neither user should be able to see the media
+        self.assert_expected_result(joining_user_id, local_media_object, False)
+        self.assert_expected_result(joining_user_id, local_media_object, False)
 
     def send_membership_with_attached_media(
         self, room_id: str, mxc_uri: MXCUri, tok: Optional[str] = None
