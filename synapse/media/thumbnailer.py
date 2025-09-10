@@ -42,6 +42,7 @@ from synapse.media._base import (
 )
 from synapse.media.media_storage import FileResponder, MediaStorage
 from synapse.storage.databases.main.media_repository import LocalMedia
+from synapse.types import Requester
 
 if TYPE_CHECKING:
     from synapse.media.media_repository import MediaRepository
@@ -270,7 +271,7 @@ class ThumbnailProvider:
         self.media_storage = media_storage
         self.store = hs.get_datastores().main
         self.dynamic_thumbnails = hs.config.media.dynamic_thumbnails
-        self.msc3911_enabled = hs.config.experimental.msc3911_enabled
+        self.enable_media_restriction = self.hs.config.experimental.msc3911_enabled
 
     async def respond_local_thumbnail(
         self,
@@ -282,6 +283,7 @@ class ThumbnailProvider:
         m_type: str,
         max_timeout_ms: int,
         for_federation: bool,
+        requester: Optional[Requester] = None,
         allow_authenticated: bool = True,
     ) -> None:
         media_info = await self.media_repo.get_local_media_info(
@@ -290,18 +292,24 @@ class ThumbnailProvider:
         if not media_info:
             return
 
-        restrictions = None
-        if self.msc3911_enabled:
-            restrictions = await self.media_repo.validate_media_restriction(
-                request, media_info, None, for_federation
-            )
-        restrictions_json = restrictions.to_dict() if restrictions else {}
-
         # if the media the thumbnail is generated from is authenticated, don't serve the
         # thumbnail over an unauthenticated endpoint
         if self.hs.config.media.enable_authenticated_media and not allow_authenticated:
             if media_info.authenticated:
                 raise NotFoundError()
+
+        # if MSC3911 is enabled, check visibility of the media for the user and retrieve
+        # any restrictions
+        restrictions = None
+        if self.enable_media_restriction:
+            if requester is not None:
+                # Only check media visibility if this is for a local request. This will
+                # raise directly back to the client if not visible
+                await self.media_repo.is_media_visible(requester.user, media_info)
+            restrictions = await self.media_repo.validate_media_restriction(
+                request, media_info, None, for_federation
+            )
+        restrictions_json = restrictions.to_dict() if restrictions else {}
 
         # Once we've checked auth we can return early if the media is cached on
         # the client
@@ -335,6 +343,7 @@ class ThumbnailProvider:
         desired_type: str,
         max_timeout_ms: int,
         for_federation: bool,
+        requester: Optional[Requester] = None,
         allow_authenticated: bool = True,
     ) -> None:
         media_info = await self.media_repo.get_local_media_info(
@@ -349,17 +358,24 @@ class ThumbnailProvider:
             if media_info.authenticated:
                 raise NotFoundError()
 
+        # if MSC3911 is enabled, check visibility of the media for the user and retrieve
+        # any restrictions
+        restrictions = None
+        if self.enable_media_restriction:
+            if requester is not None:
+                # Only check media visibility if this is for a local request. This will
+                # raise directly back to the client if not visible
+                await self.media_repo.is_media_visible(requester.user, media_info)
+            restrictions = await self.media_repo.validate_media_restriction(
+                request, None, media_id, for_federation
+            )
+
         # Once we've checked auth we can return early if the media is cached on
         # the client
         if check_for_cached_entry_and_respond(request):
             return
 
         thumbnail_infos = await self.store.get_local_media_thumbnails(media_id)
-        restrictions = None
-        if self.msc3911_enabled:
-            restrictions = await self.media_repo.validate_media_restriction(
-                request, None, media_id, for_federation
-            )
 
         restrictions_json = restrictions.to_dict() if restrictions else {}
         for info in thumbnail_infos:
@@ -440,6 +456,7 @@ class ThumbnailProvider:
         max_timeout_ms: int,
         ip_address: str,
         use_federation: bool,
+        requester: Optional[Requester] = None,
         allow_authenticated: bool = True,
     ) -> None:
         media_info = await self.media_repo.get_remote_media_info(
@@ -449,6 +466,7 @@ class ThumbnailProvider:
             ip_address,
             use_federation,
             allow_authenticated,
+            requester,
         )
         if not media_info:
             respond_404(request)
@@ -460,6 +478,11 @@ class ThumbnailProvider:
             if media_info.authenticated:
                 respond_404(request)
                 return
+
+        # if MSC3911 is enabled, check visibility of the media for the user
+        if self.enable_media_restriction and requester is not None:
+            # This will raise directly back to the client if not visible
+            await self.media_repo.is_media_visible(requester.user, media_info)
 
         # Check if the media is cached on the client, if so return 304.
         if check_for_cached_entry_and_respond(request):
@@ -522,6 +545,7 @@ class ThumbnailProvider:
         max_timeout_ms: int,
         ip_address: str,
         use_federation: bool,
+        requester: Optional[Requester] = None,
         allow_authenticated: bool = True,
     ) -> None:
         # TODO: Don't download the whole remote file
@@ -534,6 +558,7 @@ class ThumbnailProvider:
             ip_address,
             use_federation,
             allow_authenticated,
+            requester,
         )
         if not media_info:
             return
@@ -543,6 +568,11 @@ class ThumbnailProvider:
         if self.hs.config.media.enable_authenticated_media and not allow_authenticated:
             if media_info.authenticated:
                 raise NotFoundError()
+
+        # if MSC3911 is enabled, check visibility of the media for the user
+        if self.enable_media_restriction and requester is not None:
+            # This will raise directly back to the client if not visible
+            await self.media_repo.is_media_visible(requester.user, media_info)
 
         # Check if the media is cached on the client, if so return 304.
         if check_for_cached_entry_and_respond(request):
