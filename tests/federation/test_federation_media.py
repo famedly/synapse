@@ -271,7 +271,10 @@ class FederationRestrictedMediaDownloadsTest(unittest.FederatingHomeserverTestCa
                 break
 
         assert json_obj is not None, "No JSON part found"
-        assert json_obj.get("restrictions", {}).get("event_id") == "random-event-id"
+        assert (
+            json_obj.get("org.matrix.msc3911.restrictions", {}).get("event_id")
+            == "random-event-id"
+        )
 
         # Check the png file exists and matches what was uploaded
         found_file = any(SMALL_PNG in field for field in stripped_bytes)
@@ -532,7 +535,7 @@ class FederationRestrictedThumbnailTest(unittest.FederatingHomeserverTestCase):
 
         assert json_obj is not None, "No JSON part found"
         assert (
-            json_obj.get("restrictions", {}).get("profile_user_id")
+            json_obj.get("org.matrix.msc3911.restrictions", {}).get("profile_user_id")
             == "@user_id:whatever.org"
         )
 
