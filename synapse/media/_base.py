@@ -309,6 +309,7 @@ async def respond_with_multipart_responder(
     media_type: str,
     media_length: Optional[int],
     upload_name: Optional[str],
+    json_response: Optional[dict] = None,
 ) -> None:
     """
     Responds to requests originating from the federation media `/download` endpoint by
@@ -362,7 +363,9 @@ async def respond_with_multipart_responder(
             clock,
             request,
             media_type,
-            {},  # Note: if we change this we need to change the returned ETag.
+            json_response
+            if json_response
+            else {},  # Note: if we change this we need to change the returned ETag.
             disposition,
             media_length,
         )

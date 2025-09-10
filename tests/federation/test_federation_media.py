@@ -18,6 +18,7 @@
 #
 #
 import io
+import json
 import os
 import shutil
 import tempfile
@@ -30,9 +31,11 @@ from synapse.media.storage_provider import (
     FileStorageProviderBackend,
     StorageProviderWrapper,
 )
+from synapse.rest.client import login
 from synapse.server import HomeServer
-from synapse.types import UserID
-from synapse.util import Clock
+from synapse.storage.database import LoggingTransaction
+from synapse.types import JsonDict, UserID
+from synapse.util import Clock, json_encoder
 
 from tests import unittest
 from tests.media.test_media_storage import small_png
@@ -187,6 +190,164 @@ class FederationMediaDownloadsTest(unittest.FederatingHomeserverTestCase):
         self.assertNotIn("body", channel.result)
 
 
+class FederationRestrictedMediaDownloadsTest(unittest.FederatingHomeserverTestCase):
+    servlets = [
+        login.register_servlets,
+    ]
+
+    def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
+        super().prepare(reactor, clock, hs)
+        self.test_dir = tempfile.mkdtemp(prefix="synapse-tests-")
+        self.addCleanup(shutil.rmtree, self.test_dir)
+        self.primary_base_path = os.path.join(self.test_dir, "primary")
+        self.secondary_base_path = os.path.join(self.test_dir, "secondary")
+        hs.config.media.media_store_path = self.primary_base_path
+        self.store = hs.get_datastores().main
+
+        storage_providers = [
+            StorageProviderWrapper(
+                FileStorageProviderBackend(hs, self.secondary_base_path),
+                store_local=True,
+                store_remote=False,
+                store_synchronous=True,
+            )
+        ]
+
+        self.filepaths = MediaFilePaths(self.primary_base_path)
+        self.media_storage = MediaStorage(
+            hs, self.primary_base_path, self.filepaths, storage_providers
+        )
+        self.media_repo = hs.get_media_repository()
+
+    def default_config(self) -> JsonDict:
+        config = super().default_config()
+        config.setdefault("experimental_features", {})
+        config["experimental_features"].update({"msc3911_enabled": True})
+        return config
+
+    def test_restricted_media_download_with_restrictions_field(self) -> None:
+        content = io.BytesIO(SMALL_PNG)
+        content_uri = self.get_success(
+            self.media_repo.create_or_update_content(
+                "image/png",
+                "test_png_upload",
+                content,
+                67,
+                UserID.from_string("@user_id:something.org"),
+                restricted=True,
+            )
+        )
+        # Attach restrictions to the media
+        self.get_success(
+            self.media_repo.store.set_media_restricted_to_event_id(
+                self.hs.hostname, content_uri.media_id, "random-event-id"
+            )
+        )
+        # Send download request with federation endpoint
+        channel = self.make_signed_federation_request(
+            "GET",
+            f"/_matrix/federation/v1/media/download/{content_uri.media_id}",
+        )
+        self.assertEqual(200, channel.code)
+
+        content_type = channel.headers.getRawHeaders("content-type")
+        assert content_type is not None
+        assert "multipart/mixed" in content_type[0]
+        assert "boundary" in content_type[0]
+
+        boundary = content_type[0].split("boundary=")[1]
+        body = channel.result.get("body")
+        assert body is not None
+
+        # Assert a JSON part exists with field restrictions
+        stripped_bytes = body.split(b"\r\n" + b"--" + boundary.encode("utf-8"))
+        json_obj = None
+        for part in stripped_bytes:
+            if b"Content-Type: application/json" in part:
+                idx = part.find(b"\r\n\r\n")
+                assert idx != -1, "No JSON payload found after header"
+                json_bytes = part[idx + 4 :].strip()
+                json_obj = json.loads(json_bytes.decode("utf-8"))
+                break
+
+        assert json_obj is not None, "No JSON part found"
+        assert (
+            json_obj.get("org.matrix.msc3911.restrictions", {}).get("event_id")
+            == "random-event-id"
+        )
+
+        # Check the png file exists and matches what was uploaded
+        found_file = any(SMALL_PNG in field for field in stripped_bytes)
+        self.assertTrue(found_file)
+
+    def test_restricted_media_download_without_restrictions_field_fails(self) -> None:
+        content = io.BytesIO(SMALL_PNG)
+        content_uri = self.get_success(
+            self.media_repo.create_or_update_content(
+                "image/png",
+                "test_png_upload",
+                content,
+                67,
+                UserID.from_string("@user_id:whatever.org"),
+                restricted=True,
+            )
+        )
+
+        # Send download request with federation endpoint
+        channel = self.make_signed_federation_request(
+            "GET",
+            f"/_matrix/federation/v1/media/download/{content_uri.media_id}",
+        )
+        self.assertEqual(404, channel.code)
+        self.assertIn(b"Not found", channel.result.get("body", b""))
+
+    def test_restricted_media_download_with_invalid_restrictions_field_fails(
+        self,
+    ) -> None:
+        content = io.BytesIO(SMALL_PNG)
+        content_uri = self.get_success(
+            self.media_repo.create_or_update_content(
+                "image/png",
+                "test_png_upload",
+                content,
+                67,
+                UserID.from_string("@user_id:whatever.org"),
+                restricted=True,
+            )
+        )
+        # Append invalid restrictions set for test
+        json_object = {"random_field": "random_value"}
+
+        def insert_restriction(txn: LoggingTransaction) -> None:
+            self.store.db_pool.simple_insert_txn(
+                txn,
+                table="media_attachments",
+                values={
+                    "server_name": self.hs.hostname,
+                    "media_id": content_uri.media_id,
+                    "restrictions_json": json_encoder.encode(json_object),
+                },
+            )
+
+        self.get_success(
+            self.store.db_pool.runInteraction(
+                "test_restricted_media_download_with_invalid_restrictions_field_fails",
+                insert_restriction,
+            )
+        )
+
+        # Send download request with federation endpoint
+        channel = self.make_signed_federation_request(
+            "GET",
+            f"/_matrix/federation/v1/media/download/{content_uri.media_id}",
+        )
+        self.assertEqual(403, channel.code)
+        self.assertIn(
+            b"MediaRestrictions must have exactly one of",
+            channel.result.get("body", b""),
+        )
+
+
 class FederationThumbnailTest(unittest.FederatingHomeserverTestCase):
     def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
         super().prepare(reactor, clock, hs)
@@ -292,4 +453,92 @@ class FederationThumbnailTest(unittest.FederatingHomeserverTestCase):
         found_file = any(
             small_png.expected_cropped in field for field in stripped_bytes
         )
+        self.assertTrue(found_file)
+
+
+class FederationRestrictedThumbnailTest(unittest.FederatingHomeserverTestCase):
+    def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
+        super().prepare(reactor, clock, hs)
+        self.test_dir = tempfile.mkdtemp(prefix="synapse-tests-")
+        self.addCleanup(shutil.rmtree, self.test_dir)
+        self.primary_base_path = os.path.join(self.test_dir, "primary")
+        self.secondary_base_path = os.path.join(self.test_dir, "secondary")
+
+        hs.config.media.media_store_path = self.primary_base_path
+
+        storage_providers = [
+            StorageProviderWrapper(
+                FileStorageProviderBackend(hs, self.secondary_base_path),
+                store_local=True,
+                store_remote=False,
+                store_synchronous=True,
+            )
+        ]
+
+        self.filepaths = MediaFilePaths(self.primary_base_path)
+        self.media_storage = MediaStorage(
+            hs, self.primary_base_path, self.filepaths, storage_providers
+        )
+        self.media_repo = hs.get_media_repository()
+
+    def default_config(self) -> JsonDict:
+        config = super().default_config()
+        config.setdefault("experimental_features", {})
+        config["experimental_features"].update({"msc3911_enabled": True})
+        return config
+
+    def test_restricted_thumbnail_download_with_restrictions_field(self) -> None:
+        content = io.BytesIO(small_png.data)
+        content_uri = self.get_success(
+            self.media_repo.create_or_update_content(
+                "image/png",
+                "test_png_thumbnail",
+                content,
+                67,
+                UserID.from_string("@user_id:whatever.org"),
+                restricted=True,
+            )
+        )
+        # Attach restrictions to the media
+        self.get_success(
+            self.media_repo.store.set_media_restricted_to_user_profile(
+                self.hs.hostname, content_uri.media_id, "@user_id:whatever.org"
+            )
+        )
+
+        # Send download request with federation endpoint
+        channel = self.make_signed_federation_request(
+            "GET",
+            f"/_matrix/federation/v1/media/thumbnail/{content_uri.media_id}?width=32&height=32&method=scale",
+        )
+        self.assertEqual(200, channel.code)
+
+        content_type = channel.headers.getRawHeaders("content-type")
+        assert content_type is not None
+        assert "multipart/mixed" in content_type[0]
+        assert "boundary" in content_type[0]
+
+        boundary = content_type[0].split("boundary=")[1]
+        body = channel.result.get("body")
+        assert body is not None
+
+        # Assert a JSON part exists with field restrictions
+        stripped_bytes = body.split(b"\r\n" + b"--" + boundary.encode("utf-8"))
+        json_obj = None
+        for part in stripped_bytes:
+            if b"Content-Type: application/json" in part:
+                idx = part.find(b"\r\n\r\n")
+                assert idx != -1, "No JSON payload found after header"
+                json_bytes = part[idx + 4 :].strip()
+                json_obj = json.loads(json_bytes.decode("utf-8"))
+                break
+
+        assert json_obj is not None, "No JSON part found"
+        assert (
+            json_obj.get("org.matrix.msc3911.restrictions", {}).get("profile_user_id")
+            == "@user_id:whatever.org"
+        )
+
+        # Check that the png file exists and matches the expected scaled bytes
+        found_file = any(small_png.expected_scaled in field for field in stripped_bytes)
         self.assertTrue(found_file)
