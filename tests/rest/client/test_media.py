@@ -28,7 +28,7 @@ import time
 from contextlib import nullcontext
 from http import HTTPStatus
 from typing import Any, BinaryIO, ClassVar, Dict, List, Optional, Sequence, Tuple, Type
-from unittest.mock import MagicMock, Mock, patch
+from unittest.mock import AsyncMock, MagicMock, Mock, patch
 from urllib import parse
 from urllib.parse import quote, urlencode
 
@@ -65,10 +65,13 @@ from synapse.media.url_previewer import IMAGE_CACHE_EXPIRY_MS
 from synapse.rest import admin
 from synapse.rest.client import login, media, room
 from synapse.server import HomeServer
-from synapse.storage.databases.main.media_repository import LocalMedia
+from synapse.storage.databases.main.media_repository import (
+    LocalMedia,
+    MediaRestrictions,
+)
 from synapse.types import JsonDict, UserID, create_requester
 from synapse.util import Clock, json_encoder
-from synapse.util.stringutils import parse_and_validate_mxc_uri
+from synapse.util.stringutils import parse_and_validate_mxc_uri, random_string
 
 from tests import unittest
 from tests.media.test_media_storage import (
@@ -4429,3 +4432,94 @@ class RestrictedMediaVisibilityTestCase(unittest.HomeserverTestCase):
         assert media_object is not None
         self.assert_expected_result(alice_user_id, media_object, True)
         self.assert_expected_result(profile_viewing_user_id, media_object, False)
+
+
+class FederationClientDownloadTestCase(unittest.HomeserverTestCase):
+    test_image = small_png
+    headers = {
+        b"Content-Length": [b"%d" % (len(test_image.data))],
+        b"Content-Type": [test_image.content_type],
+        b"Content-Disposition": [b"inline"],
+    }
+
+    servlets = [
+        media.register_servlets,
+        login.register_servlets,
+        admin.register_servlets,
+    ]
+
+    def make_homeserver(self, reactor: MemoryReactor, clock: Clock) -> HomeServer:
+        # Mock out the homeserver's MatrixFederationHttpClient
+        client = Mock()
+        federation_get_file = AsyncMock()
+        client.federation_get_file = federation_get_file
+        self.fed_client_mock = federation_get_file
+
+        hs = self.setup_test_homeserver(federation_http_client=client)
+
+        return hs
+
+    def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
+        self.store = hs.get_datastores().main
+        self.media_repo = hs.get_media_repository()
+
+        self.remote_server = "example.com"
+        # mapping of media_id -> byte string of the json with the restrictions
+        self.media_id_data: Dict[str, bytes] = {}
+
+        self.user = self.register_user("user", "pass")
+        self.tok = self.login("user", "pass")
+
+    def generate_remote_media_id_and_restrictions(
+        self, json_dict_response: Optional[JsonDict] = None
+    ) -> str:
+        media_id = random_string(24)
+        byte_string = b"{}"
+        if json_dict_response:
+            byte_string = json_encoder.encode(json_dict_response).encode()
+
+        self.media_id_data[media_id] = byte_string
+        return media_id
+
+    def make_request_for_media(
+        self, json_dict_response: Optional[JsonDict] = None, expected_code: int = 200
+    ) -> str:
+        # Generate media id and restrictions based on SMALL_PNG
+        media_id = self.generate_remote_media_id_and_restrictions(json_dict_response)
+        self.fed_client_mock.return_value = (
+            67,
+            self.headers,
+            self.media_id_data[media_id],
+        )
+
+        channel = self.make_request(
+            "GET",
+            f"/_matrix/client/v1/media/download/{self.remote_server}/{media_id}",
+            shorthand=False,
+            access_token=self.tok,
+        )
+
+        self.assertEqual(channel.code, expected_code)
+
+        return media_id
+
+    def test_downloading_remote_media_with_restrictions_is_in_database(self) -> None:
+        # Note the unstable prefix is filtered out properly before persistence
+        media_id = self.make_request_for_media(
+            {"org.matrix.msc3911.restrictions": {"profile_user_id": "@bob:example.com"}}
+        )
+        restrictions = self.get_success(
+            self.store.get_media_restrictions(self.remote_server, media_id)
+        )
+        assert isinstance(restrictions, MediaRestrictions)
+        assert restrictions.profile_user_id is not None
+        assert restrictions.profile_user_id.to_string() == "@bob:example.com"
+
+    def test_downloading_remote_media_with_no_restrictions_does_not_save_to_db(
+        self,
+    ) -> None:
+        media_id = self.make_request_for_media()
+        restrictions = self.get_success(
+            self.store.get_media_restrictions(self.remote_server, media_id)
+        )
+        assert restrictions is None
