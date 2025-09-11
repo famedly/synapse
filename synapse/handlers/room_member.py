@@ -109,6 +109,8 @@ class RoomMemberHandler(metaclass=abc.ABCMeta):
         self.account_data_handler = hs.get_account_data_handler()
         self.event_auth_handler = hs.get_event_auth_handler()
         self._worker_lock_handler = hs.get_worker_locks_handler()
+        self.media_handler = hs.get_media_handler()
+        self.enable_restricted_media = hs.config.experimental.msc3911_enabled
 
         self._membership_types_to_include_profile_data_in = {
             Membership.JOIN,
@@ -537,6 +539,17 @@ class RoomMemberHandler(metaclass=abc.ABCMeta):
 
         # we know it was persisted, so should have a stream ordering
         assert result_event.internal_metadata.stream_ordering
+        if content and content.get("avatar_url", "") and self.enable_restricted_media:
+            mxc_uri = MXCUri.from_str(content.get("avatar_url", ""))
+            media_info = await self.media_handler.get_media_info(mxc_uri)
+            new_media_url = await self.media_handler.copy_media(
+                requester.user, media_info
+            )
+            if new_media_url:
+                mxc_uri = MXCUri.from_str(new_media_url)
+                await self.store.set_media_restricted_to_event_id(
+                    self.hs.hostname, mxc_uri.media_id, result_event.event_id
+                )
         return result_event.event_id, result_event.internal_metadata.stream_ordering
 
     async def copy_room_tags_and_direct_to_room(

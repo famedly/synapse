@@ -59,6 +59,7 @@ from synapse.rest.client import (
     profile,
     register,
     room,
+    room_upgrade_rest_servlet,
     sync,
 )
 from synapse.server import HomeServer
@@ -5265,3 +5266,326 @@ class RoomsCreateMediaAttachmentTestCase(unittest.HomeserverTestCase):
         """Test that a malformed room avatar url fails the room creation"""
         room_id = self.create_room_with_avatar(avatar_mxc="junk", expected_code=400)
         assert room_id is None
+
+
+class RoomMemberEventMediaAttachmentTestCase(unittest.HomeserverTestCase):
+    servlets = [
+        admin.register_servlets,
+        login.register_servlets,
+        media.register_servlets,
+        profile.register_servlets,
+        knock.register_servlets,
+        room_upgrade_rest_servlet.register_servlets,
+        room.register_servlets,
+        room.register_deprecated_servlets,
+    ]
+
+    def prepare(
+        self, reactor: MemoryReactor, clock: Clock, homeserver: HomeServer
+    ) -> None:
+        self.store = homeserver.get_datastores().main
+        self.server_name = self.hs.config.server.server_name
+        self.media_repo = self.hs.get_media_repository()
+
+        self.user = self.register_user("room_creator", "password")
+        self.tok = self.login("room_creator", "password")
+
+        self.other_user = self.register_user("invitee", "password")
+        self.other_tok = self.login("invitee", "password")
+
+    def default_config(self) -> JsonDict:
+        config = super().default_config()
+        config.setdefault("experimental_features", {})
+        config["experimental_features"].update({"msc3911_enabled": True})
+        return config
+
+    def create_media_and_set_as_profile_avatar(self, user_id: str, tok: str) -> MXCUri:
+        """
+        Create media without using the media repository directly, and set the
+        restricted flag on the media.
+        """
+        content = io.BytesIO(SMALL_PNG)
+        content_uri = self.get_success(
+            self.media_repo.create_or_update_content(
+                "image/png",
+                "test_png_upload",
+                content,
+                67,
+                UserID.from_string(user_id),
+                restricted=True,
+            )
+        )
+        channel = self.make_request(
+            "PUT",
+            f"/_matrix/client/v3/profile/{user_id}/avatar_url?propagate=true",
+            access_token=tok,
+            content={"avatar_url": str(content_uri)},
+        )
+        assert channel.code == HTTPStatus.OK, channel.result["body"]
+        assert channel.json_body == {}
+
+        retrieved_restrictions = self.get_success_or_raise(
+            self.store.get_media_restrictions(self.server_name, content_uri.media_id)
+        )
+        assert retrieved_restrictions is not None
+        assert str(retrieved_restrictions.profile_user_id) == user_id
+
+        return content_uri
+
+    def test_join_with_media_get_copied_and_attached_to_event(self) -> None:
+        """Test that member event by join copies and attaches the media to the event."""
+        # Set profile avatar for joining user
+        joiner_avatar_url = self.create_media_and_set_as_profile_avatar(
+            self.other_user, self.other_tok
+        )
+
+        # Create a room and invite the other_user
+        room_id = self.helper.create_room_as(self.user, is_public=True, tok=self.tok)
+        channel = self.make_request(
+            "POST",
+            f"/_matrix/client/v3/rooms/{room_id}/join",
+            access_token=self.other_tok,
+            content={"user_id": self.other_user},
+        )
+        assert channel.code == 200, channel.result["body"]
+
+        # Get the member event of the join just occured.
+        events = self.get_success(
+            self.store.get_events_sent_by_user_in_room(
+                self.other_user, room_id, 10, ["m.room.member"]
+            )
+        )
+        assert events is not None
+        event_id = events[0]
+        assert event_id is not None
+        event = self.get_success(self.store.get_event(event_id))
+        assert event.type == EventTypes.Member
+
+        # Verify that this event is the correct one
+        assert event.content.get("avatar_url") == str(joiner_avatar_url)
+
+        # Find the copied media by the event id
+        copied_media_id = self.get_success(
+            self.store.get_media_id_by_attached_event_id(event_id)
+        )
+        assert copied_media_id is not None
+        assert copied_media_id != joiner_avatar_url.media_id
+
+        # Check if copied media has attached to the event
+        copied_media_restrictions = self.get_success(
+            self.store.get_media_restrictions(self.server_name, copied_media_id)
+        )
+        assert copied_media_restrictions is not None
+        assert copied_media_restrictions.event_id == event_id
+
+    def test_invite_with_media_get_copied_and_attached_to_event(self) -> None:
+        """Test that member event by invite copies and attaches the media to the event."""
+        # Set profile avatar for invited user
+        invitee_avatar_url = self.create_media_and_set_as_profile_avatar(
+            self.other_user, self.other_tok
+        )
+
+        # Create a room
+        room_id = self.helper.create_room_as(self.user, is_public=True, tok=self.tok)
+
+        # Invite the other_user
+        channel = self.make_request(
+            "POST",
+            f"/_matrix/client/v3/rooms/{room_id}/invite",
+            access_token=self.tok,
+            content={"user_id": self.other_user},
+        )
+        assert channel.code == 200, channel.result["body"]
+
+        # Get the member event of the invite just occured.
+        events = self.get_success(
+            self.store.get_events_sent_by_user_in_room(
+                self.user, room_id, 10, ["m.room.member"]
+            )
+        )
+        assert events is not None
+        event_id = events[0]
+        assert event_id is not None
+        event = self.get_success(self.store.get_event(event_id))
+        assert event.type == EventTypes.Member
+
+        # Verify that this event is the correct one
+        assert event.content.get("avatar_url") == str(invitee_avatar_url)
+
+        # Find the copied media by the event id
+        copied_media_id = self.get_success(
+            self.store.get_media_id_by_attached_event_id(event_id)
+        )
+        assert copied_media_id is not None
+        assert copied_media_id != invitee_avatar_url.media_id
+
+        # Check if copied media has attached to the event
+        copied_media_restrictions = self.get_success(
+            self.store.get_media_restrictions(self.server_name, copied_media_id)
+        )
+        assert copied_media_restrictions is not None
+        assert copied_media_restrictions.event_id == event_id
+
+    def test_knock_with_media_get_copied_and_attached_to_event(self) -> None:
+        """Test that member event by knock copies and attaches the media to the event."""
+        # Set profile avatar for knocking user
+        knocker_avatar_url = self.create_media_and_set_as_profile_avatar(
+            self.other_user, self.other_tok
+        )
+
+        # Create a knockable room
+        room_id = self.helper.create_room_as(self.user, is_public=True, tok=self.tok)
+        channel = self.make_request(
+            "PUT",
+            f"/rooms/{room_id}/state/m.room.join_rules",
+            {"join_rule": "knock"},
+            access_token=self.tok,
+        )
+        assert channel.code == 200
+
+        # The other_user knocks on the room
+        channel = self.make_request(
+            "POST",
+            f"/_matrix/client/v3/knock/{room_id}",
+            access_token=self.other_tok,
+            content={},
+        )
+        assert channel.code == 200, channel.result
+
+        # Get the member event of the join just occured.
+        events = self.get_success(
+            self.store.get_events_sent_by_user_in_room(
+                self.other_user, room_id, 10, ["m.room.member"]
+            )
+        )
+        assert events is not None
+        member_event_id = events[0]
+        assert member_event_id is not None
+        event = self.get_success(self.store.get_event(member_event_id))
+        assert event.type == EventTypes.Member
+        assert event.content.get("avatar_url") == str(knocker_avatar_url)
+
+        # Find the copied media by the event id
+        copied_media_id = self.get_success(
+            self.store.get_media_id_by_attached_event_id(member_event_id)
+        )
+        assert copied_media_id is not None
+        assert copied_media_id != knocker_avatar_url.media_id
+
+        # Check if copied media has attached to the event
+        copied_media_restrictions = self.get_success(
+            self.store.get_media_restrictions(self.server_name, copied_media_id)
+        )
+        assert copied_media_restrictions is not None
+        assert copied_media_restrictions.event_id == member_event_id
+
+    def test_room_creator_and_invitee_with_media_get_copied_and_attached_to_event(
+        self,
+    ) -> None:
+        """Test that member event of room creation copies and attaches the media to the event."""
+        creator_mxc_uri = self.create_media_and_set_as_profile_avatar(
+            self.user, self.tok
+        )
+        invitee_mxc_uri = self.create_media_and_set_as_profile_avatar(
+            self.other_user, self.other_tok
+        )
+
+        # Send the createRoom request
+        channel = self.make_request(
+            "POST",
+            "/_matrix/client/v3/createRoom",
+            access_token=self.tok,
+            content={"name": "new room", "invite": [self.other_user]},
+        )
+        assert channel.code == HTTPStatus.OK, channel.result["body"]
+        room_id = channel.json_body["room_id"]
+
+        # Get member events of the room creation
+        events = self.get_success(
+            self.store.get_events_sent_by_user_in_room(
+                self.user, room_id, 10, ["m.room.member"]
+            )
+        )
+        assert events is not None
+
+        # Check if creator's member event has copied the image
+        creator_member_event_id = events[0]
+        assert creator_member_event_id is not None
+        event = self.get_success(self.store.get_event(creator_member_event_id))
+        assert event.type == EventTypes.Member
+        assert event.content.get("avatar_url") == str(creator_mxc_uri)
+
+        # Check if creator's profile avatar is copied and attached to the member event
+        copied_media_id = self.get_success(
+            self.store.get_media_id_by_attached_event_id(creator_member_event_id)
+        )
+        assert copied_media_id is not None
+        assert copied_media_id != creator_mxc_uri.media_id
+
+        copied_media_restrictions = self.get_success(
+            self.store.get_media_restrictions(self.server_name, copied_media_id)
+        )
+        assert copied_media_restrictions is not None
+        assert copied_media_restrictions.event_id == creator_member_event_id
+
+        # Check if invitee's member event has copied the image
+        invitee_member_event_id = events[1]
+        assert invitee_member_event_id is not None
+        event = self.get_success(self.store.get_event(invitee_member_event_id))
+        assert event.type == EventTypes.Member
+        assert event.content.get("avatar_url") == str(invitee_mxc_uri)
+
+        # Check if invitee's profile avatar is copied and attached to the member event
+        copied_media_id = self.get_success(
+            self.store.get_media_id_by_attached_event_id(invitee_member_event_id)
+        )
+        assert copied_media_id is not None
+        assert copied_media_id != invitee_mxc_uri.media_id
+
+        copied_media_restrictions = self.get_success(
+            self.store.get_media_restrictions(self.server_name, copied_media_id)
+        )
+        assert copied_media_restrictions is not None
+        assert copied_media_restrictions.event_id == invitee_member_event_id
+
+    def test_room_upgrader_with_media_get_copied_and_attached_to_event(self) -> None:
+        """Test that member event of room upgrade copies and attaches the media to the event."""
+        mxc_uri = self.create_media_and_set_as_profile_avatar(self.user, self.tok)
+        room_id = self.helper.create_room_as(self.user, is_public=True, tok=self.tok)
+
+        # Upgrade the room
+        channel = self.make_request(
+            "POST",
+            f"/_matrix/client/v3/rooms/{room_id}/upgrade",
+            access_token=self.tok,
+            content={"new_version": "10"},
+        )
+        assert channel.code == HTTPStatus.OK
+        room_id = channel.json_body["replacement_room"]
+
+        # Get member events of the room upgrade
+        events = self.get_success(
+            self.store.get_events_sent_by_user_in_room(
+                self.user, room_id, 10, ["m.room.member"]
+            )
+        )
+        assert events is not None
+        creator_member_event_id = events[0]
+        assert creator_member_event_id is not None
+        event = self.get_success(self.store.get_event(creator_member_event_id))
+        assert event.type == EventTypes.Member
+        assert event.content.get("avatar_url") == str(mxc_uri)
+
+        # Check if member event has copied the image
+        copied_media_id = self.get_success(
+            self.store.get_media_id_by_attached_event_id(creator_member_event_id)
+        )
+        assert copied_media_id is not None
+        assert copied_media_id != mxc_uri.media_id
+
+        # Check if the profile avatar is copied and attached to the member event
+        copied_media_restrictions = self.get_success(
+            self.store.get_media_restrictions(self.server_name, copied_media_id)
+        )
+        assert copied_media_restrictions is not None
+        assert copied_media_restrictions.event_id == creator_member_event_id

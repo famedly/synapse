@@ -1265,6 +1265,27 @@ class MediaRepositoryStore(MediaRepositoryBackgroundUpdateStore):
             json_dict=json_object,
         )
 
+    async def get_media_id_by_attached_event_id(self, event_id: str) -> Optional[str]:
+        sql = """
+            SELECT media_id
+            FROM media_attachments
+            WHERE restrictions_json->'restrictions'->>'event_id' = ?;
+            """
+
+        def _get_media_id_by_attached_event_id_txn(
+            txn: LoggingTransaction,
+        ) -> Optional[str]:
+            txn.execute(sql, (event_id,))
+            row = txn.fetchone()
+            if not row:
+                return None
+            return row[0]
+
+        return await self.db_pool.runInteraction(
+            "get_media_id_by_attached_event_id",
+            _get_media_id_by_attached_event_id_txn,
+        )
+
     async def set_media_restricted_to_user_profile(
         self,
         server_name: str,

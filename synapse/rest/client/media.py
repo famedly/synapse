@@ -24,9 +24,10 @@ import logging
 import re
 from typing import Optional, Union
 
+from matrix_common.types.mxc_uri import MXCUri
+
 from synapse.api.errors import (
     Codes,
-    NotFoundError,
     SynapseError,
 )
 from synapse.http.server import (
@@ -313,6 +314,7 @@ class CopyResource(RestServlet):
         super().__init__()
         self.store = hs.get_datastores().main
         self.media_repo = media_repo
+        self.media_handler = hs.get_media_handler()
         self.auth = hs.get_auth()
         self._is_mine_server_name = hs.is_mine_server_name
         self.limits_dict = {"m.upload.size": hs.config.media.max_upload_size}
@@ -354,53 +356,18 @@ class CopyResource(RestServlet):
         )
         max_timeout_ms = min(max_timeout_ms, MAXIMUM_ALLOWED_MAX_TIMEOUT_MS)
 
-        media_info: Union[LocalMedia, RemoteMedia, None] = None
-        if self._is_mine_server_name(server_name):
-            media_info = await self.media_repo.get_local_media_info(
-                request, media_id, max_timeout_ms
-            )
-        else:
-            media_info = await self.media_repo.get_remote_media_info(
-                server_name,
-                media_id,
-                max_timeout_ms,
-                request.getClientAddress().host,
-                use_federation=True,
-                allow_authenticated=True,
-                requester=requester,
-            )
-
-        if not media_info:
-            raise NotFoundError()
-        if media_info.quarantined_by:
-            raise NotFoundError()
-
+        media_info = await self.media_handler.get_media_info(
+            MXCUri.from_str(f"mxc://{server_name}/{media_id}")
+        )
         await self._validate_user_media_limit(requester, media_info)
 
         if media_info:
-            try:
-                mxc_uri, _ = await self.media_repo.create_media_id(
-                    requester.user, restricted=True
-                )
-                if media_info.media_length and media_info.sha256:
-                    await self.store.update_local_media(
-                        media_id=mxc_uri.split("/")[-1],
-                        media_type=media_info.media_type,
-                        upload_name=media_info.upload_name,
-                        media_length=media_info.media_length,
-                        user_id=requester.user,
-                        sha256=media_info.sha256,
-                        quarantined_by=None,
-                    )
-                respond_with_json(
-                    request,
-                    200,
-                    {"content_uri": mxc_uri},
-                    send_cors=True,
-                )
-            except Exception as e:
-                logger.error("Failed to copy media: %s", e)
-                respond_with_json(request, 500, {"error": "Failed to copy media"})
+            new_media_id = await self.media_handler.copy_media(
+                requester.user, media_info
+            )
+            respond_with_json(
+                request, 200, {"content_uri": new_media_id}, send_cors=True
+            )
 
 
 def register_servlets(hs: "HomeServer", http_server: HttpServer) -> None:

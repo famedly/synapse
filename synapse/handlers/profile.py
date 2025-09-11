@@ -246,7 +246,7 @@ class ProfileHandler:
         )
 
         if propagate:
-            await self._update_join_states(requester, target_user)
+            await self._update_join_states(requester, target_user, None)
 
     async def get_avatar_url(self, target_user: UserID) -> Optional[str]:
         """
@@ -409,7 +409,12 @@ class ProfileHandler:
         )
 
         if propagate:
-            await self._update_join_states(requester, target_user)
+            if self.enable_restricted_media and avatar_url_to_set:
+                await self._update_join_states(
+                    requester, target_user, content={"avatar_url": avatar_url_to_set}
+                )
+            else:
+                await self._update_join_states(requester, target_user, None)
 
     @cached()
     async def check_avatar_size_and_mime_type(self, mxc: str) -> bool:
@@ -638,7 +643,7 @@ class ProfileHandler:
         return response
 
     async def _update_join_states(
-        self, requester: Requester, target_user: UserID
+        self, requester: Requester, target_user: UserID, content: Optional[dict]
     ) -> None:
         """
         Update the membership events of each room the user is joined to with the
@@ -670,6 +675,7 @@ class ProfileHandler:
                     room_id,
                     "join",  # We treat a profile update like a join.
                     ratelimit=False,  # Try to hide that these events aren't atomic.
+                    content=content,
                 )
             except Exception as e:
                 logger.warning(

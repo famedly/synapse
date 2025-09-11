@@ -923,6 +923,7 @@ class ProfileMediaAttachmentTestCase(unittest.HomeserverTestCase):
         login.register_servlets,
         media.register_servlets,
         profile.register_servlets,
+        room.register_servlets,
     ]
 
     def prepare(
@@ -1180,3 +1181,57 @@ class ProfileMediaAttachmentTestCase(unittest.HomeserverTestCase):
             )
         )
         assert user_avatar is None
+
+    def test_profile_update_with_media_is_copied_and_attached_to_member_events(
+        self,
+    ) -> None:
+        room_id = self.helper.create_room_as(self.user, is_public=True, tok=self.tok)
+        self.helper.join(room_id, self.other_user, tok=self.other_tok)
+        mxc_uri = self.create_media_and_set_restricted_flag(self.user)
+
+        # Attach the media to the user profile.
+        channel = self.make_request(
+            "PUT",
+            f"/_matrix/client/v3/profile/{self.user}/avatar_url?propagate=true",
+            access_token=self.tok,
+            content={"avatar_url": str(mxc_uri)},
+        )
+        assert channel.code == HTTPStatus.OK
+        assert channel.json_body == {}
+
+        # Check media is set as user avatar.
+        user_avatar = self.get_success(
+            self.store.get_profile_avatar_url(
+                UserID.from_string(self.user),
+            )
+        )
+        assert user_avatar is not None
+        assert user_avatar == str(mxc_uri)
+
+        # Check media restrictions
+        media_info = self.get_success(self.store.get_local_media(mxc_uri.media_id))
+        assert media_info is not None
+        assert media_info.attachments is not None
+        assert media_info.attachments.profile_user_id == UserID.from_string(self.user)
+
+        # Check the media was copied and attached to a member event
+        events = self.get_success(
+            self.store.get_events_sent_by_user_in_room(
+                self.user, room_id, 10, ["m.room.member"]
+            )
+        )
+        # Get member event id
+        assert events is not None
+        member_event_id = events[0]
+
+        copied_media_id = self.get_success(
+            self.store.get_media_id_by_attached_event_id(member_event_id)
+        )
+        assert copied_media_id is not None
+        assert copied_media_id != mxc_uri.media_id
+
+        media_restrictions = self.get_success(
+            self.store.get_media_restrictions(self.server_name, copied_media_id)
+        )
+        assert media_restrictions is not None
+        assert media_restrictions.event_id == member_event_id

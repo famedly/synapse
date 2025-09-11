@@ -80,6 +80,7 @@ from synapse.handlers.federation import FederationHandler
 from synapse.handlers.federation_event import FederationEventHandler
 from synapse.handlers.identity import IdentityHandler
 from synapse.handlers.initial_sync import InitialSyncHandler
+from synapse.handlers.media import MediaHandler
 from synapse.handlers.message import EventCreationHandler, MessageHandler
 from synapse.handlers.pagination import PaginationHandler
 from synapse.handlers.password_policy import PasswordPolicyHandler
@@ -652,6 +653,10 @@ class HomeServer(metaclass=abc.ABCMeta):
     @cache_in_self
     def get_profile_handler(self) -> ProfileHandler:
         return ProfileHandler(self)
+
+    @cache_in_self
+    def get_media_handler(self) -> MediaHandler:
+        return MediaHandler(self)
 
     @cache_in_self
     def get_event_creation_handler(self) -> EventCreationHandler:
