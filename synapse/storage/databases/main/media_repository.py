@@ -1175,6 +1175,55 @@ class MediaRepositoryStore(MediaRepositoryBackgroundUpdateStore):
 
         return None
 
+    async def set_media_restrictions(
+        self, server_name: str, media_id: str, json_dict: JsonDict
+    ) -> None:
+        """
+        Add the media restrictions for a given server_name and media_id to the database
+
+        Args:
+           server_name:
+           media_id:
+           json_dict: The dict with the restrictions
+
+        Raises:
+            SynapseError if the media already has restrictions on it
+        """
+        return await self.db_pool.runInteraction(
+            "set_media_restrictions",
+            self.set_media_restrictions_txn,
+            server_name=server_name,
+            media_id=media_id,
+            json_dict=json_dict,
+        )
+
+    def set_media_restrictions_txn(
+        self,
+        txn: LoggingTransaction,
+        server_name: str,
+        media_id: str,
+        json_dict: JsonDict,
+    ) -> None:
+        try:
+            self.db_pool.simple_insert_txn(
+                txn,
+                "media_attachments",
+                {
+                    "server_name": server_name,
+                    "media_id": media_id,
+                    "restrictions_json": json_encoder.encode(json_dict),
+                },
+            )
+        except self.db_pool.engine.module.IntegrityError:
+            # For sqlite, a unique constraint violation is an integrity error. For
+            # psycopg2, a UniqueViolation is a subclass of IntegrityError, so this
+            # covers both.
+            raise SynapseError(
+                HTTPStatus.BAD_REQUEST,
+                f"This media, '{media_id}' already has restrictions set.",
+                errcode=Codes.INVALID_PARAM,
+            )
+
     async def set_media_restricted_to_event_id(
         self,
         server_name: str,
@@ -1209,25 +1258,12 @@ class MediaRepositoryStore(MediaRepositoryBackgroundUpdateStore):
         event_id: str,
     ) -> None:
         json_object = {"restrictions": {"event_id": event_id}}
-        try:
-            self.db_pool.simple_insert_txn(
-                txn,
-                "media_attachments",
-                {
-                    "server_name": server_name,
-                    "media_id": media_id,
-                    "restrictions_json": json_encoder.encode(json_object),
-                },
-            )
-        except self.db_pool.engine.module.IntegrityError:
-            # For sqlite, a unique constraint violation is an integrity error. For
-            # psycopg2, a UniqueViolation is a subclass of IntegrityError, so this
-            # covers both.
-            raise SynapseError(
-                HTTPStatus.BAD_REQUEST,
-                f"This media, '{media_id}' already has restrictions set.",
-                errcode=Codes.INVALID_PARAM,
-            )
+        self.set_media_restrictions_txn(
+            txn,
+            server_name=server_name,
+            media_id=media_id,
+            json_dict=json_object,
+        )
 
     async def set_media_restricted_to_user_profile(
         self,
@@ -1266,22 +1302,9 @@ class MediaRepositoryStore(MediaRepositoryBackgroundUpdateStore):
         profile_user_id: str,
     ) -> None:
         json_object = {"restrictions": {"profile_user_id": profile_user_id}}
-        try:
-            self.db_pool.simple_insert_txn(
-                txn,
-                "media_attachments",
-                {
-                    "server_name": server_name,
-                    "media_id": media_id,
-                    "restrictions_json": json_encoder.encode(json_object),
-                },
-            )
-        except self.db_pool.engine.module.IntegrityError:
-            # For sqlite, a unique constraint violation is an integrity error. For
-            # psycopg2, a UniqueViolation is a subclass of IntegrityError, so this
-            # covers both.
-            raise SynapseError(
-                HTTPStatus.BAD_REQUEST,
-                f"This media, '{media_id}' already has restrictions set.",
-                errcode=Codes.INVALID_PARAM,
-            )
+        self.set_media_restrictions_txn(
+            txn,
+            server_name=server_name,
+            media_id=media_id,
+            json_dict=json_object,
+        )

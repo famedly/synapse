@@ -75,8 +75,9 @@ from synapse.storage.databases.main.media_repository import (
     MediaRestrictions,
     RemoteMedia,
 )
-from synapse.types import Requester, UserID
+from synapse.types import JsonDict, Requester, UserID
 from synapse.types.state import StateFilter
+from synapse.util import json_decoder
 from synapse.util.async_helpers import Linearizer
 from synapse.util.retryutils import NotRetryingDestination
 from synapse.util.stringutils import random_string
@@ -1190,10 +1191,16 @@ class MediaRepository:
                 )
                 # if we had to fall back to the _matrix/media endpoint it will only return
                 # the headers and length, check the length of the tuple before unpacking
+                attachment_dict: JsonDict
                 if len(res) == 3:
-                    length, headers, json = res
+                    length, headers, json_bytes = res
+                    if json_bytes:
+                        attachment_dict = json_decoder.decode(json_bytes.decode())
                 else:
                     length, headers = res
+                    # This is set to an empty {} just as it is responded when media is
+                    # not restricted, thus maintaining backwards compatibility
+                    attachment_dict = {}
             except RequestSendFailed as e:
                 logger.warning(
                     "Request failed fetching remote media %s/%s: %r",
@@ -1245,6 +1252,21 @@ class MediaRepository:
             # alternative where we call `finish()` *after* this, where we could
             # end up having an entry in the DB but fail to write the files to
             # the storage providers.
+
+            # The unstable prefix on 'restrictions' will be here. Do not save that to
+            # the database, but filter it out. This is the companion to it's opposite in
+            # MediaRestrictions.to_dict() which adds it while unstable.
+            if "org.matrix.msc3911.restrictions" in attachment_dict:
+                restrictions_values = attachment_dict.pop(
+                    "org.matrix.msc3911.restrictions"
+                )
+                attachment_dict["restrictions"] = restrictions_values
+
+            # This can come in as 'falsey'(like '{}' or 'b""') so if this happens it has
+            # no restrictions. If it was restricted remotely, but had no attachments,
+            # then it should not have come across federation
+            restricted = True if "restrictions" in attachment_dict else False
+
             await self.store.store_cached_remote_media(
                 origin=server_name,
                 media_id=media_id,
@@ -1254,7 +1276,22 @@ class MediaRepository:
                 media_length=length,
                 filesystem_id=file_id,
                 sha256=sha256writer.hexdigest(),
+                restricted=restricted,
             )
+            # TODO: Decide about raising here? It will delete the media from the
+            #  disk but will not remove the restricted flag from the remote media
+            #  entry that just got wrote. Is this important? According to the comment
+            #  blocks above the last statement, it could raise a constraint violation
+            #  which would block this from being called. But if it is racing, we may have
+            #  been here before. Should this be gracefully handled(and basically ignored)?
+            # To keep the 'media_attachments' table smaller, unrestricted media does not
+            # have a row, only the restricted column for both local and remote media
+            attachments: Optional[MediaRestrictions] = None
+            if attachment_dict:
+                attachments = MediaRestrictions(**attachment_dict["restrictions"])
+                await self.store.set_media_restrictions(
+                    server_name, media_id, attachment_dict
+                )
 
         logger.debug("Stored remote media in file %r", fname)
 
@@ -1275,9 +1312,8 @@ class MediaRepository:
             quarantined_by=None,
             authenticated=authenticated,
             sha256=sha256writer.hexdigest(),
-            # Update this when the federation responses are updated
-            restricted=False,
-            attachments=None,
+            restricted=restricted,
+            attachments=attachments,
         )
 
     def _get_thumbnail_requirements(
