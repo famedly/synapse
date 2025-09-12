@@ -3225,6 +3225,24 @@ class CopyRestrictedResourceTestCase(unittest.HomeserverTestCase):
         resources["/_matrix/media"] = self.hs.get_media_repository_resource()
         return resources
 
+    def fetch_media(
+        self,
+        mxc_uri: MXCUri,
+        access_token: Optional[str] = None,
+        expected_code: int = 200,
+    ) -> FakeChannel:
+        """
+        Test retrieving the media. We do not care about the content of the media, just
+        that the response is correct
+        """
+        channel = self.make_request(
+            "GET",
+            f"/_matrix/client/v1/media/download/{mxc_uri.server_name}/{mxc_uri.media_id}",
+            access_token=access_token,
+        )
+        assert channel.code == expected_code, channel.code
+        return channel
+
     def test_copy_local_restricted_resource(self) -> None:
         """
         Tests that the new copy endpoint creates a new mxc uri for restricted resource.
@@ -3310,6 +3328,24 @@ class CopyRestrictedResourceTestCase(unittest.HomeserverTestCase):
 
         # Check if media is unattached to any event or user profile yet.
         assert copied_media.attachments is None
+
+        original_media_download = self.fetch_media(
+            MXCUri.from_str(f"mxc://{self.hs.hostname}/{media_id}"), self.user_tok
+        )
+        # This is a hex encoded byte stream of the raw file
+        old_media_payload = original_media_download.result.get("body")
+        assert old_media_payload is not None, old_media_payload
+
+        new_media_download = self.fetch_media(
+            MXCUri.from_str(f"mxc://{self.hs.hostname}/{new_media_id}"),
+            self.other_user_tok,
+        )
+        # Again, a hex encoded byte stream of the raw file
+        new_media_payload = new_media_download.result.get("body")
+        assert new_media_payload is not None
+
+        # If they match, this was a successful copy
+        assert old_media_payload == new_media_payload
 
     def test_copy_local_restricted_resource_fails_when_requester_does_not_have_access(
         self,
@@ -3485,6 +3521,24 @@ class CopyRestrictedResourceTestCase(unittest.HomeserverTestCase):
 
         # Check if copied media is unattached to any event or user profile yet.
         assert copied_media.attachments is None
+
+        original_media_download = self.fetch_media(
+            MXCUri.from_str(f"mxc://{remote_server}/{media_id}"), self.user_tok
+        )
+        # This is a hex encoded byte stream of the raw file
+        old_media_payload = original_media_download.result.get("body")
+        assert old_media_payload is not None, old_media_payload
+
+        new_media_download = self.fetch_media(
+            MXCUri.from_str(f"mxc://{self.hs.hostname}/{new_media_id}"),
+            self.other_user_tok,
+        )
+        # Again, a hex encoded byte stream of the raw file
+        new_media_payload = new_media_download.result.get("body")
+        assert new_media_payload is not None
+
+        # If they match, this was a successful copy
+        assert old_media_payload == new_media_payload
 
     @override_config(
         {
