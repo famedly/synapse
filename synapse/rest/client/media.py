@@ -379,23 +379,12 @@ class CopyResource(RestServlet):
 
         if media_info:
             try:
-                mxc_uri, _ = await self.media_repo.create_media_id(
-                    requester.user, restricted=True
-                )
-                if media_info.media_length and media_info.sha256:
-                    await self.store.update_local_media(
-                        media_id=mxc_uri.split("/")[-1],
-                        media_type=media_info.media_type,
-                        upload_name=media_info.upload_name,
-                        media_length=media_info.media_length,
-                        user_id=requester.user,
-                        sha256=media_info.sha256,
-                        quarantined_by=None,
-                    )
+                mxc_uri = await self.media_repo.copy_media(media_info, requester.user)
+
                 respond_with_json(
                     request,
                     200,
-                    {"content_uri": mxc_uri},
+                    {"content_uri": str(mxc_uri)},
                     send_cors=True,
                 )
             except Exception as e:

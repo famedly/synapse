@@ -84,7 +84,7 @@ from tests.media.test_media_storage import (
     small_png_with_transparency,
 )
 from tests.server import FakeChannel, FakeTransport, ThreadedMemoryReactorClock
-from tests.test_utils import SMALL_PNG
+from tests.test_utils import SMALL_PNG, SMALL_PNG_SHA256
 from tests.unittest import override_config
 
 try:
@@ -3191,7 +3191,7 @@ class RestrictedResourceUploadTestCase(unittest.HomeserverTestCase):
         assert channel.code == 403, channel.json_body
 
 
-class CopyRestrictedResource(unittest.HomeserverTestCase):
+class CopyRestrictedResourceTestCase(unittest.HomeserverTestCase):
     """
     Tests copy API when `msc3911_enabled` is configured to be True.
     """
@@ -3414,7 +3414,8 @@ class CopyRestrictedResource(unittest.HomeserverTestCase):
         """
         # create remote media
         remote_server = "remoteserver.com"
-        remote_file_id = "remote1"
+        media_id = "remotemedia"
+        remote_file_id = media_id
         file_info = FileInfo(server_name=remote_server, file_id=remote_file_id)
 
         media_storage = self.hs.get_media_repository().media_storage
@@ -3422,17 +3423,16 @@ class CopyRestrictedResource(unittest.HomeserverTestCase):
         (f, _) = self.get_success(ctx.__aenter__())
         f.write(SMALL_PNG)
         self.get_success(ctx.__aexit__(None, None, None))
-        media_id = "remotemedia"
         self.get_success(
             self.hs.get_datastores().main.store_cached_remote_media(
                 origin=remote_server,
                 media_id=media_id,
                 media_type="image/png",
-                media_length=1,
+                media_length=67,
                 time_now_ms=self.clock.time_msec(),
                 upload_name="test.png",
                 filesystem_id=remote_file_id,
-                sha256=remote_file_id,
+                sha256=SMALL_PNG_SHA256,
                 restricted=True,
             )
         )

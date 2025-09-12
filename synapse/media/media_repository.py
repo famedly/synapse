@@ -416,6 +416,50 @@ class MediaRepository:
 
         return MXCUri(self.server_name, media_id)
 
+    async def copy_media(
+        self, old_media_info: Union[LocalMedia, RemoteMedia], auth_user: UserID
+    ) -> MXCUri:
+        """
+        Copy an existing piece of media into a new file with new LocalMedia
+
+        Args:
+            old_media_info: The existing media information
+            auth_user: The UserID of the user making the request
+        """
+
+        if isinstance(old_media_info, RemoteMedia):
+            file_info = FileInfo(
+                server_name=old_media_info.media_origin, file_id=old_media_info.media_id
+            )
+        else:
+            file_info = FileInfo(server_name=None, file_id=old_media_info.media_id)
+
+        # This will ensure that if there is another storage provider containing our old
+        # media, it will be in our local cache before the copy takes place.
+        # Conveniently, it also gives us the local path of where the file lives.
+        local_path = await self.media_storage.ensure_media_is_in_local_cache(file_info)
+
+        assert old_media_info.media_length is not None
+
+        # It may end up being that this needs to be pushed down into the MediaStorage
+        # class. It needs abstraction badly, but that is beyond me at the moment.
+        io_object = open(local_path, "rb")
+
+        # Let existing methods handle creating the new file for us. By not passing a
+        # media id, one will be created.
+        new_mxc_uri = await self.create_or_update_content(
+            media_type=old_media_info.media_type,
+            upload_name=old_media_info.upload_name,
+            content=io_object,
+            content_length=old_media_info.media_length,
+            auth_user=auth_user,
+            restricted=True,
+        )
+        # I could not find a place this was close()'d explicitly, but this felt prudent
+        io_object.close()
+
+        return new_mxc_uri
+
     def respond_not_yet_uploaded(self, request: SynapseRequest) -> None:
         respond_with_json(
             request,
