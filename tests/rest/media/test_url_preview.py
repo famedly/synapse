@@ -33,6 +33,7 @@ from twisted.test.proto_helpers import AccumulatingProtocol, MemoryReactor
 from twisted.web.resource import Resource
 
 from synapse.config.oembed import OEmbedEndpointConfig
+from synapse.media.media_repository import MediaRepository
 from synapse.media.url_previewer import IMAGE_CACHE_EXPIRY_MS
 from synapse.server import HomeServer
 from synapse.types import JsonDict
@@ -124,6 +125,7 @@ class URLPreviewTests(unittest.HomeserverTestCase):
 
     def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
         self.media_repo = hs.get_media_repository()
+        assert isinstance(self.media_repo, MediaRepository)
         assert self.media_repo.url_previewer is not None
         self.url_previewer = self.media_repo.url_previewer
 
@@ -1265,6 +1267,7 @@ class URLPreviewTests(unittest.HomeserverTestCase):
         """Test that files are not stored in or fetched from storage providers."""
         host, media_id = self._download_image()
 
+        assert isinstance(self.media_repo, MediaRepository)
         rel_file_path = self.media_repo.filepaths.url_cache_filepath_rel(media_id)
         media_store_path = os.path.join(self.media_store_path, rel_file_path)
         storage_provider_path = os.path.join(self.storage_path, rel_file_path)
@@ -1308,6 +1311,7 @@ class URLPreviewTests(unittest.HomeserverTestCase):
         """Test that thumbnails are not stored in or fetched from storage providers."""
         host, media_id = self._download_image()
 
+        assert isinstance(self.media_repo, MediaRepository)
         rel_thumbnail_path = (
             self.media_repo.filepaths.url_cache_thumbnail_directory_rel(media_id)
         )
@@ -1336,6 +1340,7 @@ class URLPreviewTests(unittest.HomeserverTestCase):
         self.assertEqual(channel.code, 200)
 
         # Remove the original, otherwise thumbnails will regenerate
+        assert isinstance(self.media_repo, MediaRepository)
         rel_file_path = self.media_repo.filepaths.url_cache_filepath_rel(media_id)
         media_store_path = os.path.join(self.media_store_path, rel_file_path)
         os.remove(media_store_path)
@@ -1361,6 +1366,7 @@ class URLPreviewTests(unittest.HomeserverTestCase):
         """Test that URL cache files and thumbnails are cleaned up properly on expiry."""
         _host, media_id = self._download_image()
 
+        assert isinstance(self.media_repo, MediaRepository)
         file_path = self.media_repo.filepaths.url_cache_filepath(media_id)
         file_dirs = self.media_repo.filepaths.url_cache_filepath_dirs_to_delete(
             media_id

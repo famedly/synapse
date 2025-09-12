@@ -134,19 +134,46 @@ class ContentRepositoryConfig(Config):
     def read_config(self, config: JsonDict, **kwargs: Any) -> None:
         # Only enable the media repo if either the media repo is enabled or the
         # current worker app is the media repo.
-        if (
-            config.get("enable_media_repo", True) is False
-            and config.get("worker_app") != "synapse.app.media_repository"
-        ):
-            self.can_load_media_repo = False
-            return
+
+        workers_doing_media_duty = self.root.worker.workers_doing_media_duty
+        # It is expected by many places in Synapse and its unit tests that either there
+        # are no media repos, or only one, or every worker is one. If we have our new
+        # proper list, use that to decide if we are supposed to be handling these duties
+        if not workers_doing_media_duty:
+            if (
+                config.get("enable_media_repo", True) is False
+                and config.get("worker_app") != "synapse.app.media_repository"
+            ):
+                self.can_load_media_repo = False
+                return
+            self.can_load_media_repo = True
+
         else:
+            if self.root.worker.instance_name not in workers_doing_media_duty:
+                self.can_load_media_repo = False
+                return
             self.can_load_media_repo = True
 
         # Whether this instance should be the one to run the background jobs to
         # e.g clean up old URL previews.
-        self.media_instance_running_background_jobs = config.get(
-            "media_instance_running_background_jobs",
+        # We prefer the first worker that is on the list to be responsible. However,
+        # backwards compatible the old setting and allow it to override the list.
+        #
+        # The URLPreviewer is the only thing that cares about this. Refactoring this to
+        # not stomp all over it's own feet doing the same work twice(maybe a mod on
+        # sha256?) and then it would not matter which media worker does the job.
+        media_instance_running_background_jobs_from_list = None
+        if self.root.worker.workers_doing_media_duty:
+            media_instance_running_background_jobs_from_list = (
+                self.root.worker.workers_doing_media_duty[0]
+            )
+        media_instance_running_background_jobs = config.get(
+            "media_instance_running_background_jobs"
+        )
+
+        self.media_instance_running_background_jobs = (
+            media_instance_running_background_jobs
+            or media_instance_running_background_jobs_from_list
         )
 
         self.max_upload_size = self.parse_size(config.get("max_upload_size", "50M"))

@@ -70,6 +70,7 @@ from synapse.media.storage_provider import StorageProviderWrapper
 from synapse.media.thumbnailer import Thumbnailer, ThumbnailError
 from synapse.media.url_previewer import UrlPreviewer
 from synapse.metrics.background_process_metrics import run_as_background_process
+from synapse.replication.http.media import ReplicationCopyMediaServlet
 from synapse.storage.databases.main.media_repository import (
     LocalMedia,
     MediaRestrictions,
@@ -102,7 +103,7 @@ UPDATE_RECENTLY_ACCESSED_TS = 60 * 1000  # 1 minute
 MEDIA_RETENTION_CHECK_PERIOD_MS = 60 * 60 * 1000  # 1 hour
 
 
-class MediaRepository:
+class AbstractMediaRepository:
     def __init__(self, hs: "HomeServer"):
         self.hs = hs
         self.auth = hs.get_auth()
@@ -110,6 +111,412 @@ class MediaRepository:
         self.clock = hs.get_clock()
         self.server_name = hs.hostname
         self.store = hs.get_datastores().main
+        self._is_mine_server_name = hs.is_mine_server_name
+        self.enable_media_restriction = self.hs.config.experimental.msc3911_enabled
+
+    @trace
+    async def create_media_id_without_expiration(
+        self, auth_user: UserID, restricted: bool = False
+    ) -> MXCUri:
+        """Create and store a media ID for a local user and return the MXC URI and its
+        expiration.
+        Args:
+            auth_user: The user_id of the uploader
+            restricted: If this is to be considered restricted media
+        Returns:
+            A MXC URI of the stored content.
+        """
+        media_id = random_string(24)
+        now = self.clock.time_msec()
+        await self.store.store_local_media_id(
+            media_id=media_id,
+            time_now_ms=now,
+            user_id=auth_user,
+            restricted=restricted,
+        )
+        return MXCUri.from_str(f"mxc://{self.server_name}/{media_id}")
+
+    async def get_media_info(self, mxc_uri: MXCUri) -> Union[LocalMedia, RemoteMedia]:
+        """Get information about a media item.
+        Args:
+            mxc_uri: The MXC URI of the media item.
+        Returns:
+            The media information, or None if not found.
+        """
+        server_name = mxc_uri.server_name
+        media_id = mxc_uri.media_id
+        media_info: Optional[Union[LocalMedia, RemoteMedia]]
+        if self._is_mine_server_name(server_name):
+            media_info = await self.store.get_local_media(media_id)
+        else:
+            media_info = await self.store.get_cached_remote_media(
+                mxc_uri.server_name, mxc_uri.media_id
+            )
+        if not media_info:
+            raise SynapseError(404, "Media not found", errcode="M_NOT_FOUND")
+        if media_info.quarantined_by:
+            raise SynapseError(404, "Media not found", errcode="M_NOT_FOUND")
+        return media_info
+
+    async def create_or_update_content(
+        self,
+        media_type: str,
+        upload_name: Optional[str],
+        content: IO,
+        content_length: int,
+        auth_user: UserID,
+        media_id: Optional[str] = None,
+        restricted: bool = False,
+    ) -> MXCUri:
+        raise NotImplementedError(
+            "Sorry Mario, your MediaRepository related function is in another castle"
+        )
+
+    async def copy_media(
+        self, existing_mxc: MXCUri, auth_user: UserID, max_timeout_ms: int
+    ) -> MXCUri:
+        raise NotImplementedError(
+            "Sorry Mario, your MediaRepository related function is in another castle"
+        )
+
+    async def reached_pending_media_limit(self, auth_user: UserID) -> Tuple[bool, int]:
+        raise NotImplementedError(
+            "Sorry Mario, your MediaRepository related function is in another castle"
+        )
+
+    @trace
+    async def _generate_thumbnails(
+        self,
+        server_name: Optional[str],
+        media_id: str,
+        file_id: str,
+        media_type: str,
+        url_cache: bool = False,
+    ) -> Optional[dict]:
+        raise NotImplementedError(
+            "Sorry Mario, your MediaRepository related function is in another castle"
+        )
+
+    async def create_media_id(
+        self, auth_user: UserID, restricted: bool = False
+    ) -> Tuple[str, int]:
+        raise NotImplementedError(
+            "Sorry Mario, your MediaRepository related function is in another castle"
+        )
+
+    async def delete_old_remote_media(self, before_ts: int) -> Dict[str, int]:
+        raise NotImplementedError(
+            "Sorry Mario, your MediaRepository related function is in another castle"
+        )
+
+    async def delete_local_media_ids(
+        self, media_ids: List[str]
+    ) -> Tuple[List[str], int]:
+        raise NotImplementedError(
+            "Sorry Mario, your MediaRepository related function is in another castle"
+        )
+
+    async def delete_old_local_media(
+        self,
+        before_ts: int,
+        size_gt: int = 0,
+        keep_profiles: bool = True,
+        delete_quarantined_media: bool = False,
+        delete_protected_media: bool = False,
+    ) -> Tuple[List[str], int]:
+        raise NotImplementedError(
+            "Sorry Mario, your MediaRepository related function is in another castle"
+        )
+
+    async def get_local_media(
+        self,
+        request: SynapseRequest,
+        media_id: str,
+        name: Optional[str],
+        max_timeout_ms: int,
+        requester: Optional[Requester] = None,
+        allow_authenticated: bool = True,
+        federation: bool = False,
+    ) -> None:
+        raise NotImplementedError(
+            "Sorry Mario, your MediaRepository related function is in another castle"
+        )
+
+    async def validate_media_restriction(
+        self,
+        request: SynapseRequest,
+        media_info: Optional[LocalMedia],
+        media_id: Optional[str],
+        is_federation: bool = False,
+    ) -> Optional[MediaRestrictions]:
+        """
+        MSC3911: If media is restricted but restriction is empty, the media is in
+        pending state and only creator can see it until it is attached to an event. If
+        there is a restriction return MediaRestrictions after validation.
+
+        Args:
+            request: The incoming request.
+            media_info: Optional, the media information.
+            media_id: Optional, the media ID to validate.
+
+        Returns:
+            MediaRestrictions if there is one set, otherwise raise SynapseError.
+        """
+        if not media_info and media_id:
+            media_info = await self.store.get_local_media(media_id)
+        if not media_info:
+            return None
+        restricted = media_info.restricted
+        if not restricted:
+            return None
+        attachments: Optional[MediaRestrictions] = media_info.attachments
+        # for both federation and client endpoints
+        if attachments:
+            # Only one of event_id or profile_user_id must be set, not both, not neither
+            if attachments.event_id is None and attachments.profile_user_id is None:
+                raise SynapseError(
+                    HTTPStatus.FORBIDDEN,
+                    "MediaRestrictions must have exactly one of event_id or profile_user_id set.",
+                    errcode=Codes.FORBIDDEN,
+                )
+            if bool(attachments.event_id) == bool(attachments.profile_user_id):
+                raise SynapseError(
+                    HTTPStatus.FORBIDDEN,
+                    "MediaRestrictions must have exactly one of event_id or profile_user_id set.",
+                    errcode=Codes.FORBIDDEN,
+                )
+
+        if not attachments and is_federation:
+            raise SynapseError(
+                HTTPStatus.NOT_FOUND,
+                "Not found '%s'" % (request.path.decode(),),
+                errcode=Codes.NOT_FOUND,
+            )
+
+        if not attachments and not is_federation:
+            if (
+                isinstance(request.requester, Requester)
+                and request.requester.user.to_string() != media_info.user_id
+            ):
+                raise SynapseError(
+                    HTTPStatus.NOT_FOUND,
+                    "Not found '%s'" % (request.path.decode(),),
+                    errcode=Codes.NOT_FOUND,
+                )
+            else:
+                return None
+        return attachments
+
+    async def is_media_visible(
+        self, requesting_user: UserID, media_info_object: Union[LocalMedia, RemoteMedia]
+    ) -> None:
+        """
+        Verify that media requested for download should be visible to the user making
+        the request
+        """
+
+        if not self.enable_media_restriction:
+            return
+
+        if not media_info_object.restricted:
+            return
+
+        if not media_info_object.attachments:
+            # When the media has not been attached yet, only the originating user can
+            # see it. But once attachments have been formed, standard other rules apply
+            if isinstance(media_info_object, LocalMedia) and (
+                requesting_user.to_string() == str(media_info_object.user_id)
+            ):
+                return
+
+            # It was restricted, but no attachments. Deny
+            raise UnauthorizedRequestAPICallError(
+                f"Media requested ('{media_info_object.media_id}') is restricted"
+            )
+
+        attached_event_id = media_info_object.attachments.event_id
+        attached_profile_user_id = media_info_object.attachments.profile_user_id
+
+        if attached_event_id:
+            event_base = await self.store.get_event(attached_event_id)
+            storage_controllers = self.hs.get_storage_controllers()
+            if event_base.is_state():
+                # The standard event visibility utility, filter_events_for_client(),
+                # does not seem to meet the needs of a good UX when restricting and
+                # allowing media. This is a very, very simple version to be used for
+                # state events.
+
+                # First we will collect the current membership of the user for the room
+                # the relevant event came from. Then we will collect the membership and
+                # m.room.history_visibility event at the time of the relevant event.
+
+                # Since it is hard to find a relevant place in which to search back in
+                # time to find out if a given room ever had anything other than a leave
+                # event, this is the simplest without having to do tablescans
+
+                # Need membership of NOW
+                (
+                    membership_now,
+                    _,
+                ) = await self.store.get_local_current_membership_for_user_in_room(
+                    requesting_user.to_string(), event_base.room_id
+                )
+
+                if not membership_now:
+                    membership_now = Membership.LEAVE
+
+                membership_state_key = (EventTypes.Member, requesting_user.to_string())
+                types = (_HISTORY_VIS_KEY, membership_state_key)
+                # and history visibility and membership of THEN
+                event_id_to_state = (
+                    await storage_controllers.state.get_state_for_events(
+                        [attached_event_id],
+                        state_filter=StateFilter.from_types(types),
+                    )
+                )
+
+                state_map = event_id_to_state.get(attached_event_id)
+                # Do we need to guard against not having state of a room?
+                assert state_map is not None
+
+                visibility = get_effective_room_visibility_from_state(state_map)
+
+                memb_then_evt = state_map.get(membership_state_key)
+                membership_then = Membership.LEAVE
+                if memb_then_evt:
+                    membership_then = memb_then_evt.content.get(
+                        "membership", Membership.LEAVE
+                    )
+
+                # Have a few numbers ready for comparison below. These resolve to int
+                # The index of the visibility present from the event
+                visibility_priority = VISIBILITY_PRIORITY.index(visibility)
+                membership_priority_now = MEMBERSHIP_PRIORITY.index(membership_now)
+                membership_priority_then = MEMBERSHIP_PRIORITY.index(membership_then)
+
+                # These are essentially constants, in that they should not change
+                world_readable_index = VISIBILITY_PRIORITY.index(
+                    HistoryVisibility.WORLD_READABLE
+                )
+                shared_visibility_index = VISIBILITY_PRIORITY.index(
+                    HistoryVisibility.SHARED
+                )
+                mem_leave_index = MEMBERSHIP_PRIORITY.index(Membership.LEAVE)
+
+                # I disagree with this. 'Shared' by spec implies that some sort of
+                # positive membership event took place, but the stock
+                # filter_events_for_client() seems to treat SHARED like WORLD_READABLE,
+                # so at least this matches
+                if visibility_priority in [
+                    world_readable_index,
+                    shared_visibility_index,
+                ]:
+                    # world readable should always be seen
+                    return
+
+                # If the room is invite visible, and the user is invited, move on
+                if visibility_priority == VISIBILITY_PRIORITY.index(
+                    HistoryVisibility.INVITED
+                ) and membership_priority_now == MEMBERSHIP_PRIORITY.index(
+                    Membership.INVITE
+                ):
+                    return
+
+                # The visibility of the room is shared or greater, so requires at
+                # the minimum a 'knock' level. Make sure the membership of the user
+                # is better than leave
+                if (
+                    visibility_priority >= shared_visibility_index
+                    and membership_priority_now < mem_leave_index
+                ):
+                    return
+
+                # Cover the case that a user has left a room but still should see any
+                # media they were allowed to see prior
+                # The visibility of the room is shared or greater, so requires at
+                # the minimum a 'knock' level. Make sure the membership of the user
+                # is better than leave
+                if (
+                    visibility_priority >= shared_visibility_index
+                    and membership_priority_then < mem_leave_index
+                ):
+                    return
+
+            else:
+                filtered_events = await filter_events_for_client(
+                    storage_controllers,
+                    requesting_user.to_string(),
+                    [event_base],
+                )
+                if len(filtered_events) > 0:
+                    return
+
+        elif attached_profile_user_id:
+            # Can this user see that profile?
+
+            # The error returns here may not be suitable, use the work around below
+            # If shared room restricted profile lookups, it will be restricted
+            # to users that share rooms
+            # await self.profile_handler.check_profile_query_allowed(
+            #     restrictions.profile_user_id, requester.user
+            # )
+            # return
+
+            if self.hs.config.server.limit_profile_requests_to_users_who_share_rooms:
+                # First take care of the case where the requesting user IS the creating
+                # user. The other function below does not handle this.
+                if requesting_user.to_string() == attached_profile_user_id.to_string():
+                    return
+
+                # This call returns a set() that contains which of the "other_user_ids"
+                # share a room. Since we give it only one, if bool(set()) is True, then they
+                # share some room or had at least one invite between them.
+                if not await self.store.do_users_share_a_room_joined_or_invited(
+                    requesting_user.to_string(),
+                    [attached_profile_user_id.to_string()],
+                ):
+                    raise UnauthorizedRequestAPICallError(
+                        f"Media requested ('{media_info_object.media_id}') is restricted"
+                    )
+
+            # check these settings:
+            # * allow_profile_lookup_over_federation
+
+            # If 'limit_profile_requests_to_users_who_share_rooms' is not enabled, all
+            # bets are kinda off
+            return
+
+        # It was a third unknown restriction, or otherwise did not pass inspection
+        raise UnauthorizedRequestAPICallError(
+            f"Media requested ('{media_info_object.media_id}') is restricted"
+        )
+
+
+class MediaRepositoryWorker(AbstractMediaRepository):
+    def __init__(self, hs: "HomeServer"):
+        super().__init__(hs)
+        # initialize replication endpoint here
+        self.copy_media_client = ReplicationCopyMediaServlet.make_client(hs)
+
+    async def copy_media(
+        self, existing_mxc: MXCUri, auth_user: UserID, max_timeout_ms: int
+    ) -> MXCUri:
+        """
+        Call out to the worker responsible for handling media to copy this media object
+        """
+        result = await self.copy_media_client(
+            instance_name=self.hs.config.worker.workers_doing_media_duty[0],
+            server_name=existing_mxc.server_name,
+            media_id=existing_mxc.media_id,
+            user_id=auth_user.to_string(),
+            max_timeout_ms=max_timeout_ms,
+        )
+        return MXCUri.from_str(result["content_uri"])
+
+
+class MediaRepository(AbstractMediaRepository):
+    def __init__(self, hs: "HomeServer"):
+        super().__init__(hs)
         self.max_upload_size = hs.config.media.max_upload_size
         self.max_image_pixels = hs.config.media.max_image_pixels
         self.unused_expiration_time = hs.config.media.unused_expiration_time
@@ -198,8 +605,6 @@ class MediaRepository:
         self.media_upload_limits.sort(
             key=lambda limit: limit.time_period_ms, reverse=True
         )
-
-        self.enable_media_restriction = self.hs.config.experimental.msc3911_enabled
 
     def _start_update_recently_accessed(self) -> Deferred:
         return run_as_background_process(
@@ -416,6 +821,52 @@ class MediaRepository:
 
         return MXCUri(self.server_name, media_id)
 
+    async def copy_media(
+        self, existing_mxc: MXCUri, auth_user: UserID, max_timeout_ms: int
+    ) -> MXCUri:
+        """
+        Copy an existing piece of media into a new file with new LocalMedia
+
+        Args:
+            existing_mxc: The existing media information
+            auth_user: The UserID of the user making the request
+            max_timeout_ms: The millisecond timeout for retrieving existing media info
+        """
+
+        old_media_info = await self.get_media_info(existing_mxc)
+        if isinstance(old_media_info, RemoteMedia):
+            file_info = FileInfo(
+                server_name=old_media_info.media_origin, file_id=old_media_info.media_id
+            )
+        else:
+            file_info = FileInfo(server_name=None, file_id=old_media_info.media_id)
+
+        # This will ensure that if there is another storage provider containing our old
+        # media, it will be in our local cache before the copy takes place.
+        # Conveniently, it also gives us the local path of where the file lives.
+        local_path = await self.media_storage.ensure_media_is_in_local_cache(file_info)
+
+        assert old_media_info.media_length is not None
+
+        # It may end up being that this needs to be pushed down into the MediaStorage
+        # class. It needs abstraction badly, but that is beyond me at the moment.
+        io_object = open(local_path, "rb")
+
+        # Let existing methods handle creating the new file for us. By not passing a
+        # media id, one will be created.
+        new_mxc_uri = await self.create_or_update_content(
+            media_type=old_media_info.media_type,
+            upload_name=old_media_info.upload_name,
+            content=io_object,
+            content_length=old_media_info.media_length,
+            auth_user=auth_user,
+            restricted=True,
+        )
+        # I could not find a place this was close()'d explicitly, but this felt prudent
+        io_object.close()
+
+        return new_mxc_uri
+
     def respond_not_yet_uploaded(self, request: SynapseRequest) -> None:
         respond_with_json(
             request,
@@ -479,190 +930,6 @@ class MediaRepository:
         logger.info("Media %s has not yet been uploaded", media_id)
         self.respond_not_yet_uploaded(request)
         return None
-
-    async def is_media_visible(
-        self, requesting_user: UserID, media_info_object: Union[LocalMedia, RemoteMedia]
-    ) -> None:
-        """
-        Verify that media requested for download should be visible to the user making
-        the request
-        """
-
-        if not self.enable_media_restriction:
-            return
-
-        if not media_info_object.restricted:
-            return
-
-        if not media_info_object.attachments:
-            # When the media has not been attached yet, only the originating user can
-            # see it. But once attachments have been formed, standard other rules apply
-            if isinstance(media_info_object, LocalMedia) and (
-                requesting_user.to_string() == str(media_info_object.user_id)
-            ):
-                return
-
-            # It was restricted, but no attachments. Deny
-            raise UnauthorizedRequestAPICallError(
-                f"Media requested ('{media_info_object.media_id}') is restricted"
-            )
-
-        attached_event_id = media_info_object.attachments.event_id
-        attached_profile_user_id = media_info_object.attachments.profile_user_id
-
-        if attached_event_id:
-            event_base = await self.store.get_event(attached_event_id)
-            storage_controllers = self.hs.get_storage_controllers()
-            if event_base.is_state():
-                # The standard event visibility utility, filter_events_for_client(),
-                # does not seem to meet the needs of a good UX when restricting and
-                # allowing media. This is a very, very simple version to be used for
-                # state events.
-
-                # First we will collect the current membership of the user for the room
-                # the relevant event came from. Then we will collect the membership and
-                # m.room.history_visibility event at the time of the relevant event.
-
-                # Since it is hard to find a relevant place in which to search back in
-                # time to find out if a given room ever had anything other than a leave
-                # event, this is the simplest without having to do tablescans
-
-                # Need membership of NOW
-                (
-                    membership_now,
-                    _,
-                ) = await self.store.get_local_current_membership_for_user_in_room(
-                    requesting_user.to_string(), event_base.room_id
-                )
-
-                if not membership_now:
-                    membership_now = Membership.LEAVE
-
-                membership_state_key = (EventTypes.Member, requesting_user.to_string())
-                types = (_HISTORY_VIS_KEY, membership_state_key)
-                # and history visibility and membership of THEN
-                event_id_to_state = (
-                    await storage_controllers.state.get_state_for_events(
-                        [attached_event_id],
-                        state_filter=StateFilter.from_types(types),
-                    )
-                )
-
-                state_map = event_id_to_state.get(attached_event_id)
-                # Do we need to guard against not having state of a room?
-                assert state_map is not None
-
-                visibility = get_effective_room_visibility_from_state(state_map)
-
-                memb_then_evt = state_map.get(membership_state_key)
-                membership_then = Membership.LEAVE
-                if memb_then_evt:
-                    membership_then = memb_then_evt.content.get(
-                        "membership", Membership.LEAVE
-                    )
-
-                # Have a few numbers ready for comparison below. These resolve to int
-                # The index of the visibility present from the event
-                visibility_priority = VISIBILITY_PRIORITY.index(visibility)
-                membership_priority_now = MEMBERSHIP_PRIORITY.index(membership_now)
-                membership_priority_then = MEMBERSHIP_PRIORITY.index(membership_then)
-
-                # These are essentially constants, in that they should not change
-                world_readable_index = VISIBILITY_PRIORITY.index(
-                    HistoryVisibility.WORLD_READABLE
-                )
-                shared_visibility_index = VISIBILITY_PRIORITY.index(
-                    HistoryVisibility.SHARED
-                )
-                mem_leave_index = MEMBERSHIP_PRIORITY.index(Membership.LEAVE)
-
-                # I disagree with this. 'Shared' by spec implies that some sort of
-                # positive membership event took place, but the stock
-                # filter_events_for_client() seems to treat SHARED like WORLD_READABLE,
-                # so at least this matches
-                if visibility_priority in [
-                    world_readable_index,
-                    shared_visibility_index,
-                ]:
-                    # world readable should always be seen
-                    return
-
-                # If the room is invite visible, and the user is invited, move on
-                if visibility_priority == VISIBILITY_PRIORITY.index(
-                    HistoryVisibility.INVITED
-                ) and membership_priority_now == MEMBERSHIP_PRIORITY.index(
-                    Membership.INVITE
-                ):
-                    return
-
-                # The visibility of the room is shared or greater, so requires at
-                # the minimum a 'knock' level. Make sure the membership of the user
-                # is better than leave
-                if (
-                    visibility_priority >= shared_visibility_index
-                    and membership_priority_now < mem_leave_index
-                ):
-                    return
-
-                # Cover the case that a user has left a room but still should see any
-                # media they were allowed to see prior
-                # The visibility of the room is shared or greater, so requires at
-                # the minimum a 'knock' level. Make sure the membership of the user
-                # is better than leave
-                if (
-                    visibility_priority >= shared_visibility_index
-                    and membership_priority_then < mem_leave_index
-                ):
-                    return
-
-            else:
-                filtered_events = await filter_events_for_client(
-                    storage_controllers,
-                    requesting_user.to_string(),
-                    [event_base],
-                )
-                if len(filtered_events) > 0:
-                    return
-
-        elif attached_profile_user_id:
-            # Can this user see that profile?
-
-            # The error returns here may not be suitable, use the work around below
-            # If shared room restricted profile lookups, it will be restricted
-            # to users that share rooms
-            # await self.profile_handler.check_profile_query_allowed(
-            #     restrictions.profile_user_id, requester.user
-            # )
-            # return
-
-            if self.hs.config.server.limit_profile_requests_to_users_who_share_rooms:
-                # First take care of the case where the requesting user IS the creating
-                # user. The other function below does not handle this.
-                if requesting_user.to_string() == attached_profile_user_id.to_string():
-                    return
-
-                # This call returns a set() that contains which of the "other_user_ids"
-                # share a room. Since we give it only one, if bool(set()) is True, then they
-                # share some room or had at least one invite between them.
-                if not await self.store.do_users_share_a_room_joined_or_invited(
-                    requesting_user.to_string(),
-                    [attached_profile_user_id.to_string()],
-                ):
-                    raise UnauthorizedRequestAPICallError(
-                        f"Media requested ('{media_info_object.media_id}') is restricted"
-                    )
-
-            # check these settings:
-            # * allow_profile_lookup_over_federation
-
-            # If 'limit_profile_requests_to_users_who_share_rooms' is not enabled, all
-            # bets are kinda off
-            return
-
-        # It was a third unknown restriction, or otherwise did not pass inspection
-        raise UnauthorizedRequestAPICallError(
-            f"Media requested ('{media_info_object.media_id}') is restricted"
-        )
 
     async def get_local_media(
         self,
@@ -1844,68 +2111,3 @@ class MediaRepository:
             removed_media.append(media_id)
 
         return removed_media, len(removed_media)
-
-    async def validate_media_restriction(
-        self,
-        request: SynapseRequest,
-        media_info: Optional[LocalMedia],
-        media_id: Optional[str],
-        is_federation: bool = False,
-    ) -> Optional[MediaRestrictions]:
-        """
-        MSC3911: If media is restricted but restriction is empty, the media is in
-        pending state and only creator can see it until it is attached to an event. If
-        there is a restriction return MediaRestrictions after validation.
-
-        Args:
-            request: The incoming request.
-            media_info: Optional, the media information.
-            media_id: Optional, the media ID to validate.
-
-        Returns:
-            MediaRestrictions if there is one set, otherwise raise SynapseError.
-        """
-        if not media_info and media_id:
-            media_info = await self.store.get_local_media(media_id)
-        if not media_info:
-            return None
-        restricted = media_info.restricted
-        if not restricted:
-            return None
-        attachments: Optional[MediaRestrictions] = media_info.attachments
-        # for both federation and client endpoints
-        if attachments:
-            # Only one of event_id or profile_user_id must be set, not both, not neither
-            if attachments.event_id is None and attachments.profile_user_id is None:
-                raise SynapseError(
-                    HTTPStatus.FORBIDDEN,
-                    "MediaRestrictions must have exactly one of event_id or profile_user_id set.",
-                    errcode=Codes.FORBIDDEN,
-                )
-            if bool(attachments.event_id) == bool(attachments.profile_user_id):
-                raise SynapseError(
-                    HTTPStatus.FORBIDDEN,
-                    "MediaRestrictions must have exactly one of event_id or profile_user_id set.",
-                    errcode=Codes.FORBIDDEN,
-                )
-
-        if not attachments and is_federation:
-            raise SynapseError(
-                HTTPStatus.NOT_FOUND,
-                "Not found '%s'" % (request.path.decode(),),
-                errcode=Codes.NOT_FOUND,
-            )
-
-        if not attachments and not is_federation:
-            if (
-                isinstance(request.requester, Requester)
-                and request.requester.user.to_string() != media_info.user_id
-            ):
-                raise SynapseError(
-                    HTTPStatus.NOT_FOUND,
-                    "Not found '%s'" % (request.path.decode(),),
-                    errcode=Codes.NOT_FOUND,
-                )
-            else:
-                return None
-        return attachments

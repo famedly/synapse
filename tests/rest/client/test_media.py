@@ -60,6 +60,7 @@ from synapse.http.client import MultipartResponse
 from synapse.http.types import QueryParams
 from synapse.logging.context import make_deferred_yieldable
 from synapse.media._base import FileInfo, ThumbnailInfo
+from synapse.media.media_repository import MediaRepository
 from synapse.media.thumbnailer import ThumbnailProvider
 from synapse.media.url_previewer import IMAGE_CACHE_EXPIRY_MS
 from synapse.rest import admin
@@ -84,7 +85,7 @@ from tests.media.test_media_storage import (
     small_png_with_transparency,
 )
 from tests.server import FakeChannel, FakeTransport, ThreadedMemoryReactorClock
-from tests.test_utils import SMALL_PNG
+from tests.test_utils import SMALL_PNG, SMALL_PNG_SHA256
 from tests.unittest import override_config
 
 try:
@@ -133,8 +134,9 @@ class MediaDomainBlockingTests(unittest.HomeserverTestCase):
         # from a regular 404.
         file_id = "abcdefg12345"
         file_info = FileInfo(server_name=self.remote_server_name, file_id=file_id)
-
-        media_storage = hs.get_media_repository().media_storage
+        media_repo = hs.get_media_repository()
+        assert isinstance(media_repo, MediaRepository)
+        media_storage = media_repo.media_storage
 
         ctx = media_storage.store_into_file(file_info)
         (f, fname) = self.get_success(ctx.__aenter__())
@@ -273,6 +275,7 @@ class URLPreviewTests(unittest.HomeserverTestCase):
 
     def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
         self.media_repo = hs.get_media_repository()
+        assert isinstance(self.media_repo, MediaRepository)
         assert self.media_repo.url_previewer is not None
         self.url_previewer = self.media_repo.url_previewer
 
@@ -1405,6 +1408,7 @@ class URLPreviewTests(unittest.HomeserverTestCase):
         """Test that files are not stored in or fetched from storage providers."""
         host, media_id = self._download_image()
 
+        assert isinstance(self.media_repo, MediaRepository)
         rel_file_path = self.media_repo.filepaths.url_cache_filepath_rel(media_id)
         media_store_path = os.path.join(self.media_store_path, rel_file_path)
         storage_provider_path = os.path.join(self.storage_path, rel_file_path)
@@ -1447,6 +1451,7 @@ class URLPreviewTests(unittest.HomeserverTestCase):
         """Test that thumbnails are not stored in or fetched from storage providers."""
         host, media_id = self._download_image()
 
+        assert isinstance(self.media_repo, MediaRepository)
         rel_thumbnail_path = (
             self.media_repo.filepaths.url_cache_thumbnail_directory_rel(media_id)
         )
@@ -1475,6 +1480,7 @@ class URLPreviewTests(unittest.HomeserverTestCase):
         self.assertEqual(channel.code, 200)
 
         # Remove the original, otherwise thumbnails will regenerate
+        assert isinstance(self.media_repo, MediaRepository)
         rel_file_path = self.media_repo.filepaths.url_cache_filepath_rel(media_id)
         media_store_path = os.path.join(self.media_store_path, rel_file_path)
         os.remove(media_store_path)
@@ -1500,6 +1506,7 @@ class URLPreviewTests(unittest.HomeserverTestCase):
         """Test that URL cache files and thumbnails are cleaned up properly on expiry."""
         _host, media_id = self._download_image()
 
+        assert isinstance(self.media_repo, MediaRepository)
         file_path = self.media_repo.filepaths.url_cache_filepath(media_id)
         file_dirs = self.media_repo.filepaths.url_cache_filepath_dirs_to_delete(
             media_id
@@ -2404,6 +2411,7 @@ class DownloadAndThumbnailTestCase(unittest.HomeserverTestCase):
         assert info is not None
         file_id = info.filesystem_id
 
+        assert isinstance(self.media_repo, MediaRepository)
         thumbnail_dir = self.media_repo.filepaths.remote_media_thumbnail_dir(
             self.remote, file_id
         )
@@ -2506,6 +2514,7 @@ class DownloadAndThumbnailTestCase(unittest.HomeserverTestCase):
 
         content_type = self.test_image.content_type.decode()
         media_repo = self.hs.get_media_repository()
+        assert isinstance(media_repo, MediaRepository)
         thumbnail_provider = ThumbnailProvider(
             self.hs, media_repo, media_repo.media_storage
         )
@@ -2646,7 +2655,9 @@ class AuthenticatedMediaTestCase(unittest.HomeserverTestCase):
         file_id = "abcdefg12345"
         file_info = FileInfo(server_name="lonelyIsland", file_id=file_id)
 
-        media_storage = self.hs.get_media_repository().media_storage
+        media_repo = self.hs.get_media_repository()
+        assert isinstance(media_repo, MediaRepository)
+        media_storage = media_repo.media_storage
 
         ctx = media_storage.store_into_file(file_info)
         (f, fname) = self.get_success(ctx.__aenter__())
@@ -2779,7 +2790,9 @@ class AuthenticatedMediaTestCase(unittest.HomeserverTestCase):
         file_id = "abcdefg12345"
         file_info = FileInfo(server_name="lonelyIsland", file_id=file_id)
 
-        media_storage = self.hs.get_media_repository().media_storage
+        media_repo = self.hs.get_media_repository()
+        assert isinstance(media_repo, MediaRepository)
+        media_storage = media_repo.media_storage
 
         ctx = media_storage.store_into_file(file_info)
         (f, fname) = self.get_success(ctx.__aenter__())
@@ -3191,7 +3204,7 @@ class RestrictedResourceUploadTestCase(unittest.HomeserverTestCase):
         assert channel.code == 403, channel.json_body
 
 
-class CopyRestrictedResource(unittest.HomeserverTestCase):
+class CopyRestrictedResourceTestCase(unittest.HomeserverTestCase):
     """
     Tests copy API when `msc3911_enabled` is configured to be True.
     """
@@ -3224,6 +3237,24 @@ class CopyRestrictedResource(unittest.HomeserverTestCase):
         resources = super().create_resource_dict()
         resources["/_matrix/media"] = self.hs.get_media_repository_resource()
         return resources
+
+    def fetch_media(
+        self,
+        mxc_uri: MXCUri,
+        access_token: Optional[str] = None,
+        expected_code: int = 200,
+    ) -> FakeChannel:
+        """
+        Test retrieving the media. We do not care about the content of the media, just
+        that the response is correct
+        """
+        channel = self.make_request(
+            "GET",
+            f"/_matrix/client/v1/media/download/{mxc_uri.server_name}/{mxc_uri.media_id}",
+            access_token=access_token,
+        )
+        assert channel.code == expected_code, channel.code
+        return channel
 
     def test_copy_local_restricted_resource(self) -> None:
         """
@@ -3310,6 +3341,24 @@ class CopyRestrictedResource(unittest.HomeserverTestCase):
 
         # Check if media is unattached to any event or user profile yet.
         assert copied_media.attachments is None
+
+        original_media_download = self.fetch_media(
+            MXCUri.from_str(f"mxc://{self.hs.hostname}/{media_id}"), self.user_tok
+        )
+        # This is a hex encoded byte stream of the raw file
+        old_media_payload = original_media_download.result.get("body")
+        assert old_media_payload is not None, old_media_payload
+
+        new_media_download = self.fetch_media(
+            MXCUri.from_str(f"mxc://{self.hs.hostname}/{new_media_id}"),
+            self.other_user_tok,
+        )
+        # Again, a hex encoded byte stream of the raw file
+        new_media_payload = new_media_download.result.get("body")
+        assert new_media_payload is not None
+
+        # If they match, this was a successful copy
+        assert old_media_payload == new_media_payload
 
     def test_copy_local_restricted_resource_fails_when_requester_does_not_have_access(
         self,
@@ -3414,25 +3463,27 @@ class CopyRestrictedResource(unittest.HomeserverTestCase):
         """
         # create remote media
         remote_server = "remoteserver.com"
-        remote_file_id = "remote1"
+        media_id = "remotemedia"
+        remote_file_id = media_id
         file_info = FileInfo(server_name=remote_server, file_id=remote_file_id)
 
-        media_storage = self.hs.get_media_repository().media_storage
+        media_repo = self.hs.get_media_repository()
+        assert isinstance(media_repo, MediaRepository)
+        media_storage = media_repo.media_storage
         ctx = media_storage.store_into_file(file_info)
         (f, _) = self.get_success(ctx.__aenter__())
         f.write(SMALL_PNG)
         self.get_success(ctx.__aexit__(None, None, None))
-        media_id = "remotemedia"
         self.get_success(
             self.hs.get_datastores().main.store_cached_remote_media(
                 origin=remote_server,
                 media_id=media_id,
                 media_type="image/png",
-                media_length=1,
+                media_length=67,
                 time_now_ms=self.clock.time_msec(),
                 upload_name="test.png",
                 filesystem_id=remote_file_id,
-                sha256=remote_file_id,
+                sha256=SMALL_PNG_SHA256,
                 restricted=True,
             )
         )
@@ -3486,6 +3537,24 @@ class CopyRestrictedResource(unittest.HomeserverTestCase):
         # Check if copied media is unattached to any event or user profile yet.
         assert copied_media.attachments is None
 
+        original_media_download = self.fetch_media(
+            MXCUri.from_str(f"mxc://{remote_server}/{media_id}"), self.user_tok
+        )
+        # This is a hex encoded byte stream of the raw file
+        old_media_payload = original_media_download.result.get("body")
+        assert old_media_payload is not None, old_media_payload
+
+        new_media_download = self.fetch_media(
+            MXCUri.from_str(f"mxc://{self.hs.hostname}/{new_media_id}"),
+            self.other_user_tok,
+        )
+        # Again, a hex encoded byte stream of the raw file
+        new_media_payload = new_media_download.result.get("body")
+        assert new_media_payload is not None
+
+        # If they match, this was a successful copy
+        assert old_media_payload == new_media_payload
+
     @override_config(
         {
             "limit_profile_requests_to_users_who_share_rooms": True,
@@ -3499,7 +3568,9 @@ class CopyRestrictedResource(unittest.HomeserverTestCase):
         remote_file_id = "remote1"
         file_info = FileInfo(server_name=remote_server, file_id=remote_file_id)
 
-        media_storage = self.hs.get_media_repository().media_storage
+        media_repo = self.hs.get_media_repository()
+        assert isinstance(media_repo, MediaRepository)
+        media_storage = media_repo.media_storage
         ctx = media_storage.store_into_file(file_info)
         (f, _) = self.get_success(ctx.__aenter__())
         f.write(SMALL_PNG)

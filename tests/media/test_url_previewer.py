@@ -22,6 +22,7 @@ import os
 
 from twisted.test.proto_helpers import MemoryReactor
 
+from synapse.media.media_repository import MediaRepository
 from synapse.server import HomeServer
 from synapse.util import Clock
 
@@ -69,6 +70,7 @@ class URLPreviewTests(unittest.HomeserverTestCase):
 
     def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
         media_repo = hs.get_media_repository()
+        assert isinstance(media_repo, MediaRepository)
         assert media_repo.url_previewer is not None
         self.url_previewer = media_repo.url_previewer
 

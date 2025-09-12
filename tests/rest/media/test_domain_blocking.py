@@ -24,6 +24,7 @@ from twisted.test.proto_helpers import MemoryReactor
 from twisted.web.resource import Resource
 
 from synapse.media._base import FileInfo
+from synapse.media.media_repository import MediaRepository
 from synapse.server import HomeServer
 from synapse.util import Clock
 
@@ -44,8 +45,9 @@ class MediaDomainBlockingTests(unittest.HomeserverTestCase):
         # from a regular 404.
         file_id = "abcdefg12345"
         file_info = FileInfo(server_name=self.remote_server_name, file_id=file_id)
-
-        media_storage = hs.get_media_repository().media_storage
+        media_repo = hs.get_media_repository()
+        assert isinstance(media_repo, MediaRepository)
+        media_storage = media_repo.media_storage
 
         ctx = media_storage.store_into_file(file_info)
         (f, fname) = self.get_success(ctx.__aenter__())
