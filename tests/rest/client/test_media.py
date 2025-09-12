@@ -4646,6 +4646,9 @@ class RestrictedMediaBackwardCompatTestCase(unittest.HomeserverTestCase):
 
     def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
         self.repo = hs.get_media_repository()
+        assert isinstance(self.repo, MediaRepository)
+        self.media_storage = self.repo.media_storage
+
         self.client = hs.get_federation_http_client()
         self.store = hs.get_datastores().main
         self.user = self.register_user("user", "pass")
@@ -4721,9 +4724,7 @@ class RestrictedMediaBackwardCompatTestCase(unittest.HomeserverTestCase):
         file_id = media_id
         file_info = FileInfo(None, file_id=file_id)
 
-        media_storage = self.hs.get_media_repository().media_storage
-
-        ctx = media_storage.store_into_file(file_info)
+        ctx = self.media_storage.store_into_file(file_info)
         (f, fname) = self.get_success(ctx.__aenter__())
         f.write(SMALL_PNG)
         self.get_success(ctx.__aexit__(None, None, None))
@@ -4784,9 +4785,7 @@ class RestrictedMediaBackwardCompatTestCase(unittest.HomeserverTestCase):
         file_id = media_id
         file_info = FileInfo(server_name=self.other_server_name, file_id=file_id)
 
-        media_storage = self.hs.get_media_repository().media_storage
-
-        ctx = media_storage.store_into_file(file_info)
+        ctx = self.media_storage.store_into_file(file_info)
         (f, fname) = self.get_success(ctx.__aenter__())
         f.write(SMALL_PNG)
         self.get_success(ctx.__aexit__(None, None, None))
