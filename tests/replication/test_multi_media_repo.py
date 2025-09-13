@@ -18,18 +18,27 @@
 # [This file includes modifications made by New Vector Limited]
 #
 #
+import io
 import logging
 import os
-from typing import Any, Optional, Tuple
+import time
+from http import HTTPStatus
+from typing import Any, Dict, Optional, Tuple
+
+from matrix_common.types.mxc_uri import MXCUri
 
 from twisted.internet.protocol import Factory
 from twisted.test.proto_helpers import MemoryReactor
 from twisted.web.http import HTTPChannel
 from twisted.web.server import Request
 
+from synapse.api.constants import EventTypes, HistoryVisibility
+from synapse.media._base import FileInfo
+from synapse.media.media_repository import MediaRepository
 from synapse.rest import admin
-from synapse.rest.client import login, media
+from synapse.rest.client import login, media, room
 from synapse.server import HomeServer
+from synapse.types import UserID, create_requester
 from synapse.util import Clock
 
 from tests.http import (
@@ -39,7 +48,7 @@ from tests.http import (
 )
 from tests.replication._base import BaseMultiWorkerStreamTestCase
 from tests.server import FakeChannel, FakeTransport, make_request
-from tests.test_utils import SMALL_PNG
+from tests.test_utils import SMALL_PNG, SMALL_PNG_SHA256
 from tests.unittest import override_config
 
 logger = logging.getLogger(__name__)
@@ -246,16 +255,16 @@ class MediaRepoShardTestCase(BaseMultiWorkerStreamTestCase):
 
     def _count_remote_media(self) -> int:
         """Count the number of files in our remote media directory."""
-        path = os.path.join(
-            self.hs.get_media_repository().primary_base_path, "remote_content"
-        )
+        media_repo = self.hs.get_media_repository()
+        assert isinstance(media_repo, MediaRepository)
+        path = os.path.join(media_repo.primary_base_path, "remote_content")
         return sum(len(files) for _, _, files in os.walk(path))
 
     def _count_remote_thumbnails(self) -> int:
         """Count the number of files in our remote thumbnails directory."""
-        path = os.path.join(
-            self.hs.get_media_repository().primary_base_path, "remote_thumbnail"
-        )
+        media_repo = self.hs.get_media_repository()
+        assert isinstance(media_repo, MediaRepository)
+        path = os.path.join(media_repo.primary_base_path, "remote_thumbnail")
         return sum(len(files) for _, _, files in os.walk(path))
 
 
@@ -478,17 +487,486 @@ class AuthenticatedMediaRepoShardTestCase(BaseMultiWorkerStreamTestCase):
 
     def _count_remote_media(self) -> int:
         """Count the number of files in our remote media directory."""
-        path = os.path.join(
-            self.hs.get_media_repository().primary_base_path, "remote_content"
-        )
+        media_repo = self.hs.get_media_repository()
+        assert isinstance(media_repo, MediaRepository)
+        path = os.path.join(media_repo.primary_base_path, "remote_content")
         return sum(len(files) for _, _, files in os.walk(path))
 
     def _count_remote_thumbnails(self) -> int:
         """Count the number of files in our remote thumbnails directory."""
-        path = os.path.join(
-            self.hs.get_media_repository().primary_base_path, "remote_thumbnail"
-        )
+        media_repo = self.hs.get_media_repository()
+        assert isinstance(media_repo, MediaRepository)
+        path = os.path.join(media_repo.primary_base_path, "remote_thumbnail")
         return sum(len(files) for _, _, files in os.walk(path))
+
+
+class CopyRestrictedResourceReplicationTestCase(BaseMultiWorkerStreamTestCase):
+    """
+    Tests copy API when `msc3911_enabled` is configured to be True.
+    """
+
+    servlets = [
+        # media.register_servlets,
+        login.register_servlets,
+        admin.register_servlets,
+        room.register_servlets,
+    ]
+
+    # def make_homeserver(self, reactor: MemoryReactor, clock: Clock) -> HomeServer:
+    #     return self.setup_test_homeserver(config=config)
+
+    def default_config(self) -> Dict[str, Any]:
+        config = super().default_config()
+        config.update(
+            {
+                "experimental_features": {"msc3911_enabled": True},
+                "media_repo_instances": ["media_worker_1"],
+            }
+        )
+        config["instance_map"] = {
+            "main": {"host": "testserv", "port": 8765},
+            "media_worker_1": {"host": "testserv", "port": 1001},
+        }
+
+        return config
+
+    def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
+        # self.media_repo = hs.get_media_repository()
+        self.profile_handler = self.hs.get_profile_handler()
+        self.user = self.register_user("user", "testpass")
+        self.user_tok = self.login("user", "testpass")
+        self.other_user = self.register_user("other", "testpass")
+        self.other_user_tok = self.login("other", "testpass")
+
+    def make_worker_hs(
+        self, worker_app: str, extra_config: Optional[dict] = None, **kwargs: Any
+    ) -> HomeServer:
+        worker_hs = super().make_worker_hs(worker_app, extra_config, **kwargs)
+        # Force the media paths onto the replication resource.
+        worker_hs.get_media_repository_resource().register_servlets(
+            self._hs_to_site[worker_hs].resource, worker_hs
+        )
+        media.register_servlets(worker_hs, self._hs_to_site[worker_hs].resource)
+        return worker_hs
+
+    def fetch_media(
+        self,
+        hs: HomeServer,
+        mxc_uri: MXCUri,
+        access_token: Optional[str] = None,
+        expected_code: int = 200,
+    ) -> FakeChannel:
+        """
+        Test retrieving the media. We do not care about the content of the media, just
+        that the response is correct
+        """
+        channel = make_request(
+            self.reactor,
+            self._hs_to_site[hs],
+            "GET",
+            f"/_matrix/client/v1/media/download/{mxc_uri.server_name}/{mxc_uri.media_id}",
+            access_token=access_token,
+        )
+        assert channel.code == expected_code, channel.code
+        return channel
+
+    def test_copy_local_restricted_resource(self) -> None:
+        """
+        Tests that the new copy endpoint creates a new mxc uri for restricted resource.
+        """
+        media_worker = self.make_worker_hs(
+            "synapse.app.generic_worker", {"worker_name": "media_worker_1"}
+        )
+        media_repo = media_worker.get_media_repository()
+
+        # Create a private room
+        room_id = self.helper.create_room_as(
+            self.user,
+            is_public=False,
+            tok=self.user_tok,
+            extra_content={
+                "initial_state": [
+                    {
+                        "type": EventTypes.RoomHistoryVisibility,
+                        "state_key": "",
+                        "content": {"history_visibility": HistoryVisibility.JOINED},
+                    },
+                ]
+            },
+        )
+        # Invite the other user
+        self.helper.invite(room_id, self.user, self.other_user, tok=self.user_tok)
+        self.helper.join(room_id, self.other_user, tok=self.other_user_tok)
+
+        # The media is created with user_tok
+        content = io.BytesIO(SMALL_PNG)
+        content_uri = self.get_success(
+            media_repo.create_or_update_content(
+                "image/png",
+                "test_png_upload",
+                content,
+                67,
+                UserID.from_string(self.user),
+                restricted=True,
+            )
+        )
+        media_id = content_uri.media_id
+
+        # User sends a message with media
+        channel = self.make_request(
+            "PUT",
+            f"/rooms/{room_id}/send/m.room.message/{str(time.time())}?org.matrix.msc3911.attach_media={str(content_uri)}",
+            content={"msgtype": "m.text", "body": "Hi, this is a message"},
+            access_token=self.user_tok,
+        )
+        self.assertEqual(channel.code, HTTPStatus.OK, channel.json_body)
+        assert "event_id" in channel.json_body
+        event_id = channel.json_body["event_id"]
+        restrictions = self.get_success(
+            self.hs.get_datastores().main.get_media_restrictions(
+                content_uri.server_name, content_uri.media_id
+            )
+        )
+        assert restrictions is not None, str(restrictions)
+        assert restrictions.event_id == event_id
+
+        # The other_user copies the media from local server
+        channel = make_request(
+            self.reactor,
+            self._hs_to_site[media_worker],
+            "POST",
+            f"/_matrix/client/unstable/org.matrix.msc3911/media/copy/{self.hs.hostname}/{media_id}",
+            access_token=self.other_user_tok,
+        )
+        self.assertEqual(channel.code, 200)
+        self.assertIn("content_uri", channel.json_body)
+        new_media_id = channel.json_body["content_uri"].split("/")[-1]
+        assert new_media_id != media_id
+
+        # Check if the original media there.
+        original_media = self.get_success(
+            self.hs.get_datastores().main.get_local_media(media_id)
+        )
+        assert original_media is not None
+        assert original_media.user_id == self.user
+
+        # Check the copied media.
+        copied_media = self.get_success(
+            self.hs.get_datastores().main.get_local_media(new_media_id)
+        )
+        assert copied_media is not None
+        assert copied_media.user_id == self.other_user
+
+        # Check if they are referencing the same image.
+        assert original_media.sha256 == copied_media.sha256
+
+        # Check if media is unattached to any event or user profile yet.
+        assert copied_media.attachments is None
+
+        original_media_download = self.fetch_media(
+            media_worker,
+            MXCUri.from_str(f"mxc://{self.hs.hostname}/{media_id}"),
+            self.user_tok,
+        )
+        # This is a hex encoded byte stream of the raw file
+        old_media_payload = original_media_download.result.get("body")
+        assert old_media_payload is not None, old_media_payload
+
+        new_media_download = self.fetch_media(
+            media_worker,
+            MXCUri.from_str(f"mxc://{self.hs.hostname}/{new_media_id}"),
+            self.other_user_tok,
+        )
+        # Again, a hex encoded byte stream of the raw file
+        new_media_payload = new_media_download.result.get("body")
+        assert new_media_payload is not None
+
+        # If they match, this was a successful copy
+        assert old_media_payload == new_media_payload
+
+    def test_copy_local_restricted_resource_fails_when_requester_does_not_have_access(
+        self,
+    ) -> None:
+        """
+        Tests that the new copy endpoint performs permission checks and it prevents the
+        copy when the requester does not have access to the original media.
+        """
+        media_worker = self.make_worker_hs(
+            "synapse.app.generic_worker", {"worker_name": "media_worker_1"}
+        )
+        media_repo = media_worker.get_media_repository()
+
+        # Create a private room
+        room_id = self.helper.create_room_as(
+            self.user,
+            is_public=False,
+            tok=self.user_tok,
+            extra_content={
+                "initial_state": [
+                    {
+                        "type": EventTypes.RoomHistoryVisibility,
+                        "state_key": "",
+                        "content": {"history_visibility": HistoryVisibility.JOINED},
+                    },
+                ]
+            },
+        )
+
+        # Create the media content
+        content_uri = self.get_success(
+            media_repo.create_or_update_content(
+                "image/png",
+                "test_png_upload",
+                io.BytesIO(SMALL_PNG),
+                67,
+                UserID.from_string(self.user),
+                restricted=True,
+            )
+        )
+        # User sends a message with media
+        channel = self.make_request(
+            "PUT",
+            f"/rooms/{room_id}/send/m.room.message/{str(time.time())}?org.matrix.msc3911.attach_media={str(content_uri)}",
+            content={"msgtype": "m.text", "body": "Hi, this is a message"},
+            access_token=self.user_tok,
+        )
+        self.assertEqual(channel.code, HTTPStatus.OK, channel.json_body)
+        assert "event_id" in channel.json_body
+        event_id = channel.json_body["event_id"]
+        restrictions = self.get_success(
+            self.hs.get_datastores().main.get_media_restrictions(
+                content_uri.server_name, content_uri.media_id
+            )
+        )
+        assert restrictions is not None, str(restrictions)
+        assert restrictions.event_id == event_id
+
+        # Invite the other user
+        self.helper.invite(room_id, self.user, self.other_user, tok=self.user_tok)
+        self.helper.join(room_id, self.other_user, tok=self.other_user_tok)
+
+        # User who does not have access to the media tries to copy it.
+        channel = make_request(
+            self.reactor,
+            self._hs_to_site[media_worker],
+            "POST",
+            f"/_matrix/client/unstable/org.matrix.msc3911/media/copy/{self.hs.hostname}/{content_uri.media_id}",
+            access_token=self.other_user_tok,
+        )
+        self.assertEqual(channel.code, 403)
+
+    @override_config(
+        {
+            "limit_profile_requests_to_users_who_share_rooms": True,
+        }
+    )
+    def test_copy_local_restricted_resource_fails_when_profile_lookup_is_not_allowed(
+        self,
+    ) -> None:
+        media_worker = self.make_worker_hs(
+            "synapse.app.generic_worker", {"worker_name": "media_worker_1"}
+        )
+        media_repo = media_worker.get_media_repository()
+        # User setup a profile
+        content_uri = self.get_success(
+            media_repo.create_or_update_content(
+                "image/png",
+                "test_png_upload",
+                io.BytesIO(SMALL_PNG),
+                67,
+                UserID.from_string(self.user),
+                restricted=True,
+            )
+        )
+        user_id = UserID.from_string(self.user)
+        self.get_success(
+            self.profile_handler.set_avatar_url(
+                user_id, create_requester(user_id), str(content_uri)
+            )
+        )
+        # The users do not share any rooms, and other user tries to copy the profile picture
+        channel = make_request(
+            self.reactor,
+            self._hs_to_site[media_worker],
+            "POST",
+            f"/_matrix/client/unstable/org.matrix.msc3911/media/copy/{self.hs.hostname}/{content_uri.media_id}",
+            access_token=self.other_user_tok,
+        )
+        self.assertEqual(channel.code, 403)
+
+    def test_copy_remote_restricted_resource(self) -> None:
+        """
+        Tests that the new copy endpoint creates a new mxc uri for restricted resource.
+        """
+        media_worker = self.make_worker_hs(
+            "synapse.app.generic_worker", {"worker_name": "media_worker_1"}
+        )
+        media_repo = media_worker.get_media_repository()
+        # create remote media
+        remote_server = "remoteserver.com"
+        media_id = "remotemedia"
+        remote_file_id = media_id
+        file_info = FileInfo(server_name=remote_server, file_id=remote_file_id)
+
+        assert isinstance(media_repo, MediaRepository)
+        media_storage = media_repo.media_storage
+        ctx = media_storage.store_into_file(file_info)
+        (f, _) = self.get_success(ctx.__aenter__())
+        f.write(SMALL_PNG)
+        self.get_success(ctx.__aexit__(None, None, None))
+        self.get_success(
+            # The main store will not have authenticated media enabled, use the media repo
+            media_repo.store.store_cached_remote_media(
+                origin=remote_server,
+                media_id=media_id,
+                media_type="image/png",
+                media_length=67,
+                time_now_ms=self.clock.time_msec(),
+                upload_name="test.png",
+                filesystem_id=remote_file_id,
+                sha256=SMALL_PNG_SHA256,
+                restricted=True,
+            )
+        )
+
+        # Remote media is attached to a user profile
+        remote_user_id = f"@remote-user:{remote_server}"
+        self.get_success(
+            self.hs.get_datastores().main.set_media_restricted_to_user_profile(
+                remote_server, media_id, remote_user_id
+            )
+        )
+        remote_media = self.get_success(
+            self.hs.get_datastores().main.get_cached_remote_media(
+                remote_server, media_id
+            )
+        )
+        assert remote_media is not None
+        assert remote_media.attachments is not None
+        assert str(remote_media.attachments.profile_user_id) == remote_user_id
+
+        # The other_user copies the media from remote server
+        channel = make_request(
+            self.reactor,
+            self._hs_to_site[media_worker],
+            "POST",
+            f"/_matrix/client/unstable/org.matrix.msc3911/media/copy/{remote_server}/{media_id}",
+            access_token=self.other_user_tok,
+        )
+        self.assertEqual(channel.code, 200)
+        self.assertIn("content_uri", channel.json_body)
+        new_media_id = channel.json_body["content_uri"].split("/")[-1]
+        assert new_media_id != media_id
+
+        # Check if the original media there.
+        original_media = self.get_success(
+            self.hs.get_datastores().main.get_cached_remote_media(
+                remote_server, media_id
+            )
+        )
+        assert original_media is not None
+        assert original_media.upload_name == "test.png"
+
+        # Check the copied media.
+        copied_media = self.get_success(
+            self.hs.get_datastores().main.get_local_media(new_media_id)
+        )
+        assert copied_media is not None
+        assert copied_media.user_id == self.other_user
+
+        # Check if they are referencing the same image.
+        assert original_media.sha256 == copied_media.sha256
+
+        # Check if copied media is unattached to any event or user profile yet.
+        assert copied_media.attachments is None
+
+        original_media_download = self.fetch_media(
+            media_worker,
+            MXCUri.from_str(f"mxc://{remote_server}/{media_id}"),
+            self.user_tok,
+        )
+        # This is a hex encoded byte stream of the raw file
+        old_media_payload = original_media_download.result.get("body")
+        assert old_media_payload is not None, old_media_payload
+
+        new_media_download = self.fetch_media(
+            media_worker,
+            MXCUri.from_str(f"mxc://{self.hs.hostname}/{new_media_id}"),
+            self.other_user_tok,
+        )
+        # Again, a hex encoded byte stream of the raw file
+        new_media_payload = new_media_download.result.get("body")
+        assert new_media_payload is not None
+
+        # If they match, this was a successful copy
+        assert old_media_payload == new_media_payload
+
+    @override_config(
+        {
+            "limit_profile_requests_to_users_who_share_rooms": True,
+        }
+    )
+    def test_copy_remote_restricted_resource_fails_when_requester_does_not_have_access(
+        self,
+    ) -> None:
+        media_worker = self.make_worker_hs(
+            "synapse.app.generic_worker", {"worker_name": "media_worker_1"}
+        )
+        media_repo = media_worker.get_media_repository()
+
+        # Create remote media
+        remote_server = "remoteserver.com"
+        remote_file_id = "remote1"
+        file_info = FileInfo(server_name=remote_server, file_id=remote_file_id)
+
+        assert isinstance(media_repo, MediaRepository)
+        media_storage = media_repo.media_storage
+        ctx = media_storage.store_into_file(file_info)
+        (f, _) = self.get_success(ctx.__aenter__())
+        f.write(SMALL_PNG)
+        self.get_success(ctx.__aexit__(None, None, None))
+        media_id = "remotemedia"
+        self.get_success(
+            # The main data store will not have authenticated media enabled, use the media repo
+            media_repo.store.store_cached_remote_media(
+                origin=remote_server,
+                media_id=media_id,
+                media_type="image/png",
+                media_length=1,
+                time_now_ms=self.clock.time_msec(),
+                upload_name="test.png",
+                filesystem_id=remote_file_id,
+                sha256=remote_file_id,
+                restricted=True,
+            )
+        )
+
+        # Media is attached to a user profile
+        remote_user_id = f"@remote-user:{remote_server}"
+        self.get_success(
+            self.hs.get_datastores().main.set_media_restricted_to_user_profile(
+                remote_server, media_id, remote_user_id
+            )
+        )
+        remote_media = self.get_success(
+            self.hs.get_datastores().main.get_cached_remote_media(
+                remote_server, media_id
+            )
+        )
+        assert remote_media is not None
+        assert remote_media.attachments is not None
+        assert str(remote_media.attachments.profile_user_id) == remote_user_id
+
+        # The other user tries to copy that media from remote server, but fails because
+        # user does not have the access to the profile_user_id
+        channel = make_request(
+            self.reactor,
+            self._hs_to_site[media_worker],
+            "POST",
+            f"/_matrix/client/unstable/org.matrix.msc3911/media/copy/{remote_server}/{media_id}",
+            access_token=self.other_user_tok,
+        )
+        self.assertEqual(channel.code, 403)
 
 
 def _log_request(request: Request) -> None:

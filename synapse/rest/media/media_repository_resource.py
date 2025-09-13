@@ -23,6 +23,7 @@ from typing import TYPE_CHECKING
 
 from synapse.config._base import ConfigError
 from synapse.http.server import HttpServer, JsonResource
+from synapse.media.media_repository import MediaRepository
 
 from .config_resource import MediaConfigResource
 from .create_resource import CreateResource
@@ -96,6 +97,7 @@ class MediaRepositoryResource(JsonResource):
     @staticmethod
     def register_servlets(http_server: HttpServer, hs: "HomeServer") -> None:
         media_repo = hs.get_media_repository()
+        assert isinstance(media_repo, MediaRepository)
 
         # Note that many of these should not exist as v1 endpoints, but empirically
         # a lot of traffic still goes to them.

@@ -479,6 +479,16 @@ class WorkerConfig(Config):
                     self.instance_map[instance]
                 )
 
+        self.workers_doing_media_duty = config.get("media_repo_instances", [])
+        # I would rather do this bit below, but the behavior of Synapse is rather lax.
+        # Documented what I mean in config/repository.py
+        # self.workers_doing_media_duty = self._worker_names_performing_this_duty(
+        #     config,
+        #     "enable_media_repo",
+        #     "synapse.app.media_repository",
+        #     "media_repo_instances",
+        # )
+
     def _should_this_worker_perform_duty(
         self,
         config: Dict[str, Any],

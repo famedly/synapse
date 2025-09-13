@@ -47,6 +47,7 @@ from synapse.http.types import QueryParams
 from synapse.logging.context import make_deferred_yieldable
 from synapse.media._base import FileInfo, ThumbnailInfo
 from synapse.media.filepath import MediaFilePaths
+from synapse.media.media_repository import MediaRepository
 from synapse.media.media_storage import MediaStorage, ReadableFileWrapper
 from synapse.media.storage_provider import FileStorageProviderBackend
 from synapse.media.thumbnailer import ThumbnailProvider
@@ -629,7 +630,7 @@ class MediaRepoTests(unittest.HomeserverTestCase):
         info = self.get_success(self.store.get_cached_remote_media(origin, media_id))
         assert info is not None
         file_id = info.filesystem_id
-
+        assert isinstance(self.media_repo, MediaRepository)
         thumbnail_dir = self.media_repo.filepaths.remote_media_thumbnail_dir(
             origin, file_id
         )
@@ -730,6 +731,7 @@ class MediaRepoTests(unittest.HomeserverTestCase):
 
         content_type = self.test_image.content_type.decode()
         media_repo = self.hs.get_media_repository()
+        assert isinstance(media_repo, MediaRepository)
         thumbnail_provider = ThumbnailProvider(
             self.hs, media_repo, media_repo.media_storage
         )

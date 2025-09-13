@@ -38,7 +38,10 @@ logger = logging.getLogger(__name__)
 
 class CreateResource(RestServlet):
     def __init__(
-        self, hs: "HomeServer", media_repo: "MediaRepository", restricted: bool = False
+        self,
+        hs: "HomeServer",
+        media_repo: "MediaRepository",
+        restricted: bool = False,
     ):
         super().__init__()
 
