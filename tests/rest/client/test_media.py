@@ -4594,3 +4594,524 @@ class FederationClientDownloadTestCase(unittest.HomeserverTestCase):
             self.store.get_media_restrictions(self.remote_server, media_id)
         )
         assert restrictions is None
+
+
+configs_2 = [
+    {"enable_restricted_media": True},
+    {"enable_restricted_media": False},
+]
+
+
+@parameterized_class(configs_2)
+class RestrictedMediaBackwardCompatTestCase(unittest.HomeserverTestCase):
+    """
+    Test that restricted media can be downloaded if MSC3911 is enabled/disabled
+    """
+
+    enable_restricted_media: bool
+
+    other_server_name = "remote-server.com"
+    servlets = [
+        media.register_servlets,
+        login.register_servlets,
+        admin.register_servlets,
+        room.register_servlets,
+    ]
+
+    def make_homeserver(self, reactor: MemoryReactor, clock: Clock) -> HomeServer:
+        config = self.default_config()
+
+        self.clock = clock
+        self.storage_path = self.mktemp()
+        self.media_store_path = self.mktemp()
+        os.mkdir(self.storage_path)
+        os.mkdir(self.media_store_path)
+        config["media_store_path"] = self.media_store_path
+        config["enable_authenticated_media"] = True
+        config["experimental_features"] = {
+            "msc3911_enabled": self.enable_restricted_media
+        }
+
+        provider_config = {
+            "module": "synapse.media.storage_provider.FileStorageProviderBackend",
+            "store_local": True,
+            "store_synchronous": False,
+            "store_remote": True,
+            "config": {"directory": self.storage_path},
+        }
+
+        config["media_storage_providers"] = [provider_config]
+
+        return self.setup_test_homeserver(config=config)
+
+    def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
+        self.repo = hs.get_media_repository()
+        self.client = hs.get_federation_http_client()
+        self.store = hs.get_datastores().main
+        self.user = self.register_user("user", "pass")
+        self.tok = self.login("user", "pass")
+
+        self.other_user = self.register_user("other_user", "password")
+        self.other_user_tok = self.login("other_user", "password")
+
+        self.room_id = self.helper.create_room_as(self.user, True, tok=self.tok)
+        assert self.room_id is not None
+        self.helper.join(self.room_id, self.other_user, tok=self.other_user_tok)
+
+    def create_resource_dict(self) -> Dict[str, Resource]:
+        resources = super().create_resource_dict()
+        resources["/_matrix/media"] = self.hs.get_media_repository_resource()
+        return resources
+
+    def upload_restricted_media(self) -> str:
+        """
+        Upload media to the MSC3911 /media/upload endpoint. This will ensure the
+        restricted flag is set. Used for the authenticated ETag test
+        """
+        # upload some local media with restrictions on
+        channel = self.make_request(
+            "POST",
+            "_matrix/client/unstable/org.matrix.msc3911/media/upload?filename=test_png_upload",
+            SMALL_PNG,
+            self.tok,
+            shorthand=False,
+            content_type=b"image/png",
+            custom_headers=[("Content-Length", str(67))],
+        )
+        self.assertEqual(channel.code, 200, channel.json_body)
+
+        res = channel.json_body.get("content_uri")
+        assert res is not None
+        _, restricted_uri = res.rsplit("/", maxsplit=1)
+
+        return restricted_uri
+
+    def upload_unrestricted_media(self) -> str:
+        """
+        Upload media to the existing /_matrix/media/.../upload endpoint. This will not
+        set the restricted flag. Used for the authenticated ETag test
+        """
+        # upload another using the old endpoint so it is not restricted
+        channel = self.make_request(
+            "POST",
+            "_matrix/media/v3/upload?filename=test_png_upload",
+            SMALL_PNG,
+            self.tok,
+            shorthand=False,
+            content_type=b"image/png",
+            custom_headers=[("Content-Length", str(67))],
+        )
+        self.assertEqual(channel.code, 200, channel.json_body)
+        res = channel.json_body.get("content_uri")
+        assert res is not None
+        _, unrestricted_uri = res.rsplit("/", maxsplit=1)
+
+        return unrestricted_uri
+
+    def inject_local_media_and_send_event(self, authed: bool, restricted: bool) -> str:
+        """
+        Inject the necessary database rows to ensure availability of a piece of local
+        media (optionally with restriction and authentication)
+
+        Then send a message event that attaches this media to an event in the room. This
+        should set the restriction correctly
+        """
+
+        media_id = random_string(24)
+        file_id = media_id
+        file_info = FileInfo(None, file_id=file_id)
+
+        media_storage = self.hs.get_media_repository().media_storage
+
+        ctx = media_storage.store_into_file(file_info)
+        (f, fname) = self.get_success(ctx.__aenter__())
+        f.write(SMALL_PNG)
+        self.get_success(ctx.__aexit__(None, None, None))
+
+        self.get_success(
+            self.store.db_pool.simple_insert(
+                "local_media_repository",
+                {
+                    "media_id": media_id,
+                    "media_type": "image/png",
+                    "created_ts": self.clock.time_msec(),
+                    "upload_name": "test_local",
+                    "media_length": 67,
+                    "user_id": self.other_user,
+                    "url_cache": None,
+                    "authenticated": authed,
+                    "restricted": restricted,
+                },
+                desc="store_local_media",
+            )
+        )
+
+        # ensure we have thumbnails for the non-dynamic code path
+        self.get_success(
+            self.repo._generate_thumbnails(None, media_id, file_id, "image/png")
+        )
+
+        mxc_uri_str = f"mxc://test/{media_id}"
+        maybe_attach_media = None
+        if restricted:
+            maybe_attach_media = mxc_uri_str
+        image = {
+            "body": "test_png_upload",
+            "info": {"h": 1, "mimetype": "image/png", "size": 67, "w": 1},
+            "msgtype": "m.image",
+            "url": mxc_uri_str,
+        }
+
+        self.helper.send_event(
+            self.room_id,
+            EventTypes.Message,
+            content=image,
+            tok=self.other_user_tok,
+            attach_media_mxc=maybe_attach_media,
+        )
+
+        # We know it's the local server, so the server name is "test"
+        return media_id
+
+    def inject_remote_media(self, restricted: bool) -> str:
+        """
+        Inject the necessary database rows to ensure availability of a piece of remote
+        media (optionally with restriction). Abuse the profile_user_id field instead of
+        simulating a room
+        """
+
+        media_id = random_string(24)
+        file_id = media_id
+        file_info = FileInfo(server_name=self.other_server_name, file_id=file_id)
+
+        media_storage = self.hs.get_media_repository().media_storage
+
+        ctx = media_storage.store_into_file(file_info)
+        (f, fname) = self.get_success(ctx.__aenter__())
+        f.write(SMALL_PNG)
+        self.get_success(ctx.__aexit__(None, None, None))
+
+        # we write the authenticated status when storing media, so this should pick up
+        # config and authenticate the media
+        self.get_success(
+            self.store.store_cached_remote_media(
+                origin=self.other_server_name,
+                media_id=media_id,
+                media_type="image/png",
+                media_length=1,
+                time_now_ms=self.clock.time_msec(),
+                upload_name="remote_test.png",
+                filesystem_id=file_id,
+                sha256=file_id,
+                restricted=restricted,
+            )
+        )
+        # add restrictions if appropriate, separate database call, use arg
+        if restricted:
+            # Since we are not going to generate a remote room and therefore have an
+            # event_id, just use the profile avatar(never mind that the user doesn't
+            # exist, the server doesn't care)
+            self.get_success(
+                self.store.set_media_restricted_to_user_profile(
+                    self.other_server_name,
+                    media_id,
+                    f"@wilson:{self.other_server_name}",
+                )
+            )
+
+        # ensure we have thumbnails for the non-dynamic code path
+        self.get_success(
+            self.repo._generate_thumbnails(
+                self.other_server_name, media_id, file_id, "image/png"
+            )
+        )
+        # The server is always going to be `self.other_server_name` so just need the media_id
+        return media_id
+
+    def test_authed_restricted_local_media(self) -> None:
+        """
+        Test that authenticated and restricted media is not available over the old
+        unauthenticated endpoints
+        """
+
+        restricted_media_id = self.inject_local_media_and_send_event(
+            authed=True, restricted=True
+        )
+        # request media over authenticated endpoint, should be found
+        channel1 = self.make_request(
+            "GET",
+            f"_matrix/client/v1/media/download/test/{restricted_media_id}",
+            access_token=self.tok,
+            shorthand=False,
+        )
+        self.assertEqual(channel1.code, 200, channel1)
+
+        # request same media over unauthenticated media, should raise 404 not found
+        channel2 = self.make_request(
+            "GET",
+            f"_matrix/media/v3/download/test/{restricted_media_id}",
+            shorthand=False,
+        )
+        self.assertEqual(channel2.code, 404, channel2)
+
+        # check thumbnails as well
+        params = "?width=32&height=32&method=crop"
+        channel3 = self.make_request(
+            "GET",
+            f"/_matrix/client/v1/media/thumbnail/test/{restricted_media_id}{params}",
+            shorthand=False,
+            access_token=self.tok,
+        )
+        self.assertEqual(channel3.code, 200, channel3)
+
+        params = "?width=32&height=32&method=crop"
+        channel4 = self.make_request(
+            "GET",
+            f"/_matrix/media/r0/thumbnail/test/{restricted_media_id}{params}",
+            shorthand=False,
+            access_token=self.tok,
+        )
+        self.assertEqual(channel4.code, 404, channel4)
+
+    def test_unauthed_restricted_local_media(self) -> None:
+        """
+        Test that unauthenticated but(somehow) restricted media is available over the old
+        unauthenticated endpoints
+        """
+        # First test round, restricted media
+        restricted_media_id = self.inject_local_media_and_send_event(
+            authed=False, restricted=True
+        )
+        # request media over authenticated endpoint, should be found
+        channel1 = self.make_request(
+            "GET",
+            f"_matrix/client/v1/media/download/test/{restricted_media_id}",
+            access_token=self.tok,
+            shorthand=False,
+        )
+        self.assertEqual(channel1.code, 200, channel1)
+
+        # request same media over unauthenticated media, should be found
+        channel2 = self.make_request(
+            "GET",
+            f"_matrix/media/v3/download/test/{restricted_media_id}",
+            shorthand=False,
+        )
+        self.assertEqual(channel2.code, 200, channel2)
+
+        # check thumbnails as well
+        params = "?width=32&height=32&method=crop"
+        channel3 = self.make_request(
+            "GET",
+            f"/_matrix/client/v1/media/thumbnail/test/{restricted_media_id}{params}",
+            shorthand=False,
+            access_token=self.tok,
+        )
+        self.assertEqual(channel3.code, 200, channel3)
+
+        params = "?width=32&height=32&method=crop"
+        channel4 = self.make_request(
+            "GET",
+            f"/_matrix/media/r0/thumbnail/test/{restricted_media_id}{params}",
+            shorthand=False,
+            access_token=self.tok,
+        )
+        self.assertEqual(channel4.code, 200, channel4)
+
+    def test_authed_unrestricted_local_media(self) -> None:
+        """
+        Test that authenticated and restricted media is not available over the old
+        unauthenticated endpoints
+        """
+
+        unrestricted_media_id = self.inject_local_media_and_send_event(
+            authed=True, restricted=False
+        )
+        # request media over authenticated endpoint, should be found
+        channel1 = self.make_request(
+            "GET",
+            f"_matrix/client/v1/media/download/test/{unrestricted_media_id}",
+            access_token=self.tok,
+            shorthand=False,
+        )
+        self.assertEqual(channel1.code, 200, channel1)
+
+        # request same media over unauthenticated media, should raise 404 not found
+        channel2 = self.make_request(
+            "GET",
+            f"_matrix/media/v3/download/test/{unrestricted_media_id}",
+            shorthand=False,
+        )
+        self.assertEqual(channel2.code, 404, channel2)
+
+        # check thumbnails as well
+        params = "?width=32&height=32&method=crop"
+        channel3 = self.make_request(
+            "GET",
+            f"/_matrix/client/v1/media/thumbnail/test/{unrestricted_media_id}{params}",
+            shorthand=False,
+            access_token=self.tok,
+        )
+        self.assertEqual(channel3.code, 200, channel3)
+
+        params = "?width=32&height=32&method=crop"
+        channel4 = self.make_request(
+            "GET",
+            f"/_matrix/media/r0/thumbnail/test/{unrestricted_media_id}{params}",
+            shorthand=False,
+            access_token=self.tok,
+        )
+        self.assertEqual(channel4.code, 404, channel4)
+
+    def test_unauthed_unrestricted_local_media(self) -> None:
+        """
+        Test that unauthenticated but(somehow) restricted media is available over the old
+        unauthenticated endpoints
+        """
+        # First test round, restricted media
+        unrestricted_media_id = self.inject_local_media_and_send_event(
+            authed=False, restricted=False
+        )
+        # request media over authenticated endpoint, should be found
+        channel1 = self.make_request(
+            "GET",
+            f"_matrix/client/v1/media/download/test/{unrestricted_media_id}",
+            access_token=self.tok,
+            shorthand=False,
+        )
+        self.assertEqual(channel1.code, 200, channel1)
+
+        # request same media over unauthenticated media, should be found
+        channel2 = self.make_request(
+            "GET",
+            f"_matrix/media/v3/download/test/{unrestricted_media_id}",
+            shorthand=False,
+        )
+        self.assertEqual(channel2.code, 200, channel2)
+
+        # check thumbnails as well
+        params = "?width=32&height=32&method=crop"
+        channel3 = self.make_request(
+            "GET",
+            f"/_matrix/client/v1/media/thumbnail/test/{unrestricted_media_id}{params}",
+            shorthand=False,
+            access_token=self.tok,
+        )
+        self.assertEqual(channel3.code, 200, channel3)
+
+        params = "?width=32&height=32&method=crop"
+        channel4 = self.make_request(
+            "GET",
+            f"/_matrix/media/r0/thumbnail/test/{unrestricted_media_id}{params}",
+            shorthand=False,
+            access_token=self.tok,
+        )
+        self.assertEqual(channel4.code, 200, channel4)
+
+    def test_restricted_remote_media(self) -> None:
+        restricted_media_id = self.inject_remote_media(restricted=True)
+        channel1 = self.make_request(
+            "GET",
+            f"_matrix/client/v1/media/download/{self.other_server_name}/{restricted_media_id}",
+            access_token=self.tok,
+            shorthand=False,
+        )
+        self.assertEqual(channel1.code, 200, channel1)
+
+        channel2 = self.make_request(
+            "GET",
+            f"_matrix/media/v3/download/{self.other_server_name}/{restricted_media_id}",
+            shorthand=False,
+        )
+        self.assertEqual(channel2.code, 404, channel2)
+
+        params = "?width=32&height=32&method=crop"
+        channel3 = self.make_request(
+            "GET",
+            f"/_matrix/client/v1/media/thumbnail/{self.other_server_name}/{restricted_media_id}{params}",
+            shorthand=False,
+            access_token=self.tok,
+        )
+        self.assertEqual(channel3.code, 200, channel3)
+
+        channel4 = self.make_request(
+            "GET",
+            f"/_matrix/media/r0/thumbnail/{self.other_server_name}/{restricted_media_id}{params}",
+            shorthand=False,
+            access_token=self.tok,
+        )
+        self.assertEqual(channel4.code, 404, channel4)
+
+    def test_authenticated_media_etag(self) -> None:
+        """
+        Test that ETag works correctly with authenticated media over client
+        APIs. This is largely copied from AuthenticatedMediaTestCase above, except to
+        adjust to MSC3911 endpoints and to use this TestCase's helpers
+        """
+        # upload some local media with authentication on
+        if self.enable_restricted_media:
+            media_id = self.upload_restricted_media()
+        else:
+            media_id = self.upload_unrestricted_media()
+
+        # Check standard media endpoint
+        self._check_caching(f"/download/test/{media_id}")
+
+        # check thumbnails as well
+        params = "?width=32&height=32&method=crop"
+        self._check_caching(f"/thumbnail/test/{media_id}{params}")
+
+        # Remote media too?
+        remote_media_id = self.inject_remote_media(restricted=True)
+        self._check_caching(f"/download/{self.other_server_name}/{remote_media_id}")
+
+        params = "?width=32&height=32&method=crop"
+        self._check_caching(
+            f"/thumbnail/{self.other_server_name}/{remote_media_id}{params}"
+        )
+
+    def _check_caching(self, path: str) -> None:
+        """
+        Checks that:
+          1. fetching the path returns an ETag header
+          2. refetching with the ETag returns a 304 without a body
+          3. refetching with the ETag but through unauthenticated endpoint
+             returns 404
+        """
+
+        # Request media over authenticated endpoint, should be found
+        channel1 = self.make_request(
+            "GET",
+            f"/_matrix/client/v1/media{path}",
+            access_token=self.tok,
+            shorthand=False,
+        )
+        self.assertEqual(channel1.code, 200)
+
+        # Should have a single ETag field
+        etags = channel1.headers.getRawHeaders("ETag")
+        self.assertIsNotNone(etags)
+        assert etags is not None  # For mypy
+        self.assertEqual(len(etags), 1)
+        etag = etags[0]
+
+        # Refetching with the etag should result in 304 and empty body.
+        channel2 = self.make_request(
+            "GET",
+            f"/_matrix/client/v1/media{path}",
+            access_token=self.tok,
+            shorthand=False,
+            custom_headers=[("If-None-Match", etag)],
+        )
+        self.assertEqual(channel2.code, 304)
+        self.assertEqual(channel2.is_finished(), True)
+        self.assertNotIn("body", channel2.result)
+
+        # Refetching with the etag but no access token should result in 404.
+        channel3 = self.make_request(
+            "GET",
+            f"/_matrix/media/r0{path}",
+            shorthand=False,
+            custom_headers=[("If-None-Match", etag)],
+        )
+        self.assertEqual(channel3.code, 404)
