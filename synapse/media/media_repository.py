@@ -852,18 +852,20 @@ class MediaRepository(AbstractMediaRepository):
         # class. It needs abstraction badly, but that is beyond me at the moment.
         io_object = open(local_path, "rb")
 
+        mxc_str, _ = await self.create_media_id(auth_user, restricted=True)
+        new_mxc_uri = MXCUri.from_str(mxc_str)
         # Let existing methods handle creating the new file for us. By not passing a
         # media id, one will be created.
-        new_mxc_uri = await self.create_or_update_content(
+        run_as_background_process(
+            "background_copy_media",
+            self.create_or_update_content,
             media_type=old_media_info.media_type,
             upload_name=old_media_info.upload_name,
             content=io_object,
             content_length=old_media_info.media_length,
             auth_user=auth_user,
-            restricted=True,
+            media_id=new_mxc_uri.media_id,
         )
-        # I could not find a place this was close()'d explicitly, but this felt prudent
-        io_object.close()
 
         return new_mxc_uri
 
