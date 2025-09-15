@@ -172,8 +172,8 @@ class ContentRepositoryConfig(Config):
         )
 
         self.media_instance_running_background_jobs = (
-            media_instance_running_background_jobs
-            or media_instance_running_background_jobs_from_list
+            media_instance_running_background_jobs_from_list
+            or media_instance_running_background_jobs
         )
 
         self.max_upload_size = self.parse_size(config.get("max_upload_size", "50M"))
