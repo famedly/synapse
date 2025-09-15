@@ -654,6 +654,7 @@ class MediaRepository(AbstractMediaRepository):
             A tuple containing the MXC URI of the stored content and the timestamp at
             which the MXC URI expires.
         """
+        # XXX: this could be ok on generic workers, as no files are handled
         media_id = random_string(24)
         now = self.clock.time_msec()
         await self.store.store_local_media_id(
@@ -695,6 +696,7 @@ class MediaRepository(AbstractMediaRepository):
             media_id: The media ID to verify
             auth_user: The user_id of the uploader
         """
+        # XXX: this could be ok on generic workers, as no files are handled
         media = await self.store.get_local_media(media_id)
         if media is None:
             raise NotFoundError("Unknown media ID")
