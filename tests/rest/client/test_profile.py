@@ -36,11 +36,14 @@ from synapse.api.errors import Codes
 from synapse.rest import admin
 from synapse.rest.client import login, media, profile, room
 from synapse.server import HomeServer
+from synapse.storage.database import LoggingTransaction
 from synapse.storage.databases.main.profile import MAX_PROFILE_SIZE
 from synapse.types import JsonDict, UserID
 from synapse.util import Clock
 
 from tests import unittest
+from tests.replication._base import BaseMultiWorkerStreamTestCase
+from tests.server import FakeChannel, make_request
 from tests.test_utils import SMALL_PNG
 from tests.unittest import override_config
 from tests.utils import USE_POSTGRES_FOR_TESTS
@@ -923,6 +926,7 @@ class ProfileMediaAttachmentTestCase(unittest.HomeserverTestCase):
         login.register_servlets,
         media.register_servlets,
         profile.register_servlets,
+        room.register_servlets,
     ]
 
     def prepare(
@@ -965,6 +969,29 @@ class ProfileMediaAttachmentTestCase(unittest.HomeserverTestCase):
             )
         )
         return content_uri
+
+    def get_media_id_by_attached_event_id(self, event_id: str) -> Optional[str]:
+        sql = """
+            SELECT media_id
+            FROM media_attachments
+            WHERE restrictions_json->'restrictions'->>'event_id' = ?;
+            """
+
+        def _get_media_id_by_attached_event_id_txn(
+            txn: LoggingTransaction,
+        ) -> Optional[str]:
+            txn.execute(sql, (event_id,))
+            row = txn.fetchone()
+            if not row:
+                return None
+            return row[0]
+
+        return self.get_success(
+            self.store.db_pool.runInteraction(
+                "get_media_id_by_attached_event_id",
+                _get_media_id_by_attached_event_id_txn,
+            )
+        )
 
     def test_can_attach_media_to_profile_update(self) -> None:
         """
@@ -1180,3 +1207,246 @@ class ProfileMediaAttachmentTestCase(unittest.HomeserverTestCase):
             )
         )
         assert user_avatar is None
+
+    def test_profile_update_with_media_is_copied_and_attached_to_member_events(
+        self,
+    ) -> None:
+        room_id = self.helper.create_room_as(self.user, is_public=True, tok=self.tok)
+        self.helper.join(room_id, self.other_user, tok=self.other_tok)
+        mxc_uri = self.create_media_and_set_restricted_flag(self.user)
+
+        # Attach the media to the user profile.
+        channel = self.make_request(
+            "PUT",
+            f"/_matrix/client/v3/profile/{self.user}/avatar_url?propagate=true",
+            access_token=self.tok,
+            content={"avatar_url": str(mxc_uri)},
+        )
+        assert channel.code == HTTPStatus.OK
+        assert channel.json_body == {}
+
+        # Check media is set as user avatar.
+        user_avatar = self.get_success(
+            self.store.get_profile_avatar_url(
+                UserID.from_string(self.user),
+            )
+        )
+        assert user_avatar is not None
+        assert user_avatar == str(mxc_uri)
+
+        # Check media restrictions
+        media_info = self.get_success(self.store.get_local_media(mxc_uri.media_id))
+        assert media_info is not None
+        assert media_info.attachments is not None
+        assert media_info.attachments.profile_user_id == UserID.from_string(self.user)
+
+        # Check the media was copied and attached to a member event
+        events = self.get_success(
+            self.store.get_events_sent_by_user_in_room(
+                self.user, room_id, 10, ["m.room.member"]
+            )
+        )
+        # Get member event id
+        assert events is not None
+        member_event_id = events[0]
+
+        copied_media_id = self.get_media_id_by_attached_event_id(member_event_id)
+
+        assert copied_media_id is not None
+        assert copied_media_id != mxc_uri.media_id
+
+        media_restrictions = self.get_success(
+            self.store.get_media_restrictions(self.server_name, copied_media_id)
+        )
+        assert media_restrictions is not None
+        assert media_restrictions.event_id == member_event_id
+
+
+class ProfileMediaAttachmentReplicationTestCase(BaseMultiWorkerStreamTestCase):
+    """
+    Test that a membership event that is supposed to copy media appropriately replicates
+    the call from a generic room worker to the main process where media is handled
+    """
+
+    servlets = [
+        admin.register_servlets,
+        login.register_servlets,
+        media.register_servlets,
+        # profile.register_servlets,
+        room.register_servlets,
+    ]
+
+    def prepare(
+        self, reactor: MemoryReactor, clock: Clock, homeserver: HomeServer
+    ) -> None:
+        self.store = homeserver.get_datastores().main
+        self.server_name = self.hs.config.server.server_name
+        self.media_repo = self.hs.get_media_repository()
+
+        self.user = self.register_user("user", "password")
+        self.tok = self.login("user", "password")
+
+        self.other_user = self.register_user("other_user", "password")
+        self.other_tok = self.login("other_user", "password")
+
+    def default_config(self) -> JsonDict:
+        config = super().default_config()
+        config.setdefault("experimental_features", {})
+        config["experimental_features"].update({"msc3911_enabled": True})
+        # config["media_repo_instances"] = [MAIN_PROCESS_INSTANCE_NAME]
+
+        return config
+
+    def create_resource_dict(self) -> dict[str, Resource]:
+        resources = super().create_resource_dict()
+        resources["/_matrix/media"] = self.hs.get_media_repository_resource()
+        return resources
+
+    def create_media_and_set_restricted_flag(self, user_id: str) -> MXCUri:
+        """
+        Create media without using an endpoint, and set the restricted flag.
+        """
+        content = io.BytesIO(SMALL_PNG)
+        content_uri = self.get_success(
+            self.media_repo.create_or_update_content(
+                "image/png",
+                "test_png_upload",
+                content,
+                67,
+                UserID.from_string(user_id),
+                restricted=True,
+            )
+        )
+        return content_uri
+
+    def make_worker_hs(
+        self, worker_app: str, extra_config: Optional[dict] = None, **kwargs: Any
+    ) -> HomeServer:
+        worker_hs = super().make_worker_hs(worker_app, extra_config, **kwargs)
+        # Mount the room resource onto the worker.
+        # worker_hs.get_media_repository_resource().register_servlets(
+        #     self._hs_to_site[worker_hs].resource, worker_hs
+        # )
+        room.register_servlets(worker_hs, self._hs_to_site[worker_hs].resource)
+        profile.register_servlets(worker_hs, self._hs_to_site[worker_hs].resource)
+        return worker_hs
+
+    def get_media_id_by_attached_event_id(self, event_id: str) -> Optional[str]:
+        sql = """
+            SELECT media_id
+            FROM media_attachments
+            WHERE restrictions_json->'restrictions'->>'event_id' = ?;
+            """
+
+        def _get_media_id_by_attached_event_id_txn(
+            txn: LoggingTransaction,
+        ) -> Optional[str]:
+            txn.execute(sql, (event_id,))
+            row = txn.fetchone()
+            if not row:
+                return None
+            return row[0]
+
+        return self.get_success(
+            self.store.db_pool.runInteraction(
+                "get_media_id_by_attached_event_id",
+                _get_media_id_by_attached_event_id_txn,
+            )
+        )
+
+    def fetch_media(
+        self,
+        mxc_uri: MXCUri,
+        access_token: Optional[str] = None,
+        expected_code: int = 200,
+    ) -> FakeChannel:
+        """
+        Test retrieving the media. Assert the response code, but return the channel, the
+        test may have use of it. For this test case series, the media repo is the same
+        as the main process
+        """
+        channel = self.make_request(
+            "GET",
+            f"/_matrix/client/v1/media/download/{mxc_uri.server_name}/{mxc_uri.media_id}",
+            access_token=access_token,
+        )
+        assert channel.code == expected_code, channel.code
+        return channel
+
+    def assert_media_is_identical(self, first_mxc: MXCUri, second_mxc: MXCUri) -> None:
+        """
+        Verify that both media object are actually byte-for-byte identical
+        """
+        first_media = self.fetch_media(first_mxc, self.tok)
+        first_media_payload = first_media.result.get("body")
+        assert first_media_payload is not None
+
+        second_media = self.fetch_media(second_mxc, self.tok)
+        second_media_payload = second_media.result.get("body")
+        assert second_media_payload is not None
+
+        assert first_media_payload == second_media_payload
+
+    def test_profile_update_with_media_is_copied_and_attached_to_member_events(
+        self,
+    ) -> None:
+        generic_worker = self.make_worker_hs("synapse.app.generic_worker")
+
+        room_id = self.helper.create_room_as(self.user, is_public=True, tok=self.tok)
+        self.helper.join(room_id, self.other_user, tok=self.other_tok)
+        mxc_uri = self.create_media_and_set_restricted_flag(self.user)
+
+        # Attach the media to the user profile.
+        channel = make_request(
+            self.reactor,
+            self._hs_to_site[generic_worker],
+            "PUT",
+            f"/_matrix/client/v3/profile/{self.user}/avatar_url?propagate=true",
+            access_token=self.tok,
+            content={"avatar_url": str(mxc_uri)},
+        )
+        assert channel.code == HTTPStatus.OK
+        assert channel.json_body == {}
+
+        # Check media is set as user avatar.
+        user_avatar = self.get_success(
+            self.store.get_profile_avatar_url(
+                UserID.from_string(self.user),
+            )
+        )
+        assert user_avatar is not None
+        assert user_avatar == str(mxc_uri)
+
+        # Check media restrictions
+        media_info = self.get_success(self.store.get_local_media(mxc_uri.media_id))
+        assert media_info is not None
+        assert media_info.attachments is not None
+        assert media_info.attachments.profile_user_id == UserID.from_string(self.user)
+
+        # Check the media was copied and attached to a member event
+        events = self.get_success(
+            self.store.get_events_sent_by_user_in_room(
+                self.user, room_id, 10, ["m.room.member"]
+            )
+        )
+        # Get member event id
+        assert events is not None
+        member_event_id = events[0]
+
+        copied_media_id = self.get_media_id_by_attached_event_id(member_event_id)
+
+        assert copied_media_id is not None, copied_media_id
+        assert copied_media_id != mxc_uri.media_id
+
+        media_restrictions = self.get_success(
+            self.store.get_media_restrictions(self.server_name, copied_media_id)
+        )
+        assert media_restrictions is not None
+        assert media_restrictions.event_id == member_event_id
+
+        # the media ID should be different, but the server_name will be for the local
+        # host. Verify that both media byte streams are the same
+        new_media_mxc_uri = MXCUri(
+            server_name=self.server_name, media_id=copied_media_id
+        )
+        self.assert_media_is_identical(mxc_uri, new_media_mxc_uri)

@@ -109,6 +109,7 @@ class RoomMemberHandler(metaclass=abc.ABCMeta):
         self.account_data_handler = hs.get_account_data_handler()
         self.event_auth_handler = hs.get_event_auth_handler()
         self._worker_lock_handler = hs.get_worker_locks_handler()
+        self.enable_restricted_media = hs.config.experimental.msc3911_enabled
 
         self._membership_types_to_include_profile_data_in = {
             Membership.JOIN,
@@ -537,6 +538,7 @@ class RoomMemberHandler(metaclass=abc.ABCMeta):
 
         # we know it was persisted, so should have a stream ordering
         assert result_event.internal_metadata.stream_ordering
+
         return result_event.event_id, result_event.internal_metadata.stream_ordering
 
     async def copy_room_tags_and_direct_to_room(
@@ -859,6 +861,23 @@ class RoomMemberHandler(metaclass=abc.ABCMeta):
                         content["avatar_url"] = avatar_url
             except Exception as e:
                 logger.info("Failed to get profile information for %r: %s", target, e)
+
+            if self.enable_restricted_media and not media_info_for_attachment:
+                # Other than membership
+                avatar_url = content.get("avatar_url")
+                if avatar_url:
+                    # Something about the MediaRepository does not like being part of
+                    # the initialization code of the RoomMemberHandler, so just import
+                    # it on the spot instead.
+                    media_repo = self.hs.get_media_repository()
+
+                    new_mxc_uri = await media_repo.copy_media(
+                        MXCUri.from_str(avatar_url), requester.user, 20_000
+                    )
+                    media_object = await media_repo.get_media_info(new_mxc_uri)
+                    assert isinstance(media_object, LocalMedia)
+                    media_info_for_attachment = {media_object}
+                    content[EventContentFields.MEMBERSHIP_AVATAR_URL] = str(new_mxc_uri)
 
         # if this is a join with a 3pid signature, we may need to turn a 3pid
         # invite into a normal invite before we can handle the join.
