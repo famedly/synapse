@@ -44,6 +44,7 @@ from synapse.api.constants import EventTypes
 from synapse.api.room_versions import RoomVersions
 from synapse.config.homeserver import HomeServerConfig
 from synapse.config.server import DEFAULT_ROOM_VERSION
+from synapse.config.workers import MAIN_PROCESS_INSTANCE_NAME
 from synapse.logging.context import current_context, set_current_context
 from synapse.server import HomeServer
 from synapse.storage.database import LoggingDatabaseConnection
@@ -153,6 +154,7 @@ def default_config(
         # Setting this to an empty list turns off federation sending.
         "federation_sender_instances": [],
         "media_store_path": "media",
+        "media_repo_instances": [MAIN_PROCESS_INSTANCE_NAME],
         # the test signing key is just an arbitrary ed25519 key to keep the config
         # parser happy
         "signing_key": "ed25519 a_lPym qvioDNmfExFBRPgdTU+wtFYKq4JfwFRv7sYVgWvmgJg",

@@ -479,15 +479,18 @@ class WorkerConfig(Config):
                     self.instance_map[instance]
                 )
 
-        self.workers_doing_media_duty = config.get("media_repo_instances", [])
-        # I would rather do this bit below, but the behavior of Synapse is rather lax.
-        # Documented what I mean in config/repository.py
-        # self.workers_doing_media_duty = self._worker_names_performing_this_duty(
-        #     config,
-        #     "enable_media_repo",
-        #     "synapse.app.media_repository",
-        #     "media_repo_instances",
-        # )
+        # Allow the old setting to still work. It is very unprecise when an exact worker
+        # is actually needed, e.g. for placing HTTP replication calls. Prefer the new
+        # list format. If the old setting is used, and the main process does not have
+        # the media repo enabled, it's likely HTTP replication calls will not work.
+        # TODO: decide if we should just start raising a ConfigError when
+        #  enable_media_repo or the legacy app name is used.
+        self.workers_doing_media_duty = self._worker_names_performing_this_duty(
+            config,
+            "enable_media_repo",
+            "synapse.app.media_repository",
+            "media_repo_instances",
+        )
 
     def _should_this_worker_perform_duty(
         self,

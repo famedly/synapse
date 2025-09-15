@@ -33,6 +33,7 @@ from twisted.web.http import HTTPChannel
 from twisted.web.server import Request
 
 from synapse.api.constants import EventTypes, HistoryVisibility
+from synapse.config.workers import MAIN_PROCESS_INSTANCE_NAME
 from synapse.media._base import FileInfo
 from synapse.media.media_repository import MediaRepository
 from synapse.rest import admin
@@ -73,6 +74,10 @@ class MediaRepoShardTestCase(BaseMultiWorkerStreamTestCase):
     def default_config(self) -> dict:
         conf = super().default_config()
         conf["federation_custom_ca_list"] = [get_test_ca_cert_file()]
+        conf["media_repo_instances"] = [
+            MAIN_PROCESS_INSTANCE_NAME,
+            "synapse.app.generic_worker",
+        ]
         return conf
 
     def make_worker_hs(
@@ -288,6 +293,10 @@ class AuthenticatedMediaRepoShardTestCase(BaseMultiWorkerStreamTestCase):
     def default_config(self) -> dict:
         conf = super().default_config()
         conf["federation_custom_ca_list"] = [get_test_ca_cert_file()]
+        conf["media_repo_instances"] = [
+            MAIN_PROCESS_INSTANCE_NAME,
+            "synapse.app.generic_worker",
+        ]
         return conf
 
     def make_worker_hs(
@@ -502,18 +511,19 @@ class AuthenticatedMediaRepoShardTestCase(BaseMultiWorkerStreamTestCase):
 
 class CopyRestrictedResourceReplicationTestCase(BaseMultiWorkerStreamTestCase):
     """
-    Tests copy API when `msc3911_enabled` is configured to be True.
+    Tests copy API when `msc3911_enabled` is configured to be True. Specifically, tests
+    that the replication call for the copying of the media works properly from a
+    separate worker. The main process is the media repository.
+
     """
 
+    # We purposely do not register the new client/fed media endpoints here, as any
+    # workers will also pick these up, and we do not want that
     servlets = [
-        # media.register_servlets,
         login.register_servlets,
         admin.register_servlets,
         room.register_servlets,
     ]
-
-    # def make_homeserver(self, reactor: MemoryReactor, clock: Clock) -> HomeServer:
-    #     return self.setup_test_homeserver(config=config)
 
     def default_config(self) -> Dict[str, Any]:
         config = super().default_config()
@@ -531,7 +541,6 @@ class CopyRestrictedResourceReplicationTestCase(BaseMultiWorkerStreamTestCase):
         return config
 
     def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
-        # self.media_repo = hs.get_media_repository()
         self.profile_handler = self.hs.get_profile_handler()
         self.user = self.register_user("user", "testpass")
         self.user_tok = self.login("user", "testpass")
@@ -542,10 +551,8 @@ class CopyRestrictedResourceReplicationTestCase(BaseMultiWorkerStreamTestCase):
         self, worker_app: str, extra_config: Optional[dict] = None, **kwargs: Any
     ) -> HomeServer:
         worker_hs = super().make_worker_hs(worker_app, extra_config, **kwargs)
-        # Force the media paths onto the replication resource.
-        worker_hs.get_media_repository_resource().register_servlets(
-            self._hs_to_site[worker_hs].resource, worker_hs
-        )
+        # Force the media paths onto the endpoint resource. The worker will also pickup
+        # the other servlets requested from self.servlets above.
         media.register_servlets(worker_hs, self._hs_to_site[worker_hs].resource)
         return worker_hs
 

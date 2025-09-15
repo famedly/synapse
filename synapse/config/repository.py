@@ -136,23 +136,18 @@ class ContentRepositoryConfig(Config):
         # current worker app is the media repo.
 
         workers_doing_media_duty = self.root.worker.workers_doing_media_duty
-        # It is expected by many places in Synapse and its unit tests that either there
-        # are no media repos, or only one, or every worker is one. If we have our new
-        # proper list, use that to decide if we are supposed to be handling these duties
-        if not workers_doing_media_duty:
-            if (
-                config.get("enable_media_repo", True) is False
-                and config.get("worker_app") != "synapse.app.media_repository"
-            ):
-                self.can_load_media_repo = False
-                return
-            self.can_load_media_repo = True
-
-        else:
-            if self.root.worker.instance_name not in workers_doing_media_duty:
-                self.can_load_media_repo = False
-                return
-            self.can_load_media_repo = True
+        # The worker list for which worker instances are capable of handling media
+        # related tasks.
+        #
+        # If the old setting of `enable_media_repo` was used, this will
+        # not be reliably filled in. Each workers view of this list will be different,
+        # in that each will only know if itself is on the list. Instances that can see
+        # `enable_media_repo: False` will see this list as empty. Instances with `True`
+        # will see the main process
+        if self.root.worker.instance_name not in workers_doing_media_duty:
+            self.can_load_media_repo = False
+            return
+        self.can_load_media_repo = True
 
         # Whether this instance should be the one to run the background jobs to
         # e.g clean up old URL previews.

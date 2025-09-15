@@ -1271,8 +1271,6 @@ class ProfileMediaAttachmentReplicationTestCase(BaseMultiWorkerStreamTestCase):
     servlets = [
         admin.register_servlets,
         login.register_servlets,
-        media.register_servlets,
-        # profile.register_servlets,
         room.register_servlets,
     ]
 
@@ -1282,6 +1280,12 @@ class ProfileMediaAttachmentReplicationTestCase(BaseMultiWorkerStreamTestCase):
         self.store = homeserver.get_datastores().main
         self.server_name = self.hs.config.server.server_name
         self.media_repo = self.hs.get_media_repository()
+
+        # We have to register this special, not up in the self.servlets above as part of
+        # the class. Any workers pull that data in too, and we do not want that for this
+        # test case. Normally, this is handled by distinct "listeners", but unit tests
+        # don't have those.
+        media.register_servlets(self.hs, self.site.resource)
 
         self.user = self.register_user("user", "password")
         self.tok = self.login("user", "password")
@@ -1293,14 +1297,8 @@ class ProfileMediaAttachmentReplicationTestCase(BaseMultiWorkerStreamTestCase):
         config = super().default_config()
         config.setdefault("experimental_features", {})
         config["experimental_features"].update({"msc3911_enabled": True})
-        # config["media_repo_instances"] = [MAIN_PROCESS_INSTANCE_NAME]
 
         return config
-
-    def create_resource_dict(self) -> dict[str, Resource]:
-        resources = super().create_resource_dict()
-        resources["/_matrix/media"] = self.hs.get_media_repository_resource()
-        return resources
 
     def create_media_and_set_restricted_flag(self, user_id: str) -> MXCUri:
         """
