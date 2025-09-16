@@ -339,7 +339,6 @@ class AbstractMediaRepository:
 
         if attached_event_id:
             event_base = await self.store.get_event(attached_event_id)
-            storage_controllers = self.hs.get_storage_controllers()
             if event_base.is_state():
                 # The standard event visibility utility, filter_events_for_client(),
                 # does not seem to meet the needs of a good UX when restricting and
@@ -367,17 +366,29 @@ class AbstractMediaRepository:
 
                 membership_state_key = (EventTypes.Member, requesting_user.to_string())
                 types = (_HISTORY_VIS_KEY, membership_state_key)
-                # and history visibility and membership of THEN
-                event_id_to_state = (
-                    await storage_controllers.state.get_state_for_events(
-                        [attached_event_id],
-                        state_filter=StateFilter.from_types(types),
-                    )
-                )
 
-                state_map = event_id_to_state.get(attached_event_id)
-                # Do we need to guard against not having state of a room?
-                assert state_map is not None
+                # and history visibility and membership of THEN
+                state_filter = StateFilter.from_types(types)
+                state_handler = self.hs.get_state_handler()
+
+                # State Map to Event IDs
+                state_map_to_e_id = await state_handler.compute_state_after_events(
+                    event_base.room_id, [attached_event_id], state_filter=state_filter
+                )
+                # Get the EventBases for those Event IDs
+                events = await self.store.get_events(
+                    state_map_to_e_id.values(),
+                )
+                # Sort into mapping of StateMap to EventBases
+                state_map = {
+                    k: events[v] for k, v in state_map_to_e_id.items() if v in events
+                }
+
+                # Don't need to make sure we have an actual StateMap. The defaults
+                # applied below handle those occasions. E.g. if it is early in a room
+                # at the point of the event we are trying to get visibility on, the
+                # state may not exist yet for these filtered events. Like for the
+                # membership event that follows room creation.
 
                 visibility = get_effective_room_visibility_from_state(state_map)
 
@@ -443,6 +454,7 @@ class AbstractMediaRepository:
                     return
 
             else:
+                storage_controllers = self.hs.get_storage_controllers()
                 filtered_events = await filter_events_for_client(
                     storage_controllers,
                     requesting_user.to_string(),
