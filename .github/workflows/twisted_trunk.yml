@@ -182,7 +182,7 @@ jobs:
       - name: Prepare Complement's Prerequisites
         run: synapse/.ci/scripts/setup_complement_prerequisites.sh
 
-      - uses: actions/setup-go@d35c59abb061a4a6fb18e82ac0862c26744d6ab5 # v5.5.0
+      - uses: actions/setup-go@c0137caad775660c0844396c52da96e560aba63d # v5.5.0
         with:
           cache-dependency-path: complement/go.sum
           go-version-file: complement/go.mod
