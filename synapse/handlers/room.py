@@ -1220,6 +1220,61 @@ class RoomCreationHandler:
         # override any attempt to set room versions via the creation_content
         creation_content["room_version"] = room_version.identifier
 
+        # In order to prevent partial room entries in the database, pre-sanitize and
+        # validate the data. No data should be persisted at this time.
+        # Currently, only checks the m.room.avatar entry. If it exists.
+        raw_initial_state = config.get("initial_state", [])
+
+        initial_state = OrderedDict()
+        for val in raw_initial_state:
+            initial_state[(val["type"], val.get("state_key", ""))] = val["content"]
+
+        room_avatar = initial_state.get((EventTypes.RoomAvatar, ""))
+        # It is unfortunate that this conditional block has to be run twice: once here
+        # to validate the data and again to actually attach the media reference.
+        if room_avatar is not None and self.config.experimental.msc3911_enabled:
+            # this should be an mxc, but the spec does not specifically say it has to be
+            extracted_media_id: Optional[str] = room_avatar.get("url")
+            # It may be that "url" is set to either an empty string or None. Accept
+            # this gracefully, to account for backwards compatible behavior
+            if extracted_media_id:
+                try:
+                    mxc_uri = MXCUri.from_str(extracted_media_id)
+                except ValueError:
+                    raise SynapseError(
+                        HTTPStatus.BAD_REQUEST,
+                        f"Room avatar MXC Uri ('{extracted_media_id}') is malformed",
+                        Codes.INVALID_PARAM,
+                    )
+                # If there is a media item, check for existing restrictions
+                local_media_data = await self.store.get_local_media(mxc_uri.media_id)
+
+                # Non-existent media is to be handled by the download media endpoint
+                # so ignore it for now and allow proceeding. It will just not attach
+                # the media
+                if local_media_data is not None and local_media_data.restricted:
+                    if not local_media_data.attachments:
+                        if requester.user.to_string() != local_media_data.user_id:
+                            # A different user created a room compared to who uploaded
+                            # the media. Just like with the '/state/' and '/send/'
+                            # endpoints, do not leak the metadata
+                            raise SynapseError(
+                                HTTPStatus.BAD_REQUEST,
+                                f"The media requested for a room avatar is invalid as the media '{mxc_uri.media_id}' does not exist",
+                                Codes.INVALID_PARAM,
+                            )
+
+                    else:
+                        # This media is already attached. If it was a prior attempt to
+                        # create a room, the atomic handling of the room creation means
+                        # it will not be attached, so if this exists it succeeded
+                        # somewhere else.
+                        raise SynapseError(
+                            HTTPStatus.BAD_REQUEST,
+                            f"The media requested for a room avatar is invalid as the media '{mxc_uri.media_id}' does not exist",
+                            Codes.INVALID_PARAM,
+                        )
+
         # trusted private chats have the invited users marked as additional creators
         if (
             room_version.msc4289_creator_power_enabled
@@ -1280,12 +1335,6 @@ class RoomCreationHandler:
                 servers=[self.hs.hostname],
                 check_membership=False,
             )
-
-        raw_initial_state = config.get("initial_state", [])
-
-        initial_state = OrderedDict()
-        for val in raw_initial_state:
-            initial_state[(val["type"], val.get("state_key", ""))] = val["content"]
 
         (
             last_stream_id,
