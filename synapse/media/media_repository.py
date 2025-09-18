@@ -330,6 +330,12 @@ class AbstractMediaRepository:
                 return
 
             # It was restricted, but no attachments. Deny
+            logger.debug(
+                "Media ID ('%s') as requested by '%s' was restricted but had no "
+                "attachments",
+                media_info_object.media_id,
+                requesting_user.to_string(),
+            )
             raise UnauthorizedRequestAPICallError(
                 f"Media requested ('{media_info_object.media_id}') is restricted"
             )
@@ -475,6 +481,14 @@ class AbstractMediaRepository:
                     requesting_user.to_string(),
                     [attached_profile_user_id.to_string()],
                 ):
+                    logger.debug(
+                        "Media ID (%s) as requested by '%s' was restricted by "
+                        "profile, but was not allowed(is "
+                        "'limit_profile_requests_to_users_who_share_rooms' enabled?)",
+                        media_info_object.media_id,
+                        requesting_user.to_string(),
+                    )
+
                     raise UnauthorizedRequestAPICallError(
                         f"Media requested ('{media_info_object.media_id}') is restricted"
                     )
@@ -487,6 +501,13 @@ class AbstractMediaRepository:
             return
 
         # It was a third unknown restriction, or otherwise did not pass inspection
+        logger.debug(
+            "Media ID (%s) as requested by '%s' was restricted, but was not "
+            "allowed(media_attachments=%s)",
+            media_info_object.media_id,
+            requesting_user.to_string(),
+            media_info_object.attachments,
+        )
         raise UnauthorizedRequestAPICallError(
             f"Media requested ('{media_info_object.media_id}') is restricted"
         )
