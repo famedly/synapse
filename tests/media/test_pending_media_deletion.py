@@ -1,13 +1,14 @@
 import io
-
-from matrix_common.types.mxc_uri import MXCUri
+import os
+from http import HTTPStatus
 
 from twisted.test.proto_helpers import MemoryReactor
 from twisted.web.resource import Resource
 
+from synapse.media.filepath import MediaFilePaths
 from synapse.media.media_repository import MediaRepository
 from synapse.rest import admin
-from synapse.rest.client import login, media, room
+from synapse.rest.client import login, media, profile, room
 from synapse.server import HomeServer
 from synapse.types import UserID
 from synapse.util import Clock
@@ -24,13 +25,17 @@ class PendingMediaDeletionTestCase(unittest.HomeserverTestCase):
         login.register_servlets,
         admin.register_servlets,
         room.register_servlets,
+        profile.register_servlets,
     ]
 
     def make_homeserver(self, reactor: MemoryReactor, clock: Clock) -> HomeServer:
         config = self.default_config()
         config.update(
             {
-                "experimental_features": {"msc3911_enabled": True},
+                "experimental_features": {
+                    "msc3911_enabled": True,
+                    "msc3911_enabled_media_retention": True,
+                },
             }
         )
         return self.setup_test_homeserver(config=config)
@@ -40,43 +45,50 @@ class PendingMediaDeletionTestCase(unittest.HomeserverTestCase):
         self.store = hs.get_datastores().main
 
         self.user = self.register_user("user", "testpass")
-        self.user_tok = self.login("user", "testpass")
+        self.tok = self.login("user", "testpass")
+
+        self.filepaths = MediaFilePaths(hs.config.media.media_store_path)
 
     def create_resource_dict(self) -> dict[str, Resource]:
         resources = super().create_resource_dict()
         resources["/_matrix/media"] = self.hs.get_media_repository_resource()
         return resources
 
-    def test_pending_media_deletion(self) -> None:
+    def test_pending_media_deletion_success(self) -> None:
         """
         Test that media that is older than 24 hours yet not attached to any event or profile is deleted.
         """
         assert isinstance(self.media_repository, MediaRepository)
 
-        # Create media that is not attached to any event or profile
+        # Create 2 media that is not attached to any event or profile
         random_content = bytes(random_string(24), "utf-8")
-        mxc_uri_1: MXCUri = self.get_success(
+        server_name = self.hs.hostname
+        mxc_uri_1 = self.get_success(
             self.media_repository.create_or_update_content(
                 media_type="text/plain",
                 upload_name=None,
                 content=io.BytesIO(random_content),
                 content_length=len(random_content),
                 auth_user=UserID.from_string(self.user),
+                restricted=True,
             )
         )
+        media_1_id = mxc_uri_1.media_id
 
         random_content = bytes(random_string(24), "utf-8")
-        mxc_uri_2: MXCUri = self.get_success(
+        mxc_uri_2 = self.get_success(
             self.media_repository.create_or_update_content(
                 media_type="text/plain",
                 upload_name=None,
                 content=io.BytesIO(random_content),
                 content_length=len(random_content),
                 auth_user=UserID.from_string(self.user),
+                restricted=True,
             )
         )
+        media_2_id = mxc_uri_2.media_id
 
-        # Prove that the media is written on the local media table
+        # Prove that the media are written on the local media table
         uploaded_media = self.get_success(
             self.media_repository.store.get_local_media(mxc_uri_1.media_id)
         )
@@ -88,6 +100,12 @@ class PendingMediaDeletionTestCase(unittest.HomeserverTestCase):
         )
         assert uploaded_media is not None
         assert uploaded_media.attachments is None
+
+        # Check if the file exists
+        local_path_1 = self.filepaths.local_media_filepath(media_1_id)
+        assert os.path.exists(local_path_1)
+        local_path_2 = self.filepaths.local_media_filepath(media_2_id)
+        assert os.path.exists(local_path_2)
 
         # Advance 25 hours to make the media eligible for deletion
         self.reactor.advance(25 * 60 * 60)
@@ -102,3 +120,87 @@ class PendingMediaDeletionTestCase(unittest.HomeserverTestCase):
             self.media_repository.store.get_local_media(mxc_uri_2.media_id)
         )
         assert uploaded_media is None
+
+        # Attempt to access media to check if media is deleted from file
+        channel = self.make_request(
+            "GET",
+            f"/_matrix/media/v3/download/{server_name}/{media_1_id}",
+            shorthand=False,
+            access_token=self.tok,
+        )
+        self.assertEqual(
+            404,
+            channel.code,
+            msg=(
+                "Expected to receive a 404 on accessing deleted media: %s:%s"
+                % (server_name, media_1_id)
+            ),
+        )
+
+        channel = self.make_request(
+            "GET",
+            f"/_matrix/media/v3/download/{server_name}/{media_2_id}",
+            shorthand=False,
+            access_token=self.tok,
+        )
+        self.assertEqual(
+            404,
+            channel.code,
+            msg=(
+                "Expected to receive a 404 on accessing deleted media: %s:%s"
+                % (server_name, media_2_id)
+            ),
+        )
+
+        # Test if the file is deleted
+        assert os.path.exists(local_path_1) is False
+        assert os.path.exists(local_path_2) is False
+
+    def test_pending_media_deletion_not_deleted_if_attached(self) -> None:
+        """
+        Test that media that is attached to an event or profile is not deleted.
+        """
+        assert isinstance(self.media_repository, MediaRepository)
+
+        # Create media via upload endpoint
+        random_content = bytes(random_string(24), "utf-8")
+        channel = self.make_request(
+            "POST",
+            "_matrix/client/unstable/org.matrix.msc3911/media/upload?filename=test_png_upload",
+            random_content,
+            self.tok,
+            shorthand=False,
+            content_type=b"image/png",
+            custom_headers=[("Content-Length", str(24))],
+        )
+        self.assertEqual(channel.code, 200, channel.json_body)
+        mxc_uri_str = channel.json_body.get("content_uri")
+        assert mxc_uri_str is not None
+
+        # Attach the media to a profile
+        channel = self.make_request(
+            "PUT",
+            f"/_matrix/client/v3/profile/{self.user}/avatar_url",
+            access_token=self.tok,
+            content={"avatar_url": mxc_uri_str},
+        )
+        assert channel.code == HTTPStatus.OK
+        assert channel.json_body == {}
+        _, media_id = mxc_uri_str.rsplit("/", maxsplit=1)
+
+        # Check if media is updated with restrictions field
+        restrictions = self.get_success(
+            self.store.get_media_restrictions(self.hs.hostname, media_id)
+        )
+        assert restrictions is not None, str(restrictions)
+        assert restrictions.event_id is None
+        assert restrictions.profile_user_id == UserID.from_string(self.user)
+
+        # Advance 25 hours
+        self.reactor.advance(25 * 60 * 60)
+
+        # Check that media is not deleted
+        uploaded_media = self.get_success(
+            self.media_repository.store.get_local_media(media_id)
+        )
+        assert uploaded_media is not None

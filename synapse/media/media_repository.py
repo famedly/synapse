@@ -607,7 +607,7 @@ class MediaRepository(AbstractMediaRepository):
             key=lambda limit: limit.time_period_ms, reverse=True
         )
 
-        if self.enable_media_restriction:
+        if self.hs.config.experimental.msc3911_enabled_media_retention:
             self.clock.looping_call(
                 self._pending_media_cleanup, PENDING_MEDIA_CLEANUP_INTERVAL_MS
             )
@@ -636,7 +636,9 @@ class MediaRepository(AbstractMediaRepository):
     async def _pending_media_cleanup(self) -> None:
         pending_media_ids = await self.store.get_pending_media_ids()
         if pending_media_ids:
-            await self.store.delete_local_media(pending_media_ids)
+            await self.delete_local_media_ids(pending_media_ids)
+            await self.store.delete_url_cache_media(pending_media_ids)
+            await self.store.delete_url_cache(pending_media_ids)
 
     def mark_recently_accessed(self, server_name: Optional[str], media_id: str) -> None:
         """Mark the given media as recently accessed.

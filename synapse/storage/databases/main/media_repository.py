@@ -1313,6 +1313,7 @@ class MediaRepositoryStore(MediaRepositoryBackgroundUpdateStore):
         """
         Get a list of ids of pending media that is older than 24 hours and unattached.
         """
+        threshold_ts = self._clock.time_msec() - 24 * 60 * 60 * 1000
 
         def _get_pending_media_ids_txn(txn: LoggingTransaction) -> list[str]:
             sql = """
@@ -1321,29 +1322,11 @@ class MediaRepositoryStore(MediaRepositoryBackgroundUpdateStore):
                     LEFT JOIN media_attachments
                     ON local_media_repository.media_id = media_attachments.media_id
                 WHERE (media_attachments.restrictions_json IS NULL OR media_attachments.restrictions_json = '{}')
-                    AND local_media_repository.created_ts < (strftime('%s','now') - 24 * 60 * 60);
+                    AND local_media_repository.created_ts < ?;
             """
-            txn.execute(
-                sql,
-            )
+            txn.execute(sql, (threshold_ts,))
             return [row[0] for row in txn]
 
         return await self.db_pool.runInteraction(
             "get_pending_media_ids", _get_pending_media_ids_txn
         )
-
-    async def delete_local_media(self, media_ids: list[str]) -> None:
-        """
-        Delete media entries from the local_media_repository table.
-
-        Args:
-            media_ids: A list of media_id strings to delete.
-        """
-        if not media_ids:
-            return
-
-        def _delete_local_media_txn(txn: LoggingTransaction) -> None:
-            sql = "DELETE FROM local_media_repository WHERE media_id = ?"
-            txn.execute_batch(sql, [(media_id,) for media_id in media_ids])
-
-        await self.db_pool.runInteraction("delete_local_media", _delete_local_media_txn)
