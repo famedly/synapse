@@ -1,4 +1,3 @@
-import io
 import os
 from http import HTTPStatus
 
@@ -62,41 +61,44 @@ class PendingMediaDeletionTestCase(unittest.HomeserverTestCase):
 
         # Create 2 media that is not attached to any event or profile
         random_content = bytes(random_string(24), "utf-8")
-        server_name = self.hs.hostname
-        mxc_uri_1 = self.get_success(
-            self.media_repository.create_or_update_content(
-                media_type="text/plain",
-                upload_name=None,
-                content=io.BytesIO(random_content),
-                content_length=len(random_content),
-                auth_user=UserID.from_string(self.user),
-                restricted=True,
-            )
+        channel = self.make_request(
+            "POST",
+            "_matrix/client/unstable/org.matrix.msc3911/media/upload?filename=test_1",
+            random_content,
+            self.tok,
+            shorthand=False,
+            content_type=b"image/png",
+            custom_headers=[("Content-Length", str(24))],
         )
-        media_1_id = mxc_uri_1.media_id
+        assert channel.code == 200, channel.json_body
+        mxc_uri_str = channel.json_body.get("content_uri")
+        assert mxc_uri_str is not None
+        media_1_id = mxc_uri_str.rsplit("/", 1)[-1]
 
         random_content = bytes(random_string(24), "utf-8")
-        mxc_uri_2 = self.get_success(
-            self.media_repository.create_or_update_content(
-                media_type="text/plain",
-                upload_name=None,
-                content=io.BytesIO(random_content),
-                content_length=len(random_content),
-                auth_user=UserID.from_string(self.user),
-                restricted=True,
-            )
+        channel = self.make_request(
+            "POST",
+            "_matrix/client/unstable/org.matrix.msc3911/media/upload?filename=test_2",
+            random_content,
+            self.tok,
+            shorthand=False,
+            content_type=b"image/png",
+            custom_headers=[("Content-Length", str(24))],
         )
-        media_2_id = mxc_uri_2.media_id
+        assert channel.code == 200, channel.json_body
+        mxc_uri_str = channel.json_body.get("content_uri")
+        assert mxc_uri_str is not None
+        media_2_id = mxc_uri_str.rsplit("/", 1)[-1]
 
         # Prove that the media are written on the local media table
         uploaded_media = self.get_success(
-            self.media_repository.store.get_local_media(mxc_uri_1.media_id)
+            self.media_repository.store.get_local_media(media_1_id)
         )
         assert uploaded_media is not None
         assert uploaded_media.attachments is None
 
         uploaded_media = self.get_success(
-            self.media_repository.store.get_local_media(mxc_uri_2.media_id)
+            self.media_repository.store.get_local_media(media_2_id)
         )
         assert uploaded_media is not None
         assert uploaded_media.attachments is None
@@ -112,29 +114,26 @@ class PendingMediaDeletionTestCase(unittest.HomeserverTestCase):
 
         # Check the deletion is completed
         uploaded_media = self.get_success(
-            self.media_repository.store.get_local_media(mxc_uri_1.media_id)
+            self.media_repository.store.get_local_media(media_1_id)
         )
         assert uploaded_media is None
 
         uploaded_media = self.get_success(
-            self.media_repository.store.get_local_media(mxc_uri_2.media_id)
+            self.media_repository.store.get_local_media(media_2_id)
         )
         assert uploaded_media is None
 
         # Attempt to access media to check if media is deleted from file
+        server_name = self.hs.hostname
         channel = self.make_request(
             "GET",
             f"/_matrix/media/v3/download/{server_name}/{media_1_id}",
             shorthand=False,
             access_token=self.tok,
         )
-        self.assertEqual(
-            404,
-            channel.code,
-            msg=(
-                "Expected to receive a 404 on accessing deleted media: %s:%s"
-                % (server_name, media_1_id)
-            ),
+        assert channel.code == 404, (
+            "Expected to receive a 404 on accessing deleted media: %s:%s"
+            % (server_name, media_1_id)
         )
 
         channel = self.make_request(
@@ -143,13 +142,9 @@ class PendingMediaDeletionTestCase(unittest.HomeserverTestCase):
             shorthand=False,
             access_token=self.tok,
         )
-        self.assertEqual(
-            404,
-            channel.code,
-            msg=(
-                "Expected to receive a 404 on accessing deleted media: %s:%s"
-                % (server_name, media_2_id)
-            ),
+        assert channel.code == 404, (
+            "Expected to receive a 404 on accessing deleted media: %s:%s"
+            % (server_name, media_1_id)
         )
 
         # Test if the file is deleted
@@ -173,7 +168,7 @@ class PendingMediaDeletionTestCase(unittest.HomeserverTestCase):
             content_type=b"image/png",
             custom_headers=[("Content-Length", str(24))],
         )
-        self.assertEqual(channel.code, 200, channel.json_body)
+        assert channel.code == 200, channel.json_body
         mxc_uri_str = channel.json_body.get("content_uri")
         assert mxc_uri_str is not None
 
