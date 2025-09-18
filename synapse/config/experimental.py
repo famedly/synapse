@@ -592,7 +592,12 @@ class ExperimentalConfig(Config):
         # MSC3911: Linking Media to Events
         self.msc3911_enabled: bool = experimental.get("msc3911_enabled", False)
 
-        # Disable the current media create and upload endpoints
+        # MSC3911: Disable the current media create and upload endpoints
         self.msc3911_unrestricted_media_upload_disabled: bool = experimental.get(
             "msc3911_unrestricted_media_upload_disabled", False
+        )
+
+        # MSC3911: Delete pending media that is older than 24 hours but not attached to any events
+        self.msc3911_enabled_media_retention = experimental.get(
+            "msc3911_enabled_media_retention", False
         )
