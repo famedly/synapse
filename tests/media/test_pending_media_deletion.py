@@ -199,3 +199,41 @@ class PendingMediaDeletionTestCase(unittest.HomeserverTestCase):
             self.media_repository.store.get_local_media(media_id)
         )
         assert uploaded_media is not None
+
+    def test_pending_media_deletion_does_not_delete_unrestricted_media(self) -> None:
+        """
+        Test that unrestricted media should not be deleted.
+        """
+        assert isinstance(self.media_repository, MediaRepository)
+
+        # Create unrestricted media via upload endpoint
+        random_content = bytes(random_string(24), "utf-8")
+        channel = self.make_request(
+            "POST",
+            "_matrix/media/v3/upload?filename=unrestricted",
+            random_content,
+            self.tok,
+            shorthand=False,
+            content_type=b"image/png",
+            custom_headers=[("Content-Length", str(24))],
+        )
+        assert channel.code == 200, channel.json_body
+        mxc_uri_str = channel.json_body.get("content_uri")
+        assert mxc_uri_str is not None
+        _, media_id = mxc_uri_str.rsplit("/", maxsplit=1)
+
+        # Check if media is not restricted
+        media_info = self.get_success(
+            self.media_repository.store.get_local_media(media_id)
+        )
+        assert media_info is not None
+        assert media_info.restricted is False
+
+        # Advance 25 hours
+        self.reactor.advance(25 * 60 * 60)
+
+        # Check that media is not deleted
+        uploaded_media = self.get_success(
+            self.media_repository.store.get_local_media(media_id)
+        )
+        assert uploaded_media is not None

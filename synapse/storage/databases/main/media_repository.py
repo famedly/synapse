@@ -1321,7 +1321,8 @@ class MediaRepositoryStore(MediaRepositoryBackgroundUpdateStore):
                 FROM local_media_repository
                     LEFT JOIN media_attachments
                     ON local_media_repository.media_id = media_attachments.media_id
-                WHERE (media_attachments.restrictions_json IS NULL OR media_attachments.restrictions_json = '{}')
+                WHERE local_media_repository.restricted = 1
+                    AND media_attachments.restrictions_json IS NULL
                     AND local_media_repository.created_ts < ?;
             """
             txn.execute(sql, (threshold_ts,))
