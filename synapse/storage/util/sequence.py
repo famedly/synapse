@@ -41,7 +41,13 @@ Postgres sequence '%(seq)s' is inconsistent with associated stream position
 of '%(stream_name)s' in the 'stream_positions' table.
 
 This is likely a programming error and should be reported at
-https://github.com/matrix-org/synapse.
+https://github.com/matrix-org/synapse. Please include the following data with
+your report:
+-----
+last_value: '%(last_value)',    is_called: '%(is_called)',
+max_stream_id: '%(max_stream_id)',
+max_in_stream_positions: '%(max_in_stream_positions)'
+-----
 
 A temporary workaround to fix this error is to shut down Synapse (including
 any and all workers) and run the following SQL:
@@ -191,7 +197,14 @@ class PostgresSequenceGenerator(SequenceGenerator):
         if max_in_stream_positions and max_in_stream_positions > last_value:
             raise IncorrectDatabaseSetup(
                 _INCONSISTENT_STREAM_ERROR
-                % {"seq": self._sequence_name, "stream_name": stream_name}
+                % {
+                    "seq": self._sequence_name,
+                    "stream_name": stream_name,
+                    "last_value": last_value,
+                    "is_called": is_called,
+                    "max_stream_id": max_stream_id,
+                    "max_in_stream_positions": max_in_stream_positions,
+                }
             )
 
     def get_max_allocated(self, txn: Cursor) -> int:
