@@ -301,15 +301,36 @@ class ProfileHandler:
             avatar_url = f"mxc://{avatar_url}"
         mxc_uri = MXCUri.from_str(avatar_url)
 
-        media_info = await self.hs.get_datastores().main.get_local_media(
-            mxc_uri.media_id
-        )
-        if media_info is None or media_info.user_id != requester.user.to_string():
-            raise SynapseError(
-                HTTPStatus.BAD_REQUEST,
-                f"The media attachment request is invalid as the media '{mxc_uri.media_id}' does not exist",
-                Codes.INVALID_PARAM,
+        media_info: Union[LocalMedia, RemoteMedia, None]
+        if self._is_mine_server_name(mxc_uri.server_name):
+            media_info = await self.hs.get_datastores().main.get_local_media(
+                mxc_uri.media_id
             )
+            if not media_info:
+                # Locally, if there is no data on this, it implies they are making up
+                # things. Or, maybe, that they forgot to do a `/copy` first. Let them
+                # known
+                raise SynapseError(
+                    HTTPStatus.BAD_REQUEST,
+                    f"The media attachment request is invalid as the media '{mxc_uri.media_id}' does not exist",
+                    Codes.INVALID_PARAM,
+                )
+
+            elif media_info.user_id != requester.user.to_string():
+                # Media doesn't belong to the requester. Nope
+                raise SynapseError(
+                    HTTPStatus.BAD_REQUEST,
+                    f"The media attachment request is invalid as the media '{mxc_uri.media_id}' does not exist",
+                    Codes.INVALID_PARAM,
+                )
+        else:
+            media_info = await self.hs.get_datastores().main.get_cached_remote_media(
+                mxc_uri.server_name, mxc_uri.media_id
+            )
+            if not media_info:
+                # There is no data on this, not much can be done until it comes along
+                return
+
         if self.disable_unrestricted_media and not media_info.restricted:
             raise SynapseError(
                 HTTPStatus.BAD_REQUEST,
