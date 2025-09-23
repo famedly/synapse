@@ -599,15 +599,15 @@ class MultiWriterIdGenerator(AbstractStreamIdGenerator):
         #
         # We only do this on the success path so that the persisted current
         # position points to a persisted row with the correct instance name.
-        if self._writers:
-            txn.call_after(
-                run_as_background_process,
-                "MultiWriterIdGenerator._update_table",
-                self.server_name,
-                self._db.runInteraction,
-                "MultiWriterIdGenerator._update_table",
-                self._update_stream_positions_table_txn,
-            )
+        # if self._writers:
+        #     txn.call_after(
+        #         run_as_background_process,
+        #         "MultiWriterIdGenerator._update_table",
+        #         self.server_name,
+        #         self._db.runInteraction,
+        #         "MultiWriterIdGenerator._update_table",
+        #         self._update_stream_positions_table_txn,
+        #     )
 
         return [self._return_factor * next_id for next_id in next_ids]
 
