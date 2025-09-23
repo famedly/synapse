@@ -102,6 +102,7 @@ class LocalMedia:
     sha256: Optional[str]
     restricted: bool
     attachments: Optional[MediaRestrictions]
+    original_media_id: Optional[str]
 
 
 @attr.s(slots=True, frozen=True, auto_attribs=True)
@@ -119,6 +120,7 @@ class RemoteMedia:
     sha256: Optional[str]
     restricted: bool
     attachments: Optional[MediaRestrictions]
+    original_media_id: Optional[str]
 
 
 @attr.s(slots=True, frozen=True, auto_attribs=True)
@@ -283,6 +285,7 @@ class MediaRepositoryStore(MediaRepositoryBackgroundUpdateStore):
                 "authenticated",
                 "sha256",
                 "restricted",
+                "original_media_id",
             ),
             allow_none=True,
             desc="get_local_media",
@@ -310,6 +313,7 @@ class MediaRepositoryStore(MediaRepositoryBackgroundUpdateStore):
             sha256=row[10],
             restricted=bool(row[11]),
             attachments=restriction_info,
+            original_media_id=row[12],
         )
 
     async def get_local_media_by_user_paginate(
@@ -370,7 +374,8 @@ class MediaRepositoryStore(MediaRepositoryBackgroundUpdateStore):
                     sha256,
                     restricted,
                     ma.restrictions_json->'restrictions'->>'event_id' AS event_id,
-                    ma.restrictions_json->'restrictions'->>'event_id' AS profile_user_id
+                    ma.restrictions_json->'restrictions'->>'event_id' AS profile_user_id,
+                    original_media_id
                 FROM local_media_repository AS lmr
                 -- a LEFT JOIN allows values from the right table to be NULL if non-existent
                 LEFT JOIN media_attachments AS ma ON lmr.media_id = ma.media_id
@@ -406,6 +411,7 @@ class MediaRepositoryStore(MediaRepositoryBackgroundUpdateStore):
                     )
                     if bool(row[12])
                     else None,
+                    original_media_id=row[15],
                 )
                 for row in txn
             ]
@@ -540,6 +546,7 @@ class MediaRepositoryStore(MediaRepositoryBackgroundUpdateStore):
         sha256: Optional[str] = None,
         quarantined_by: Optional[str] = None,
         restricted: bool = False,
+        original_media_id: Optional[str] = None,
     ) -> None:
         if self.hs.config.media.enable_authenticated_media:
             authenticated = True
@@ -560,6 +567,7 @@ class MediaRepositoryStore(MediaRepositoryBackgroundUpdateStore):
                 "sha256": sha256,
                 "quarantined_by": quarantined_by,
                 "restricted": restricted,
+                "original_media_id": original_media_id,
             },
             desc="store_local_media",
         )
@@ -574,6 +582,7 @@ class MediaRepositoryStore(MediaRepositoryBackgroundUpdateStore):
         sha256: str,
         url_cache: Optional[str] = None,
         quarantined_by: Optional[str] = None,
+        original_media_id: Optional[str] = None,
     ) -> None:
         updatevalues = {
             "media_type": media_type,
@@ -581,6 +590,7 @@ class MediaRepositoryStore(MediaRepositoryBackgroundUpdateStore):
             "media_length": media_length,
             "url_cache": url_cache,
             "sha256": sha256,
+            "original_media_id": original_media_id,
         }
 
         # This should never be un-set by this function.
@@ -761,6 +771,7 @@ class MediaRepositoryStore(MediaRepositoryBackgroundUpdateStore):
                 "authenticated",
                 "sha256",
                 "restricted",
+                "original_media_id",
             ),
             allow_none=True,
             desc="get_cached_remote_media",
@@ -786,6 +797,7 @@ class MediaRepositoryStore(MediaRepositoryBackgroundUpdateStore):
             sha256=row[8],
             restricted=bool(row[9]),
             attachments=restriction_info,
+            original_media_id=row[10],
         )
 
     async def store_cached_remote_media(
@@ -799,6 +811,7 @@ class MediaRepositoryStore(MediaRepositoryBackgroundUpdateStore):
         filesystem_id: str,
         sha256: Optional[str],
         restricted: bool = False,
+        original_media_id: Optional[str] = None,
     ) -> None:
         if self.hs.config.media.enable_authenticated_media:
             authenticated = True
@@ -819,6 +832,7 @@ class MediaRepositoryStore(MediaRepositoryBackgroundUpdateStore):
                 "authenticated": authenticated,
                 "sha256": sha256,
                 "restricted": restricted,
+                "original_media_id": original_media_id,
             },
             desc="store_cached_remote_media",
         )
@@ -1104,6 +1118,39 @@ class MediaRepositoryStore(MediaRepositoryBackgroundUpdateStore):
             get_matching_media_txn,
             "local_media_repository",
             sha256,
+        )
+
+    async def get_original_media_id_by_hash(
+        self, sha256: str, server_name: Optional[str] = None
+    ) -> Optional[str]:
+        """
+        Get the media ID of the original media with the given SHA256 hash.
+        """
+
+        sql = """
+                SELECT media_id
+                FROM local_media_repository
+                WHERE sha256 = ?
+                LIMIT 1
+                """
+
+        if server_name and not self.hs.is_mine_server_name(server_name):
+            sql = """
+                SELECT media_id
+                FROM remote_media_cache
+                WHERE sha256 = ?
+                LIMIT 1
+                """
+
+        def _get_original_media_by_hash_txn(txn: LoggingTransaction) -> Optional[str]:
+            txn.execute(sql, (sha256,))
+            row = txn.fetchone()
+            if row:
+                return row[0]
+            return None
+
+        return await self.db_pool.runInteraction(
+            "get_original_media_by_hash", _get_original_media_by_hash_txn
         )
 
     async def get_media_uploaded_size_for_user(

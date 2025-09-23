@@ -751,6 +751,25 @@ class MediaRepository(AbstractMediaRepository):
             raise NotFoundError("Media ID has expired")
 
     @trace
+    async def check_file_exists(
+        self, server_name: Optional[str], sha256: str
+    ) -> Optional[str]:
+        """Check if the media with the given SHA256 already exists. If so, return the
+        media path of the original.
+
+        Args:
+            server_name: The server name
+            sha256: The SHA256 hash of the media to check for duplication
+        """
+        original_media_id = await self.store.get_original_media_id_by_hash(
+            sha256, server_name
+        )
+        if original_media_id:
+            local_path = self.filepaths.local_media_filepath(original_media_id)
+            return local_path
+        return None
+
+    @trace
     async def create_or_update_content(
         self,
         media_type: str,
@@ -760,6 +779,7 @@ class MediaRepository(AbstractMediaRepository):
         auth_user: UserID,
         media_id: Optional[str] = None,
         restricted: bool = False,
+        original_media_id: Optional[str] = None,
     ) -> MXCUri:
         """Create or update the content of the given media ID.
 
@@ -783,9 +803,13 @@ class MediaRepository(AbstractMediaRepository):
 
         file_info = FileInfo(server_name=None, file_id=media_id)
         sha256reader = SHA256TransparentIOReader(content)
+        sha256 = sha256reader.hexdigest()
+        if not original_media_id:
+            original_media_id = await self.check_file_exists(
+                sha256=sha256, server_name=self.hs.hostname
+            )
         # This implements all of IO as it has a passthrough
         fname = await self.media_storage.store_file(sha256reader.wrap(), file_info)
-        sha256 = sha256reader.hexdigest()
         should_quarantine = await self.store.get_is_hash_quarantined(sha256)
 
         logger.info("Stored local media in file %r", fname)
@@ -835,6 +859,7 @@ class MediaRepository(AbstractMediaRepository):
                 sha256=sha256,
                 quarantined_by="system" if should_quarantine else None,
                 restricted=restricted,
+                original_media_id=original_media_id,
             )
         else:
             await self.store.update_local_media(
@@ -845,6 +870,7 @@ class MediaRepository(AbstractMediaRepository):
                 user_id=auth_user,
                 sha256=sha256,
                 quarantined_by="system" if should_quarantine else None,
+                original_media_id=original_media_id,
             )
 
         try:
@@ -894,6 +920,7 @@ class MediaRepository(AbstractMediaRepository):
             content_length=old_media_info.media_length,
             auth_user=auth_user,
             restricted=True,
+            original_media_id=local_path,
         )
         # I could not find a place this was close()'d explicitly, but this felt prudent
         io_object.close()
@@ -1443,6 +1470,7 @@ class MediaRepository(AbstractMediaRepository):
             # will always be false and attachments will always be None here
             restricted=False,
             attachments=None,
+            original_media_id=None,
         )
 
     async def _federation_download_remote_file(
@@ -1614,6 +1642,7 @@ class MediaRepository(AbstractMediaRepository):
             sha256=sha256writer.hexdigest(),
             restricted=restricted,
             attachments=attachments,
+            original_media_id=None,
         )
 
     def _get_thumbnail_requirements(
