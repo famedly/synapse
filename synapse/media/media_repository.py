@@ -869,7 +869,8 @@ class MediaRepository(AbstractMediaRepository):
         old_media_info = await self.get_media_info(existing_mxc)
         if isinstance(old_media_info, RemoteMedia):
             file_info = FileInfo(
-                server_name=old_media_info.media_origin, file_id=old_media_info.media_id
+                server_name=old_media_info.media_origin,
+                file_id=old_media_info.filesystem_id,
             )
         else:
             file_info = FileInfo(server_name=None, file_id=old_media_info.media_id)
