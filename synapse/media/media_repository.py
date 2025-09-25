@@ -174,7 +174,7 @@ class AbstractMediaRepository:
 
     async def copy_media(
         self, existing_mxc: MXCUri, auth_user: UserID, max_timeout_ms: int
-    ) -> MXCUri:
+    ) -> Optional[MXCUri]:
         raise NotImplementedError(
             "Sorry Mario, your MediaRepository related function is in another castle"
         )
@@ -533,7 +533,7 @@ class MediaRepositoryWorker(AbstractMediaRepository):
 
     async def copy_media(
         self, existing_mxc: MXCUri, auth_user: UserID, max_timeout_ms: int
-    ) -> MXCUri:
+    ) -> Optional[MXCUri]:
         """
         Call out to the worker responsible for handling media to copy this media object
         """
@@ -544,7 +544,10 @@ class MediaRepositoryWorker(AbstractMediaRepository):
             user_id=auth_user.to_string(),
             max_timeout_ms=max_timeout_ms,
         )
-        return MXCUri.from_str(result["content_uri"])
+        if result.get("content_uri"):
+            return MXCUri.from_str(result["content_uri"])
+        else:
+            return None
 
 
 class MediaRepository(AbstractMediaRepository):
@@ -751,6 +754,25 @@ class MediaRepository(AbstractMediaRepository):
             raise NotFoundError("Media ID has expired")
 
     @trace
+    async def get_original_file_path_by_hash(
+        self, server_name: Optional[str], sha256: str
+    ) -> Optional[str]:
+        """Check if the media with the given SHA256 already exists. If so, return the
+        media path of the original.
+
+        Args:
+            server_name: The server name
+            sha256: The SHA256 hash of the media to check for duplication
+        """
+        original_media_id = await self.store.get_original_media_id_by_hash(
+            sha256, server_name
+        )
+        if original_media_id:
+            local_path = self.filepaths.local_media_filepath(original_media_id)
+            return local_path
+        return None
+
+    @trace
     async def create_or_update_content(
         self,
         media_type: str,
@@ -760,6 +782,7 @@ class MediaRepository(AbstractMediaRepository):
         auth_user: UserID,
         media_id: Optional[str] = None,
         restricted: bool = False,
+        original_media_id: Optional[str] = None,
     ) -> MXCUri:
         """Create or update the content of the given media ID.
 
@@ -781,15 +804,28 @@ class MediaRepository(AbstractMediaRepository):
         if media_id is None:
             media_id = random_string(24)
 
-        file_info = FileInfo(server_name=None, file_id=media_id)
+        # Generate SHA256 hash
+        content.seek(0)
         sha256reader = SHA256TransparentIOReader(content)
-        # This implements all of IO as it has a passthrough
-        fname = await self.media_storage.store_file(sha256reader.wrap(), file_info)
+        sha256reader.read()
         sha256 = sha256reader.hexdigest()
+
+        if not original_media_id:
+            original_media_id = await self.get_original_file_path_by_hash(
+                sha256=sha256, server_name=self.hs.hostname
+            )
+            if original_media_id:
+                logger.info("Found existing media in path %r", original_media_id)
+            else:
+                # Only store file if the original media's file path doesn't exist
+                # This implements all of IO as it has a passthrough
+                file_info = FileInfo(server_name=None, file_id=media_id)
+                fname = await self.media_storage.store_file(
+                    sha256reader.wrap(), file_info
+                )
+                logger.info("Stored local media in file %r", fname)
+
         should_quarantine = await self.store.get_is_hash_quarantined(sha256)
-
-        logger.info("Stored local media in file %r", fname)
-
         if should_quarantine:
             logger.warning(
                 "Media has been automatically quarantined as it matched existing quarantined media"
@@ -835,6 +871,7 @@ class MediaRepository(AbstractMediaRepository):
                 sha256=sha256,
                 quarantined_by="system" if should_quarantine else None,
                 restricted=restricted,
+                original_media_id=original_media_id,
             )
         else:
             await self.store.update_local_media(
@@ -845,10 +882,17 @@ class MediaRepository(AbstractMediaRepository):
                 user_id=auth_user,
                 sha256=sha256,
                 quarantined_by="system" if should_quarantine else None,
+                original_media_id=original_media_id,
             )
 
         try:
-            await self._generate_thumbnails(None, media_id, media_id, media_type)
+            # TODO: if the original media exists, create a thumbnail for that?
+            # or is it okay to not create the thumbnail when it's not original?
+            # cuz original media will likely have the thumbnails.
+            # the problem is how to connect the original thumbnails to copied media.
+            if not original_media_id:
+                await self._generate_thumbnails(None, media_id, media_id, media_type)
+
         except Exception as e:
             logger.info("Failed to generate thumbnails: %s", e)
 
@@ -856,7 +900,7 @@ class MediaRepository(AbstractMediaRepository):
 
     async def copy_media(
         self, existing_mxc: MXCUri, auth_user: UserID, max_timeout_ms: int
-    ) -> MXCUri:
+    ) -> Optional[MXCUri]:
         """
         Copy an existing piece of media into a new file with new LocalMedia
 
@@ -878,7 +922,13 @@ class MediaRepository(AbstractMediaRepository):
         # This will ensure that if there is another storage provider containing our old
         # media, it will be in our local cache before the copy takes place.
         # Conveniently, it also gives us the local path of where the file lives.
-        local_path = await self.media_storage.ensure_media_is_in_local_cache(file_info)
+        try:
+            local_path = await self.media_storage.ensure_media_is_in_local_cache(
+                file_info
+            )
+        except Exception as e:
+            logger.error("Failed to ensure media is in local cache. %s", e)
+            return None
 
         assert old_media_info.media_length is not None
 
@@ -895,6 +945,7 @@ class MediaRepository(AbstractMediaRepository):
             content_length=old_media_info.media_length,
             auth_user=auth_user,
             restricted=True,
+            original_media_id=local_path,
         )
         # I could not find a place this was close()'d explicitly, but this felt prudent
         io_object.close()
@@ -1444,6 +1495,7 @@ class MediaRepository(AbstractMediaRepository):
             # will always be false and attachments will always be None here
             restricted=False,
             attachments=None,
+            original_media_id=None,
         )
 
     async def _federation_download_remote_file(
@@ -1615,6 +1667,7 @@ class MediaRepository(AbstractMediaRepository):
             sha256=sha256writer.hexdigest(),
             restricted=restricted,
             attachments=attachments,
+            original_media_id=None,
         )
 
     def _get_thumbnail_requirements(
