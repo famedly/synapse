@@ -874,10 +874,13 @@ class RoomMemberHandler(metaclass=abc.ABCMeta):
                     new_mxc_uri = await media_repo.copy_media(
                         MXCUri.from_str(avatar_url), requester.user, 20_000
                     )
-                    media_object = await media_repo.get_media_info(new_mxc_uri)
-                    assert isinstance(media_object, LocalMedia)
-                    media_info_for_attachment = {media_object}
-                    content[EventContentFields.MEMBERSHIP_AVATAR_URL] = str(new_mxc_uri)
+                    if new_mxc_uri:
+                        media_object = await media_repo.get_media_info(new_mxc_uri)
+                        assert isinstance(media_object, LocalMedia)
+                        media_info_for_attachment = {media_object}
+                        content[EventContentFields.MEMBERSHIP_AVATAR_URL] = str(
+                            new_mxc_uri
+                        )
 
         # if this is a join with a 3pid signature, we may need to turn a 3pid
         # invite into a normal invite before we can handle the join.

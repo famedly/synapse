@@ -90,10 +90,10 @@ class ReplicationCopyMediaServlet(ReplicationEndpoint):
                 "MXC as provided was not formatted correctly",
                 Codes.INVALID_PARAM,
             )
-        mxc_uri = await self.media_repo.copy_media(
+        copied_mxc_uri = await self.media_repo.copy_media(
             mxc_uri, user_id, max_timeout_ms=max_timeout_ms
         )
-        return 200, {"content_uri": str(mxc_uri)}
+        return 200, {"content_uri": str(copied_mxc_uri)}
 
 
 def register_servlets(hs: "HomeServer", http_server: HttpServer) -> None:

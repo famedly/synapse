@@ -1126,31 +1126,36 @@ class MediaRepositoryStore(MediaRepositoryBackgroundUpdateStore):
         """
         Get the media ID of the original media with the given SHA256 hash.
         """
-
+        # if there are several media_ids with the same sha256, should we get the oldest
+        # item(created_ts) or the most recently used one(last_accessed_ts)?
         sql = """
-                SELECT media_id
-                FROM local_media_repository
-                WHERE sha256 = ?
-                LIMIT 1
-                """
+        SELECT media_id
+        FROM local_media_repository
+        WHERE sha256 = ?
+        ORDER BY created_ts ASC
+        LIMIT 1
+        """
 
         if server_name and not self.hs.is_mine_server_name(server_name):
             sql = """
-                SELECT media_id
-                FROM remote_media_cache
-                WHERE sha256 = ?
-                LIMIT 1
-                """
+            SELECT media_id
+            FROM remote_media_cache
+            WHERE sha256 = ?
+            ORDER BY created_ts ASC
+            LIMIT 1
+            """
 
-        def _get_original_media_by_hash_txn(txn: LoggingTransaction) -> Optional[str]:
+        def _get_original_media_id_by_hash_txn(
+            txn: LoggingTransaction,
+        ) -> Optional[str]:
             txn.execute(sql, (sha256,))
-            row = txn.fetchone()
-            if row:
-                return row[0]
+            rows = txn.fetchone()
+            if rows:
+                return rows[0]
             return None
 
         return await self.db_pool.runInteraction(
-            "get_original_media_by_hash", _get_original_media_by_hash_txn
+            "get_original_media_id_by_hash", _get_original_media_id_by_hash_txn
         )
 
     async def get_media_uploaded_size_for_user(

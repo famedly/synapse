@@ -1,5 +1,8 @@
+import hashlib
 import io
 import os
+import shutil
+from typing import Tuple
 
 from matrix_common.types.mxc_uri import MXCUri
 from PIL import Image as Image
@@ -17,7 +20,7 @@ from synapse.types import UserID
 from synapse.util import Clock
 
 from tests import unittest
-from tests.test_utils import SMALL_PNG
+from tests.test_utils import SMALL_PNG, SMALL_PNG_SHA256
 
 
 class RestrictedMediaDeduplicationTestCase(unittest.HomeserverTestCase):
@@ -47,16 +50,26 @@ class RestrictedMediaDeduplicationTestCase(unittest.HomeserverTestCase):
         self.other_user = self.register_user("other", "testpass")
         self.other_user_tok = self.login("other", "testpass")
         self.filepaths = MediaFilePaths(hs.config.media.media_store_path)
+        self.local_media_root = (
+            self.hs.config.media.media_store_path + "/local_content/"
+        )
+        self.remote_media_root = (
+            self.hs.config.media.media_store_path + "/remote_content/"
+        )
 
-        self.remote = "example.com"
-        self.media_id = "12345"
+    def tearDown(self) -> None:
+        super().tearDown()
+        media_root = self.hs.config.media.media_store_path
+        if os.path.exists(media_root):
+            shutil.rmtree(media_root)
 
     def create_resource_dict(self) -> dict[str, Resource]:
         resources = super().create_resource_dict()
         resources["/_matrix/media"] = self.hs.get_media_repository_resource()
         return resources
 
-    def create_restricted_media(self, user: str) -> MXCUri:
+    def create_restricted_media(self, user: str) -> Tuple[MXCUri, str]:
+        assert isinstance(self.media_repository, MediaRepository)
         mxc_uri = self.get_success(
             self.media_repository.create_or_update_content(
                 "image/png",
@@ -74,20 +87,32 @@ class RestrictedMediaDeduplicationTestCase(unittest.HomeserverTestCase):
         assert uploaded_media.attachments is None
 
         local_path = self.filepaths.local_media_filepath(mxc_uri.media_id)
+        assert os.path.getsize(local_path) == 67
+        assert uploaded_media.sha256 == SMALL_PNG_SHA256
         assert os.path.exists(local_path)
-
-        return mxc_uri
+        return mxc_uri, local_path
 
     def generate_path_from_media_id(self, media_id: str) -> str:
         return f"{media_id[:2]}/{media_id[2:4]}/{media_id[4:]}"
+
+    def find_files_with_hash(self, root_dir: str, expected_sha256: str) -> list[str]:
+        matches = []
+        for dirpath, _, filenames in os.walk(root_dir):
+            for filename in filenames:
+                file_path = os.path.join(dirpath, filename)
+                with open(file_path, "rb") as f:
+                    file_bytes = f.read()
+                    sha256 = hashlib.sha256(file_bytes).hexdigest()
+                    if sha256 == expected_sha256:
+                        matches.append(file_path)
+        return matches
 
     def test_upload_media_with_original_media_id_field(self) -> None:
         """
         Test that uploading same media again will create media with original_media_id field.
         """
         # Create an original media and make sure it's written to the file
-        original_mxc = self.create_restricted_media(self.user)
-
+        _, original_media_path = self.create_restricted_media(self.user)
         # Upload another media with the same file
         channel = self.make_request(
             "POST",
@@ -98,20 +123,27 @@ class RestrictedMediaDeduplicationTestCase(unittest.HomeserverTestCase):
             custom_headers=[("Content-Length", str(67))],
         )
         assert channel.code == 200, channel.json_body
-        mxc_uri_str = channel.json_body.get("content_uri")
-        assert mxc_uri_str is not None
-        media_id = mxc_uri_str.rsplit("/", 1)[-1]
+        new_mxc_uri_str = channel.json_body.get("content_uri")
+        assert new_mxc_uri_str is not None
+        new_media_id = new_mxc_uri_str.rsplit("/", 1)[-1]
 
         # Make sure the new media is saved with the `original_media_id`
-        media_info = self.get_success(
-            self.media_repository.store.get_local_media(media_id)
+        new_media_info = self.get_success(
+            self.media_repository.store.get_local_media(new_media_id)
         )
-        assert media_info is not None
-        assert media_info.original_media_id is not None
-        assert "synapse/media/local_content" in media_info.original_media_id
-        assert (
-            self.generate_path_from_media_id(original_mxc.media_id)
-            in media_info.original_media_id
+        assert new_media_info is not None
+        assert new_media_info.original_media_id is not None
+
+        # Check if the new media's original_media_id and the original file path are the same
+        assert new_media_info.original_media_id == original_media_path, (
+            f"Expected {new_media_info.original_media_id} to equal {original_media_path}"
+        )
+        assert new_media_info.sha256 == SMALL_PNG_SHA256
+
+        # Confirm that there's only one media file exists with the hash
+        matches = self.find_files_with_hash(self.local_media_root, SMALL_PNG_SHA256)
+        assert len(matches) == 1, (
+            f"Expected 1 file with hash {SMALL_PNG_SHA256}, found: {matches}"
         )
 
     def test_async_upload_media_with_original_media_id_field(self) -> None:
@@ -120,7 +152,8 @@ class RestrictedMediaDeduplicationTestCase(unittest.HomeserverTestCase):
         original_media_id field.
         """
         # Create original file
-        original_mxc = self.create_restricted_media(self.user)
+        _, original_media_path = self.create_restricted_media(self.user)
+
         # Create media id with create endpoint
         channel = self.make_request(
             "POST",
@@ -152,10 +185,17 @@ class RestrictedMediaDeduplicationTestCase(unittest.HomeserverTestCase):
         )
         assert media_info is not None
         assert media_info.original_media_id is not None
-        assert "synapse/media/local_content" in media_info.original_media_id
-        assert (
-            self.generate_path_from_media_id(original_mxc.media_id)
-            in media_info.original_media_id
+
+        # Check if the new media's original_media_id and the original file path are the same
+        assert media_info.original_media_id == original_media_path, (
+            f"Expected {media_info.original_media_id} to equal {original_media_path}"
+        )
+        assert media_info.sha256 == SMALL_PNG_SHA256
+
+        # Confirm that there's only one media file exists with the hash
+        matches = self.find_files_with_hash(self.local_media_root, SMALL_PNG_SHA256)
+        assert len(matches) == 1, (
+            f"Expected 1 file with hash {SMALL_PNG_SHA256}, found: {matches}"
         )
 
     def test_copy_local_media_with_original_media_id(self) -> None:
@@ -163,7 +203,7 @@ class RestrictedMediaDeduplicationTestCase(unittest.HomeserverTestCase):
         Test if copying a local media creates media with original_media_id.
         """
         # create a media and make sure it's written to the file
-        original_mxc = self.create_restricted_media(self.user)
+        original_mxc, original_media_path = self.create_restricted_media(self.user)
 
         # Copy the original media
         channel = self.make_request(
@@ -176,16 +216,23 @@ class RestrictedMediaDeduplicationTestCase(unittest.HomeserverTestCase):
         assert "content_uri" in channel.json_body
         copied_media_id = channel.json_body["content_uri"].split("/")[-1]
 
-        # check if the copied media has the original media id field
+        # Check if the copied media has the original media id field
         copied_media = self.get_success(
             self.hs.get_datastores().main.get_local_media(copied_media_id)
         )
         assert copied_media is not None
         assert copied_media.original_media_id is not None
-        assert "synapse/media/local_content" in copied_media.original_media_id
-        assert (
-            self.generate_path_from_media_id(original_mxc.media_id)
-            in copied_media.original_media_id
+
+        # Check if the new media's original_media_id and the original file path are the same
+        assert copied_media.original_media_id == original_media_path, (
+            f"Expected {copied_media.original_media_id} to equal {original_media_path}"
+        )
+        assert copied_media.sha256 == SMALL_PNG_SHA256
+
+        # Confirm that there's only one media file exists with the hash
+        matches = self.find_files_with_hash(self.local_media_root, SMALL_PNG_SHA256)
+        assert len(matches) == 1, (
+            f"Expected 1 file with hash {SMALL_PNG_SHA256}, found: {matches}"
         )
 
     def test_copy_remote_media_with_original_media_id(self) -> None:
@@ -194,10 +241,9 @@ class RestrictedMediaDeduplicationTestCase(unittest.HomeserverTestCase):
         """
         # Create remote media
         remote_server = "remoteserver.com"
-        remote_file_id = "remote1"
-        file_info = FileInfo(
-            server_name=remote_server, file_id=remote_file_id, url_cache=True
-        )
+        media_id = "remotemedia"
+        remote_file_id = media_id
+        file_info = FileInfo(server_name=remote_server, file_id=remote_file_id)
 
         assert isinstance(self.media_repository, MediaRepository)
         media_storage = self.media_repository.media_storage
@@ -208,13 +254,13 @@ class RestrictedMediaDeduplicationTestCase(unittest.HomeserverTestCase):
         self.get_success(
             self.hs.get_datastores().main.store_cached_remote_media(
                 origin=remote_server,
-                media_id=remote_file_id,
+                media_id=media_id,
                 media_type="image/png",
-                media_length=1,
+                media_length=67,
                 time_now_ms=self.clock.time_msec(),
                 upload_name="test.png",
                 filesystem_id=remote_file_id,
-                sha256=remote_file_id,
+                sha256=SMALL_PNG_SHA256,
                 restricted=True,
             )
         )
@@ -225,13 +271,6 @@ class RestrictedMediaDeduplicationTestCase(unittest.HomeserverTestCase):
                 remote_server, remote_file_id, remote_user_id
             )
         )
-        restrictions = self.get_success(
-            self.hs.get_datastores().main.get_media_restrictions(
-                remote_server, remote_file_id
-            )
-        )
-        assert restrictions is not None
-        assert str(restrictions.profile_user_id) == remote_user_id
 
         # Make sure that the remote media is in cache
         cached_remote_media = self.get_success(
@@ -261,11 +300,22 @@ class RestrictedMediaDeduplicationTestCase(unittest.HomeserverTestCase):
         )
         assert copied_media is not None
         assert copied_media.original_media_id is not None
-        assert (
-            f"synapse/media/remote_content/{remote_server}"
-            in copied_media.original_media_id
+
+        # Check if the copied media's original_media_id and the original file path are the same
+        original_media_path = (
+            self.remote_media_root
+            + f"{remote_server}/"
+            + self.generate_path_from_media_id(remote_file_id)
         )
-        assert (
-            self.generate_path_from_media_id(remote_file_id)
-            in copied_media.original_media_id
+        assert copied_media.original_media_id == original_media_path, (
+            f"Expected {copied_media.original_media_id} to equal {original_media_path}"
+        )
+        assert copied_media.sha256 == SMALL_PNG_SHA256
+
+        # Check if the local media path didn't created
+        local_media_path = self.local_media_root + self.generate_path_from_media_id(
+            copied_media_id
+        )
+        assert not os.path.exists(local_media_path), (
+            f"Did not expect local media path to exist: {local_media_path}"
         )
