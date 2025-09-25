@@ -1308,3 +1308,26 @@ class MediaRepositoryStore(MediaRepositoryBackgroundUpdateStore):
             media_id=media_id,
             json_dict=json_object,
         )
+
+    async def get_pending_media_ids(self) -> list[str]:
+        """
+        Get a list of ids of pending media that is older than 24 hours and unattached.
+        """
+        threshold_ts = self._clock.time_msec() - 24 * 60 * 60 * 1000
+
+        def _get_pending_media_ids_txn(txn: LoggingTransaction) -> list[str]:
+            sql = """
+                SELECT local_media_repository.media_id
+                FROM local_media_repository
+                    LEFT JOIN media_attachments
+                    ON local_media_repository.media_id = media_attachments.media_id
+                WHERE local_media_repository.restricted IS TRUE
+                    AND media_attachments.restrictions_json IS NULL
+                    AND local_media_repository.created_ts < ?;
+            """
+            txn.execute(sql, (threshold_ts,))
+            return [row[0] for row in txn]
+
+        return await self.db_pool.runInteraction(
+            "get_pending_media_ids", _get_pending_media_ids_txn
+        )
