@@ -110,6 +110,10 @@ class RoomMemberHandler(metaclass=abc.ABCMeta):
         self.event_auth_handler = hs.get_event_auth_handler()
         self._worker_lock_handler = hs.get_worker_locks_handler()
         self.enable_restricted_media = hs.config.experimental.msc3911_enabled
+        # This is technically wrong, but works for proof of concept
+        self.allow_legacy_media = (
+            not hs.config.experimental.msc3911_unrestricted_media_upload_disabled
+        )
 
         self._membership_types_to_include_profile_data_in = {
             Membership.JOIN,
@@ -871,13 +875,35 @@ class RoomMemberHandler(metaclass=abc.ABCMeta):
                     # it on the spot instead.
                     media_repo = self.hs.get_media_repository()
 
-                    new_mxc_uri = await media_repo.copy_media(
-                        MXCUri.from_str(avatar_url), requester.user, 20_000
-                    )
-                    media_object = await media_repo.get_media_info(new_mxc_uri)
-                    assert isinstance(media_object, LocalMedia)
-                    media_info_for_attachment = {media_object}
-                    content[EventContentFields.MEMBERSHIP_AVATAR_URL] = str(new_mxc_uri)
+                    try:
+                        new_mxc_uri = await media_repo.copy_media(
+                            MXCUri.from_str(avatar_url), requester.user, 20_000
+                        )
+                    except SynapseError:
+                        # The copy command can fail if the media doesn't already exist.
+                        # In this case, if legacy media is allowed, ignore it.
+                        # Otherwise, deny it and re-raise.
+                        #
+                        # This reaches the profile handler but does not deny the profile
+                        # change request? How odd
+                        if self.allow_legacy_media:
+                            logger.debug(
+                                "Ignoring media copy request; the media is unknown and "
+                                "will not be treated as restricted"
+                            )
+
+                        else:
+                            logger.warning(
+                                "Unknown media can not be restricted to membership event"
+                            )
+                            raise
+                    else:
+                        media_object = await media_repo.get_media_info(new_mxc_uri)
+                        assert isinstance(media_object, LocalMedia)
+                        media_info_for_attachment = {media_object}
+                        content[EventContentFields.MEMBERSHIP_AVATAR_URL] = str(
+                            new_mxc_uri
+                        )
 
         # if this is a join with a 3pid signature, we may need to turn a 3pid
         # invite into a normal invite before we can handle the join.
