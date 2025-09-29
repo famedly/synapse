@@ -47,7 +47,7 @@ echo -e "\e[32m>>>> fetching upstream branches\e[0m"
 git fetch --tags upstream
 
 echo -e "\e[32m>>>> checkout master branch\e[0m"
-git checkout master-test
+git checkout master
 echo -e "\e[32m>>>> resetting master branch\e[0m"
 git reset --hard
 
@@ -136,7 +136,7 @@ git merge "upstream/release-${release_name}" -m "Famedly ${release_name}"
 
 # Retrieve the git log entries themselves and format them to fit well into the
 # markdown format. If there were none, we can skip this whole next section
-git_log_output=$(git log $(git describe --tags --abbrev=0)..master-test --pretty=format:'- %s %C(bold blue)(%an)%Creset\' --no-merges --no-decorate | sort -u -f -k2)
+git_log_output=$(git log $(git describe --tags --abbrev=0)..master --pretty=format:'- %s %C(bold blue)(%an)%Creset\' --no-merges --no-decorate | sort -u -f -k2)
 
 if [[ ! -z $git_log_output ]]; then
   echo -e "\e[32m>>>> Listing changes from main branch since last release\e[0m"
