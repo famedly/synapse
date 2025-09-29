@@ -7,6 +7,10 @@
 
 
 
+### Famedly additions for v1.138.2_1
+- Update poetry.lock file
+
+
 # Synapse 1.138.1 (2025-09-24)
 
 ## Bugfixes
