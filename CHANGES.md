@@ -43,6 +43,11 @@ No significant changes since 1.137.0rc1.
 * Bump types-setuptools from 80.9.0.20250529 to 80.9.0.20250809. ([\#18796](https://github.com/element-hq/synapse/issues/18796))
 
 
+### Famedly additions for v1.137.0_1
+
+- chore: Add some useful data to the database inconsistency error to help with reporting (Jason Little)
+- chore: update workflow for nightly image (Soyoung Kim)
+
 # Synapse 1.136.0 (2025-08-12)
 
 Note: This release includes the security fixes from `1.135.2` and `1.136.0rc2`, detailed below.
