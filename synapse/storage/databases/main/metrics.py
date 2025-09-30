@@ -473,3 +473,25 @@ class ServerMetricsStore(EventPushActionsWorkerStore, SQLBaseStore):
         await self.db_pool.runInteraction(
             "generate_user_daily_visits", _generate_user_daily_visits
         )
+
+    async def get_event_counts_for_metrics(self) -> Tuple[int, int, int, int, int, int]:
+        """
+        Returns the number of messages, events, and encrypted events in the database,
+        split by local and remote.
+        """
+
+        def _count(txn: LoggingTransaction) -> Tuple[int, int, int, int, int, int]:
+            sql = """
+                SELECT
+                COUNT(CASE WHEN type IN ('m.room.message', 'm.room.encrypted') AND sender LIKE ? THEN 1 END) AS local_message_count,
+                COUNT(CASE WHEN type IN ('m.room.message', 'm.room.encrypted') AND sender NOT LIKE ? THEN 1 END) AS remote_message_count,
+                COUNT(CASE WHEN sender LIKE ? THEN 1 END) AS local_event_count,
+                COUNT(CASE WHEN sender NOT LIKE ? THEN 1 END) AS remote_event_count,
+                COUNT(CASE WHEN type = 'm.room.encrypted' AND sender LIKE ? THEN 1 END) AS local_encrypted_count,
+                COUNT(CASE WHEN type = 'm.room.encrypted' AND sender NOT LIKE ? THEN 1 END) AS remote_encrypted_count
+            FROM events
+            """
+            txn.execute(sql, tuple(("%:" + self.hs.hostname,) * 6))
+            return cast(Tuple[int, int, int, int, int, int], txn.fetchone())
+
+        return await self.db_pool.runInteraction("get_event_counts_for_metrics", _count)
