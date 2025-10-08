@@ -37,12 +37,44 @@ current_dau_gauge = Gauge(
     labelnames=[SERVER_NAME_LABEL],
 )
 
+# Gauge for users
+users_in_status_gauge = Gauge(
+    "synapse_user_count",
+    "Number of users in active, deactivated, suspended, and locked status",
+    ["status", SERVER_NAME_LABEL],
+)
+
+users_in_time_ranges_gauge = Gauge(
+    "synapse_active_users",
+    "Number of active users in time ranges in 24h, 7d, and 30d",
+    ["time_range", SERVER_NAME_LABEL],
+)
+
+# We may want to add additional ranges in the future.
+retained_users_gauge = Gauge(
+    "synapse_retained_users",
+    "Number of retained users in 30d",
+    ["time_range", SERVER_NAME_LABEL],
+)
+
 
 @attr.s(auto_attribs=True)
 class CommonUsageMetrics:
     """Usage metrics shared between the phone home stats and the prometheus exporter."""
 
+    # active users in time ranges
     daily_active_users: int
+    weekly_active_users: int
+    monthly_active_users: int
+
+    # user counts in different states
+    active_users: int
+    deactivated_users: int
+    suspended_users: int
+    locked_users: int
+
+    # retained users in time ranges
+    monthly_retained_users: int
 
 
 class CommonUsageMetricsManager:
@@ -82,9 +114,20 @@ class CommonUsageMetricsManager:
         use if it doesn't exist yet, or update it.
         """
         dau_count = await self._store.count_daily_users()
+        wau_count = await self._store.count_weekly_users()
+        mau_count = await self._store.count_monthly_users()
+
+        user_metric = await self._store.get_user_count_per_status()
 
         return CommonUsageMetrics(
             daily_active_users=dau_count,
+            weekly_active_users=wau_count,
+            monthly_active_users=mau_count,
+            active_users=user_metric.get("active", 0),
+            deactivated_users=user_metric.get("deactivated", 0),
+            suspended_users=user_metric.get("suspended", 0),
+            locked_users=user_metric.get("locked", 0),
+            monthly_retained_users=user_metric.get("monthly_retained", 0),
         )
 
     async def _update_gauges(self) -> None:
@@ -94,3 +137,28 @@ class CommonUsageMetricsManager:
         current_dau_gauge.labels(
             **{SERVER_NAME_LABEL: self.server_name},
         ).set(float(metrics.daily_active_users))
+
+        time_range_to_metric = {
+            "24h": metrics.daily_active_users,
+            "7d": metrics.weekly_active_users,
+            "30d": metrics.monthly_active_users,
+        }
+        for time_range, _metric in time_range_to_metric.items():
+            users_in_time_ranges_gauge.labels(
+                time_range=time_range, **{SERVER_NAME_LABEL: self.server_name}
+            ).set(float(_metric))
+
+        status_to_metric = {
+            "active": metrics.active_users,
+            "deactivated": metrics.deactivated_users,
+            "suspended": metrics.suspended_users,
+            "locked": metrics.locked_users,
+        }
+        for status, _metric in status_to_metric.items():
+            users_in_status_gauge.labels(
+                status=status, **{SERVER_NAME_LABEL: self.server_name}
+            ).set(float(_metric))
+
+        retained_users_gauge.labels(
+            time_range="30d", **{SERVER_NAME_LABEL: self.server_name}
+        ).set(float(metrics.monthly_retained_users))

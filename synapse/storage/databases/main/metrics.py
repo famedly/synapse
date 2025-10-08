@@ -229,6 +229,15 @@ class ServerMetricsStore(EventPushActionsWorkerStore, SQLBaseStore):
             "count_daily_users", self._count_users, yesterday
         )
 
+    async def count_weekly_users(self) -> int:
+        """
+        Counts the number of users who used this homeserver in the last 7 days.
+        """
+        seven_days_ago = int(self._clock.time_msec()) - (1000 * 60 * 60 * 24 * 7)
+        return await self.db_pool.runInteraction(
+            "count_weekly_users", self._count_users, seven_days_ago
+        )
+
     async def count_monthly_users(self) -> int:
         """
         Counts the number of users who used this homeserver in the last 30 days.
@@ -472,4 +481,58 @@ class ServerMetricsStore(EventPushActionsWorkerStore, SQLBaseStore):
 
         await self.db_pool.runInteraction(
             "generate_user_daily_visits", _generate_user_daily_visits
+        )
+
+    async def get_user_count_per_status(self) -> Dict[str, int]:
+        def _get_user_count_per_status(txn: LoggingTransaction) -> Dict[str, int]:
+            sql = """
+                SELECT
+                    SUM(CASE WHEN deactivated = 0 AND locked = FALSE AND suspended = FALSE THEN 1 ELSE 0 END) AS active_users,
+                    SUM(CASE WHEN deactivated = 1 THEN 1 ELSE 0 END) AS deactivated_users,
+                    SUM(CASE WHEN suspended = TRUE THEN 1 ELSE 0 END) AS suspended_users,
+                    SUM(CASE WHEN locked = TRUE THEN 1 ELSE 0 END) AS locked_users
+                FROM users;
+            """
+            txn.execute(sql)
+            row = txn.fetchone()
+            if not row:
+                logger.warning("No results from get_user_count_per_status")
+            metrics = {
+                "active": row[0] if row is not None else 0,
+                "deactivated": row[1] if row is not None else 0,
+                "suspended": row[2] if row is not None else 0,
+                "locked": row[3] if row is not None else 0,
+            }
+
+            sql = """
+                SELECT COUNT(*)
+                FROM (
+                    SELECT user_id
+                    FROM user_daily_visits
+                    WHERE timestamp > ? AND timestamp < ?
+                    GROUP BY user_id
+                    HAVING max(timestamp) - min(timestamp) > ?
+                ) AS r30_users;
+            """
+            thirty_days_in_ms = 86400 * 30 * 1000
+            now_ms = int(self._clock.time()) * 1000
+            sixty_days_ago_in_ms = now_ms - 2 * thirty_days_in_ms
+            one_day_from_now_in_ms = now_ms + (86400 * 1000)
+            txn.execute(
+                sql,
+                (
+                    sixty_days_ago_in_ms,
+                    one_day_from_now_in_ms,
+                    thirty_days_in_ms,
+                ),
+            )
+            (count,) = cast(Tuple[int], txn.fetchone())
+            if not count:
+                logger.warning("No results from get_user_count_per_status")
+                metrics["monthly_retained"] = 0
+            metrics["monthly_retained"] = count
+            return metrics
+
+        return await self.db_pool.runInteraction(
+            "get_user_count_per_status", _get_user_count_per_status
         )
