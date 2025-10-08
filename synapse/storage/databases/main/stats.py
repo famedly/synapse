@@ -324,7 +324,6 @@ class StatsStore(StateDeltasStore):
     ) -> None:
         """Bulk update stats tables for a given stream_id and updates the stats
         incremental position.
-
         Args:
             ts: Current timestamp in ms
             updates: The updates to commit as a mapping of
@@ -357,6 +356,24 @@ class StatsStore(StateDeltasStore):
         await self.db_pool.runInteraction(
             "bulk_update_stats_delta", _bulk_update_stats_delta_txn
         )
+
+    async def get_room_stats(self) -> Tuple[int, int]:
+        """
+        Retrieve the total number of rooms and locally joined rooms.
+        """
+
+        def _get_room_stats_txn(txn: LoggingTransaction) -> Tuple[int, int]:
+            sql = """
+                SELECT
+                    count(*) AS total,
+                    count(CASE WHEN local_users_in_room > 0 THEN 1 END) AS locally_joined
+                FROM room_stats_current;
+                """
+            txn.execute(sql)
+            row = cast(Tuple[int, int], txn.fetchone())
+            return row[0], row[1]
+
+        return await self.db_pool.runInteraction("get_room_stats", _get_room_stats_txn)
 
     async def update_stats_delta(
         self,
