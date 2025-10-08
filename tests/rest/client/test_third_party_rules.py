@@ -37,7 +37,7 @@ from synapse.rest import admin
 from synapse.rest.client import account, login, profile, room, room_upgrade_rest_servlet
 from synapse.server import HomeServer
 from synapse.types import JsonDict, Requester, StateMap
-from synapse.util import Clock
+from synapse.util.clock import Clock
 from synapse.util.frozenutils import unfreeze
 
 from tests import unittest
