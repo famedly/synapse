@@ -18,6 +18,7 @@
 # [This file includes modifications made by New Vector Limited]
 #
 #
+import hashlib
 import os
 import shutil
 import tempfile
@@ -375,6 +376,10 @@ class MediaRepoTests(unittest.HomeserverTestCase):
         resources = super().create_resource_dict()
         resources["/_matrix/media"] = self.hs.get_media_repository_resource()
         return resources
+
+    def generate_sha256(self, bytes: BytesIO) -> str:
+        bytes.seek(0)
+        return hashlib.sha256(bytes.read()).hexdigest()
 
     def _req(
         self, content_disposition: Optional[bytes], include_content_type: bool = True

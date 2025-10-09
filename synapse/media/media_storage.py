@@ -201,6 +201,9 @@ class MediaStorage:
         """Asynchronously write the `source` to `output`."""
         await defer_to_thread(self.reactor, _write_file_synchronously, source, output)
 
+    def generate_path_from_sha256(self, sha256: str) -> str:
+        return f"{sha256[:2]}/{sha256[2:4]}/{sha256[4:]}"
+
     @trace_with_opname("MediaStorage.store_into_file")
     @contextlib.asynccontextmanager
     async def store_into_file(
@@ -228,6 +231,10 @@ class MediaStorage:
         path = self._file_info_to_path(file_info)
         fname = os.path.join(self.local_media_directory, path)
 
+        # TODO: use path of sha256
+        if file_info.sha256:
+            path = self.generate_path_from_sha256(file_info.sha256)
+            fname = os.path.join(self.local_media_directory, path)
         dirname = os.path.dirname(fname)
         os.makedirs(dirname, exist_ok=True)
 
@@ -273,14 +280,18 @@ class MediaStorage:
         Returns:
             Returns a Responder if the file was found, otherwise None.
         """
+        # TODO: fetch file info from sha256 path
+        # also keep the old ones working.
+        # if not the old ones, find by sha256
         paths = [self._file_info_to_path(file_info)]
 
+        # if file_info.sha256:
+        #     paths.append(self.filepaths.remote_media_sha_rel(file_info.sha256))
         # fallback for remote thumbnails with no method in the filename
         if file_info.thumbnail and file_info.server_name:
             paths.append(
                 self.filepaths.remote_media_thumbnail_rel_legacy(
-                    server_name=file_info.server_name,
-                    file_id=file_info.file_id,
+                    sha256=file_info.sha256,
                     width=file_info.thumbnail.width,
                     height=file_info.thumbnail.height,
                     content_type=file_info.thumbnail.type,
@@ -334,6 +345,12 @@ class MediaStorage:
             if os.path.exists(legacy_local_path):
                 return legacy_local_path
 
+        # TODO: if existing search doesn't work, search by SHA256 by media_id
+        if file_info.sha256:
+            path = self.filepaths.remote_media_filepath_rel(file_info.sha256)
+            if os.path.exists(path):
+                return path
+
         dirname = os.path.dirname(local_path)
         os.makedirs(dirname, exist_ok=True)
 
@@ -352,6 +369,7 @@ class MediaStorage:
 
     @trace
     def _file_info_to_path(self, file_info: FileInfo) -> str:
+        # TODO: convert to the sha path!
         """Converts file_info into a relative path.
 
         The path is suitable for storing files under a directory, e.g. used to
@@ -370,6 +388,11 @@ class MediaStorage:
 
         if file_info.server_name:
             if file_info.thumbnail:
+                if file_info.sha256:
+                    return self.filepaths.remote_media_filepath_sha_rel(
+                        sha256=file_info.sha256
+                    )
+
                 return self.filepaths.remote_media_thumbnail_rel(
                     server_name=file_info.server_name,
                     file_id=file_info.file_id,
@@ -383,6 +406,14 @@ class MediaStorage:
             )
 
         if file_info.thumbnail:
+            if file_info.sha256:
+                return self.filepaths.local_media_thumbnail_sha_rel(
+                    sha256=file_info.sha256,
+                    width=file_info.thumbnail.width,
+                    height=file_info.thumbnail.height,
+                    content_type=file_info.thumbnail.type,
+                    method=file_info.thumbnail.method,
+                )
             return self.filepaths.local_media_thumbnail_rel(
                 media_id=file_info.file_id,
                 width=file_info.thumbnail.width,
@@ -390,6 +421,9 @@ class MediaStorage:
                 content_type=file_info.thumbnail.type,
                 method=file_info.thumbnail.method,
             )
+
+        if file_info.sha256:
+            return self.filepaths.local_media_filepath_sha_rel(file_info.sha256)
         return self.filepaths.local_media_filepath_rel(file_info.file_id)
 
 

@@ -437,7 +437,7 @@ class FederationThumbnailTest(unittest.FederatingHomeserverTestCase):
         assert "multipart/mixed" in content_type[0]
         assert "boundary" in content_type[0]
 
-        # extract boundary
+        # extract boundaryx
         boundary = content_type[0].split("boundary=")[1]
         # split on boundary and check that json field and expected value exist
         body = channel.result.get("body")
