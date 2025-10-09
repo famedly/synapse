@@ -22,13 +22,21 @@ import json
 import os
 import shutil
 import tempfile
-from typing import Dict, Optional
+from typing import (
+    BinaryIO,
+    Dict,
+    List,
+    Optional,
+    Tuple,
+)
 from unittest.mock import AsyncMock, Mock
 
 from twisted.test.proto_helpers import MemoryReactor
 
+from synapse.handlers.room_member import Ratelimiter
 from synapse.media.filepath import MediaFilePaths
-from synapse.media.media_storage import MediaStorage
+from synapse.media.media_repository import MediaRepository
+from synapse.media.media_storage import FileResponder, MediaStorage
 from synapse.media.storage_provider import (
     FileStorageProviderBackend,
     StorageProviderWrapper,
@@ -44,7 +52,8 @@ from synapse.util.stringutils import random_string
 
 from tests import unittest
 from tests.media.test_media_storage import small_png
-from tests.test_utils import SMALL_PNG
+from tests.test_utils import SMALL_PNG, SMALL_PNG_SHA256
+from tests.unittest import override_config
 
 
 class FederationMediaDownloadsTest(unittest.FederatingHomeserverTestCase):
@@ -193,6 +202,80 @@ class FederationMediaDownloadsTest(unittest.FederatingHomeserverTestCase):
         self.assertEqual(channel.code, 304)
         self.assertEqual(channel.is_finished(), True)
         self.assertNotIn("body", channel.result)
+
+    @override_config({"enable_local_media_storage_deduplication": True})
+    def test_federation_download_remote_file_with_sha256_path(self) -> None:
+        """Test `_get_remote_media_impl` function with federation endpoint can download remote media in sha256 path."""
+
+        # Mock the federation download media function of the client.
+        async def _mock_federation_download_media(
+            destination: str,
+            media_id: str,
+            output_stream: BinaryIO,
+            max_size: int,
+            max_timeout_ms: int,
+            download_ratelimiter: Ratelimiter,
+            ip_address: str,
+        ) -> Tuple[int, Dict[bytes, List[bytes]]]:
+            output_stream.write(SMALL_PNG)
+            output_stream.flush()
+            headers = {
+                b"Content-Type": [b"image/png"],
+                b"Content-Disposition": [b"attachment; filename=test.png"],
+                b"Content-Length": [b"67"],
+            }
+            return 67, headers
+
+        self.media_repo.client.federation_download_media = (  # type: ignore
+            _mock_federation_download_media
+        )
+
+        # Download remote media using `_get_remote_media_impl`
+        server_name = "other_server.com"
+        media_id = random_string(24)  # media id from the remote server
+        max_timeout_ms = 1000
+        ratelimiter = AsyncMock()
+        ip_address = "127.0.0.1"
+        assert isinstance(self.media_repo, MediaRepository)
+        responder, media_info = self.get_success(
+            self.media_repo._get_remote_media_impl(
+                server_name=server_name,
+                media_id=media_id,
+                max_timeout_ms=max_timeout_ms,
+                download_ratelimiter=ratelimiter,
+                ip_address=ip_address,
+                use_federation_endpoint=True,
+                allow_authenticated=True,
+            )
+        )
+        assert isinstance(responder, FileResponder)
+        responder.open_file.seek(0)
+        content = responder.open_file.read()
+        assert content == SMALL_PNG
+        assert media_info.media_id == media_id
+        assert media_info.media_origin == server_name
+        assert media_info.upload_name == "test.png"
+        assert media_info.sha256 == SMALL_PNG_SHA256
+
+        # Check if the file is saved in the media  table
+        remote_media = self.get_success(
+            self.media_repo.store.get_cached_remote_media(server_name, media_id)
+        )
+        assert remote_media is not None
+
+        # Check if the file is saved in the filesystem with sha256 path
+        assert os.path.exists(self.media_repo.filepaths.filepath_sha(SMALL_PNG_SHA256))
+
+        # Check if the thumbnails are generated in the sha256 path
+        assert os.path.exists(
+            self.media_repo.filepaths.thumbnail_sha_dir(SMALL_PNG_SHA256)
+        )
+        thumbnail = self.get_success(
+            self.media_repo.store.get_remote_media_thumbnail(
+                server_name, media_id, 1, 1, "image/png"
+            )
+        )
+        assert thumbnail is not None
 
 
 class FederationRestrictedMediaDownloadsTest(unittest.FederatingHomeserverTestCase):
