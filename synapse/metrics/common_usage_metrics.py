@@ -18,6 +18,7 @@
 # [This file includes modifications made by New Vector Limited]
 #
 #
+from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 import attr
@@ -56,6 +57,15 @@ retained_users_gauge = Gauge(
     "Number of retained users in 30d",
     ["time_range", SERVER_NAME_LABEL],
 )
+
+
+@dataclass
+class UserMetrics:
+    active: int = 0
+    deactivated: int = 0
+    suspended: int = 0
+    locked: int = 0
+    retained_30d: int = 0
 
 
 @attr.s(auto_attribs=True)
@@ -117,17 +127,17 @@ class CommonUsageMetricsManager:
         wau_count = await self._store.count_weekly_users()
         mau_count = await self._store.count_monthly_users()
 
-        user_metric = await self._store.get_user_count_per_status()
+        user_metric: UserMetrics = await self._store.get_user_count_per_status()
 
         return CommonUsageMetrics(
             daily_active_users=dau_count,
             weekly_active_users=wau_count,
             monthly_active_users=mau_count,
-            active_users=user_metric.get("active", 0),
-            deactivated_users=user_metric.get("deactivated", 0),
-            suspended_users=user_metric.get("suspended", 0),
-            locked_users=user_metric.get("locked", 0),
-            monthly_retained_users=user_metric.get("monthly_retained", 0),
+            active_users=user_metric.active,
+            deactivated_users=user_metric.deactivated,
+            suspended_users=user_metric.suspended,
+            locked_users=user_metric.locked,
+            monthly_retained_users=user_metric.retained_30d,
         )
 
     async def _update_gauges(self) -> None:
