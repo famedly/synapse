@@ -526,6 +526,7 @@ class ThumbnailInfo:
     type: str
     # The size of the media file, in bytes.
     length: int
+    sha256: Optional[str] = None
 
 
 @attr.s(slots=True, frozen=True, auto_attribs=True)
@@ -540,6 +541,7 @@ class FileInfo:
     url_cache: bool = False
     # Whether the file is a thumbnail or not.
     thumbnail: Optional[ThumbnailInfo] = None
+    sha256: Optional[str] = None
 
     # The below properties exist to maintain compatibility with third-party modules.
     @property
@@ -571,6 +573,12 @@ class FileInfo:
         if not self.thumbnail:
             return None
         return self.thumbnail.length
+
+    @property
+    def sha256_path(self) -> Optional[str]:
+        if not self.sha256:
+            return None
+        return f"{self.sha256[:2]}/{self.sha256[2:4]}/{self.sha256[4:]}"
 
 
 def get_filename_from_headers(headers: Dict[bytes, List[bytes]]) -> Optional[str]:
