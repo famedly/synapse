@@ -63,6 +63,21 @@ jobs:
       #   uses: peaceiris/actions-mdbook@ee69d230fe19748b7abf22df32acaa93833fad08 # v2.0.0
       #   with:
       #     mdbook-version: '0.4.17'
+      - name: Caching
+        uses: Swatinem/rust-cache@9d47c6ad4b02e050fd481d890b2ea34778fd09d6
+        with:
+          shared-key: "mdbook"
+          save-if: ${{ ! startsWith(github.ref, 'gh-readonly-queue/') }}
+
+      - name: Install required tooling
+        run: |
+          cargo install mdbook-linkcheck mdbook-mermaid mdbook-admonish
+          cargo install mdbook --no-default-features --features search --vers "^0.4" --locked
+
+      - name: Setup Pages
+        id: pages
+        uses: actions/configure-pages@v5
+
       - name: Setup mdbook-admonish
         working-directory: ./docs
         run: mdbook-admonish install

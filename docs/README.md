@@ -1,7 +1,5 @@
 # Synapse Documentation
 
-Test line
-
 **The documentation is currently hosted [here](https://element-hq.github.io/synapse).**
 Please update any links to point to the new website instead.
 
