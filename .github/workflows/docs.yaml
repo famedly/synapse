@@ -74,7 +74,7 @@ jobs:
       - name: Install required tooling
         run: |
           cargo install mdbook-linkcheck mdbook-mermaid mdbook-admonish
-          cargo install mdbook --no-default-features --features search --vers "0.4.10-1" --locked
+          cargo install mdbook@0.4.10 --no-default-features --features search --locked
 
       - name: Setup Pages
         id: pages
