@@ -31,17 +31,17 @@ site-url = "/synapse/"
 # Additional HTML, JS, CSS that's injected into each page of the book.
 # More information available in docs/website_files/README.md
 additional-css = [
-    "website_files/table-of-contents.css",
-    "website_files/remove-nav-buttons.css",
-    "website_files/indent-section-headers.css",
-    "website_files/version-picker.css",
+    "docs/website_files/table-of-contents.css",
+    "docs/website_files/remove-nav-buttons.css",
+    "docs/website_files/indent-section-headers.css",
+    "docs/website_files/version-picker.css",
 ]
 additional-js = [
-    "website_files/table-of-contents.js",
-    "website_files/version-picker.js",
-    "website_files/version.js",
+    "docs/website_files/table-of-contents.js",
+    "docs/website_files/version-picker.js",
+    "docs/website_files/version.js",
 ]
-theme = "website_files/theme"
+theme = "docs/website_files/theme"
 
 [preprocessor.schema_versions]
 command = "./scripts-dev/schema_versions.py"
