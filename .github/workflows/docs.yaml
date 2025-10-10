@@ -65,16 +65,16 @@ jobs:
           # Fetch all history so that the schema_versions script works.
           fetch-depth: 0
 
-      # - name: Caching
-      #   uses: Swatinem/rust-cache@9d47c6ad4b02e050fd481d890b2ea34778fd09d6
-      #   with:
-      #     shared-key: "mdbook"
-      #     save-if: ${{ ! startsWith(github.ref, 'gh-readonly-queue/') }}
+      - name: Caching
+        uses: Swatinem/rust-cache@9d47c6ad4b02e050fd481d890b2ea34778fd09d6
+        with:
+          shared-key: "mdbook"
+          save-if: ${{ ! startsWith(github.ref, 'gh-readonly-queue/') }}
 
       - name: Install required tooling
         run: |
-          cargo install mdbook-linkcheck mdbook-mermaid mdbook-admonish
           cargo install mdbook@0.4.10 --no-default-features --features search --locked
+          cargo install mdbook-linkcheck mdbook-mermaid mdbook-admonish
 
       - name: Setup Pages
         id: pages
