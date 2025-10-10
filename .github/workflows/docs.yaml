@@ -3,8 +3,8 @@ name: Deploy the documentation
 on:
   push:
     branches:
-      # For bleeding-edge documentation
-      - develop
+      # test building documentation
+      - thomast/update-documentation
       # For documentation specific to a release
       - 'release-v*'
       # stable docs
@@ -35,6 +35,10 @@ jobs:
               master)
                   # deploy to "latest" for the master branch.
                   branch="latest"
+                  ;;
+              thomast/update-documentation)
+                  # deploy to "test" for the test branch.
+                  branch="test"
                   ;;
           esac
 
