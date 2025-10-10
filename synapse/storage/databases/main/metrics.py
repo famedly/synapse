@@ -25,6 +25,7 @@ from typing import TYPE_CHECKING, Dict, List, Tuple, cast
 
 from synapse.metrics import SERVER_NAME_LABEL, GaugeBucketCollector
 from synapse.metrics.background_process_metrics import wrap_as_background_process
+from synapse.metrics.common_usage_metrics import UserMetrics
 from synapse.storage._base import SQLBaseStore
 from synapse.storage.database import (
     DatabasePool,
@@ -483,8 +484,9 @@ class ServerMetricsStore(EventPushActionsWorkerStore, SQLBaseStore):
             "generate_user_daily_visits", _generate_user_daily_visits
         )
 
-    async def get_user_count_per_status(self) -> Dict[str, int]:
-        def _get_user_count_per_status(txn: LoggingTransaction) -> Dict[str, int]:
+    async def get_user_count_per_status(self) -> UserMetrics:
+        def _get_user_count_per_status(txn: LoggingTransaction) -> UserMetrics:
+            metrics = UserMetrics()
             sql = """
                 SELECT
                     SUM(CASE WHEN deactivated = 0 AND locked = FALSE AND suspended = FALSE THEN 1 ELSE 0 END) AS active_users,
@@ -494,15 +496,17 @@ class ServerMetricsStore(EventPushActionsWorkerStore, SQLBaseStore):
                 FROM users;
             """
             txn.execute(sql)
-            row = txn.fetchone()
-            if not row:
-                logger.warning("No results from get_user_count_per_status")
-            metrics = {
-                "active": row[0] if row is not None else 0,
-                "deactivated": row[1] if row is not None else 0,
-                "suspended": row[2] if row is not None else 0,
-                "locked": row[3] if row is not None else 0,
-            }
+            (active, deactivated, suspended, locked) = cast(
+                Tuple[int, int, int, int], txn.fetchone()
+            )
+            if active:
+                metrics.active = active
+            if deactivated:
+                metrics.deactivated = deactivated
+            if suspended:
+                metrics.suspended = suspended
+            if locked:
+                metrics.locked = locked
 
             sql = """
                 SELECT COUNT(*)
@@ -528,9 +532,9 @@ class ServerMetricsStore(EventPushActionsWorkerStore, SQLBaseStore):
             )
             (count,) = cast(Tuple[int], txn.fetchone())
             if not count:
-                logger.warning("No results from get_user_count_per_status")
-                metrics["monthly_retained"] = 0
-            metrics["monthly_retained"] = count
+                logger.info("No retained user found. Setting it to 0")
+            if count:
+                metrics.retained_30d = count
             return metrics
 
         return await self.db_pool.runInteraction(
