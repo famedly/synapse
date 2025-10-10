@@ -65,10 +65,6 @@ jobs:
           # Fetch all history so that the schema_versions script works.
           fetch-depth: 0
 
-      # - name: Setup mdbook
-      #   uses: peaceiris/actions-mdbook@ee69d230fe19748b7abf22df32acaa93833fad08 # v2.0.0
-      #   with:
-      #     mdbook-version: '0.4.17'
       - name: Caching
         uses: Swatinem/rust-cache@9d47c6ad4b02e050fd481d890b2ea34778fd09d6
         with:
@@ -85,7 +81,6 @@ jobs:
         uses: actions/configure-pages@v5
 
       - name: Setup mdbook-admonish
-        working-directory: ./docs
         run: mdbook-admonish install
 
       - name: Set version of docs
