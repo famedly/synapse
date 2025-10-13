@@ -116,4 +116,4 @@ federation_sender_instances:
 
 ## Other Worker types
 
-Using the concepts shown here it is possible to create other worker types in Docker Compose. See the [Workers](https://element-hq.github.io/synapse/latest/workers.html#available-worker-applications) documentation for a list of available workers.
+Using the concepts shown here it is possible to create other worker types in Docker Compose. See the [Workers](https://famedly.github.io/synapse/latest/workers.html#available-worker-applications) documentation for a list of available workers.

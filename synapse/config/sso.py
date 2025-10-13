@@ -34,7 +34,7 @@ This server's configuration file is using the deprecated 'template_dir' setting 
 'sso' section. Support for this setting has been deprecated and will be removed in a
 future version of Synapse. Server admins should instead use the new
 'custom_template_directory' setting documented here:
-https://element-hq.github.io/synapse/latest/templates.html
+https://famedly.github.io/synapse/latest/templates.html
 ---------------------------------------------------------------------------------------"""
 
 

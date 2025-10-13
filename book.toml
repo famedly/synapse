@@ -1,8 +1,8 @@
 # Documentation for possible options in this file is at
 # https://rust-lang.github.io/mdBook/format/config.html
 [book]
-title = "Synapse"
-authors = ["The Matrix.org Foundation C.I.C."]
+title = "Famedly Synapse"
+authors = ["Famedly", "The Matrix.org Foundation C.I.C."]
 language = "en"
 multilingual = false
 

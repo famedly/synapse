@@ -4,7 +4,7 @@
 # that it is ready for testing via Complement.
 #
 # Instructions for building this image from those it depends on is detailed in this guide:
-# https://github.com/element-hq/synapse/blob/develop/docker/README-testing.md#testing-with-postgresql-and-single-or-multi-process-synapse
+# https://github.com/famedly/synapse/blob/master/docker/README-testing.md#testing-with-postgresql-and-single-or-multi-process-synapse
 
 ARG SYNAPSE_VERSION=latest
 # This is an intermediate image, to be built locally (not pulled from a registry).

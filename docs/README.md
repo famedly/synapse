@@ -1,14 +1,12 @@
-# Synapse Documentation
+# Famedly Synapse Documentation
 
-**The documentation is currently hosted [here](https://element-hq.github.io/synapse).**
-Please update any links to point to the new website instead.
+**This is Famedly's fork of Element Synapse. The upstream documentation is hosted [here](https://element-hq.github.io/synapse).**
 
 ## About
 
 This directory currently holds a series of markdown files documenting how to install, use
-and develop Synapse. The documentation is readable directly from this repository, but it is
-recommended to instead browse through the [website](https://element-hq.github.io/synapse) for
-easier discoverability.
+and develop Synapse. This documentation is based on the upstream Element Synapse documentation
+with any necessary modifications for Famedly's fork.
 
 ## Adding to the documentation
 
@@ -66,7 +64,7 @@ The URL at which the docs can be viewed at will be logged.
 ## Synapse configuration documentation
 
 The [Configuration
-Manual](https://element-hq.github.io/synapse/latest/usage/configuration/config_documentation.html)
+Manual](https://famedly.github.io/synapse/latest/usage/configuration/config_documentation.html)
 page is generated from a YAML file,
 [schema/synapse-config.schema.yaml](../schema/synapse-config.schema.yaml). To
 add new options or modify existing ones, first edit that file, then run

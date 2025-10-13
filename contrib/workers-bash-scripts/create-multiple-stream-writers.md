@@ -1,6 +1,6 @@
 # Creating multiple stream writers with a bash script
 
-This script creates multiple [stream writer](https://github.com/element-hq/synapse/blob/develop/docs/workers.md#stream-writers) workers.
+This script creates multiple [stream writer](https://github.com/famedly/synapse/blob/master/docs/workers.md#stream-writers) workers.
 
 Stream writers require both replication and HTTP listeners.
 
@@ -71,7 +71,7 @@ cat << EXAMPLECONFIG
 # Don't forget to configure your reverse proxy and
 # necessary endpoints to their respective worker.
 
-# See https://github.com/element-hq/synapse/blob/develop/docs/workers.md
+# See https://github.com/famedly/synapse/blob/master/docs/workers.md
 # for more information.
 
 # Remember: Under NO circumstances should the replication
@@ -102,7 +102,7 @@ You should receive an output similar to the following:
 # Don't forget to configure your reverse proxy and
 # necessary endpoints to their respective worker.
 
-# See https://github.com/element-hq/synapse/blob/develop/docs/workers.md
+# See https://github.com/famedly/synapse/blob/master/docs/workers.md
 # for more information
 
 # Remember: Under NO circumstances should the replication

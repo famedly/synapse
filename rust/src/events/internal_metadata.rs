@@ -317,7 +317,7 @@ impl EventInternalMetadata {
     /// outliers.
     ///
     /// See also
-    /// https://element-hq.github.io/synapse/develop/development/room-dag-concepts.html#out-of-band-membership-events.
+    /// https://famedly.github.io/synapse/latest/development/room-dag-concepts.html#out-of-band-membership-events.
     ///
     /// (Added in synapse 0.99.0, so may be unreliable for events received
     /// before that)

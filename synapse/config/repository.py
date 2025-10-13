@@ -124,8 +124,8 @@ class MediaUploadLimit:
     Represents a limit on the amount of data a user can upload in a given time
     period.
 
-    These can be configured through the `media_upload_limits` [config option](https://element-hq.github.io/synapse/latest/usage/configuration/config_documentation.html#media_upload_limits)
-    or via the `get_media_upload_limits_for_user` module API [callback](https://element-hq.github.io/synapse/latest/modules/media_repository_callbacks.html#get_media_upload_limits_for_user).
+    These can be configured through the `media_upload_limits` [config option](https://famedly.github.io/synapse/latest/usage/configuration/config_documentation.html#media_upload_limits)
+    or via the `get_media_upload_limits_for_user` module API [callback](https://famedly.github.io/synapse/latest/modules/media_repository_callbacks.html#get_media_upload_limits_for_user).
     """
 
     max_bytes: int
