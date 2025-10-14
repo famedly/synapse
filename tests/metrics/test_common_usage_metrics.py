@@ -3,7 +3,7 @@ from twisted.test.proto_helpers import MemoryReactor
 from synapse.rest import admin, login, register, room
 from synapse.server import HomeServer
 from synapse.types import create_requester
-from synapse.util import Clock
+from synapse.util.clock import Clock
 
 from tests.unittest import FederatingHomeserverTestCase
 
