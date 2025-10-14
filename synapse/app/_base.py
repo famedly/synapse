@@ -27,11 +27,6 @@ import socket
 import sys
 import traceback
 import warnings
-from importlib.metadata import (
-    PackageNotFoundError,
-    packages_distributions,
-    version,
-)
 from textwrap import indent
 from typing import (
     TYPE_CHECKING,
@@ -96,6 +91,7 @@ from synapse.util import SYNAPSE_VERSION
 from synapse.util.caches.lrucache import setup_expire_lru_cache_entries
 from synapse.util.daemonize import daemonize_process
 from synapse.util.gai_resolver import GAIResolver
+from synapse.util.module_loader import get_loaded_module_information
 from synapse.util.rlimit import change_resource_limit
 
 if TYPE_CHECKING:
@@ -592,19 +588,14 @@ async def start(hs: "HomeServer") -> None:
     module_api = hs.get_module_api()
     for module, config in hs.config.modules.loaded_modules:
         m = module(config, module_api)
-        # this is needed and intended
-        # for example, calling module.__module__ on mjolnir return mjolnir.antispam
-        # the packages_distributions() only have the first bit in the key of its dictionary (mjolnir)
-        package_name = packages_distributions()[module.__module__.split(".")[0]][0]
-        try:
-            module_version = version(package_name)
-        except PackageNotFoundError:
-            module_version = getattr(module, "__version__", "unknown")
+        package_name, module_name, module_version = get_loaded_module_information(
+            module
+        )
         # Set module info metrics for prometheus
         module_instances_info.labels(
             package_name=package_name,
             # what is given in the config
-            module_name=module.__module__ + "." + module.__name__,
+            module_name=module_name,
             module_version=module_version,
             **{SERVER_NAME_LABEL: hs.hostname},
         ).set(1)
