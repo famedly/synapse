@@ -74,7 +74,12 @@ from synapse.handlers.auth import load_legacy_password_auth_providers
 from synapse.http.site import SynapseSite
 from synapse.logging.context import LoggingContext, PreserveLoggingContext
 from synapse.logging.opentracing import init_tracer
-from synapse.metrics import install_gc_manager, register_threadpool
+from synapse.metrics import (
+    SERVER_NAME_LABEL,
+    install_gc_manager,
+    module_instances_info,
+    register_threadpool,
+)
 from synapse.metrics.background_process_metrics import run_as_background_process
 from synapse.metrics.jemalloc import setup_jemalloc_stats
 from synapse.module_api.callbacks.spamchecker_callbacks import load_legacy_spam_checkers
@@ -86,6 +91,7 @@ from synapse.util import SYNAPSE_VERSION
 from synapse.util.caches.lrucache import setup_expire_lru_cache_entries
 from synapse.util.daemonize import daemonize_process
 from synapse.util.gai_resolver import GAIResolver
+from synapse.util.module_loader import get_loaded_module_information
 from synapse.util.rlimit import change_resource_limit
 
 if TYPE_CHECKING:
@@ -582,6 +588,13 @@ async def start(hs: "HomeServer") -> None:
     module_api = hs.get_module_api()
     for module, config in hs.config.modules.loaded_modules:
         m = module(config, module_api)
+        module_name, module_version = get_loaded_module_information(module)
+        # Set module info metrics for prometheus
+        module_instances_info.labels(
+            module_name=module_name,
+            module_version=module_version,
+            **{SERVER_NAME_LABEL: hs.hostname},
+        ).set(1)
         logger.info("Loaded module %s", m)
 
     if hs.config.auto_accept_invites.enabled:

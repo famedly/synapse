@@ -72,6 +72,7 @@
       - [Server Notices](admin_api/server_notices.md)
       - [Statistics](admin_api/statistics.md)
       - [Users](admin_api/user_admin_api.md)
+      - [Modules](admin_api/modules_api.md)
       - [Server Version](admin_api/version_api.md)
       - [Federation](usage/administration/admin_api/federation.md)
       - [Client-Server API Extensions](admin_api/client_server_api_extensions.md)
