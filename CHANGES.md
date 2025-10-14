@@ -5,10 +5,14 @@
 - Fix a bug introduced in 1.139.1 where a client could receive an Internal Server Error if they set `device_keys: null` in the request to [`POST /_matrix/client/v3/keys/upload`](https://spec.matrix.org/v1.16/client-server-api/#post_matrixclientv3keysupload). ([\#19023](https://github.com/element-hq/synapse/issues/19023))
 
 
-### Famedly additions for v1.137.0_1
+### Famedly additions for v1.139.2_1
 
 - feat: add user metrics (Soyoung Kim)
 - feat: add room count metrics (Soyoung Kim)
+
+### Famedly additions for v1.139.2_2
+- fix: Nonetype when the db query doesn't return value (Soyoung Kim)
+
 
 # Synapse 1.139.1 (2025-10-07)
 
