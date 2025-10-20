@@ -110,6 +110,9 @@ class RoomMemberHandler(metaclass=abc.ABCMeta):
         self.event_auth_handler = hs.get_event_auth_handler()
         self._worker_lock_handler = hs.get_worker_locks_handler()
         self.enable_restricted_media = hs.config.experimental.msc3911_enabled
+        self.allow_legacy_media = (
+            not hs.config.experimental.msc3911_unrestricted_media_upload_disabled
+        )
 
         self._membership_types_to_include_profile_data_in = {
             Membership.JOIN,
@@ -863,21 +866,83 @@ class RoomMemberHandler(metaclass=abc.ABCMeta):
                 logger.info("Failed to get profile information for %r: %s", target, e)
 
             if self.enable_restricted_media and not media_info_for_attachment:
-                # Other than membership
-                avatar_url = content.get("avatar_url")
+                # This code path should only be taken for memberships updating an
+                # avatar url
+                avatar_url = content.get(EventContentFields.MEMBERSHIP_AVATAR_URL)
                 if avatar_url:
                     # Something about the MediaRepository does not like being part of
                     # the initialization code of the RoomMemberHandler, so just import
                     # it on the spot instead.
                     media_repo = self.hs.get_media_repository()
 
-                    new_mxc_uri = await media_repo.copy_media(
-                        MXCUri.from_str(avatar_url), requester.user, 20_000
-                    )
-                    media_object = await media_repo.get_media_info(new_mxc_uri)
-                    assert isinstance(media_object, LocalMedia)
-                    media_info_for_attachment = {media_object}
-                    content[EventContentFields.MEMBERSHIP_AVATAR_URL] = str(new_mxc_uri)
+                    try:
+                        # Run a preflight that this media exists. The http replication
+                        # call should not be a thundering herd of guaranteed http fails.
+                        existing_mxc_uri = MXCUri.from_str(avatar_url)
+                        # The actual info is irrelevant at this stage, just ignore. This
+                        # will raise if the media does not exist
+                        _ = await media_repo.get_media_info(existing_mxc_uri)
+
+                        new_mxc_uri = await media_repo.copy_media(
+                            existing_mxc_uri, requester.user, 20_000
+                        )
+                    except SynapseError:
+                        # The only kind of media copying that should fail is from a
+                        # remote item that has not been seen and cached previously. This
+                        # should already be guarded from in the only circumstances we
+                        # could think of: setting a profile avatar.
+                        #
+                        # If legacy unrestricted media is allowed, this can still be
+                        # triggered. If this happens, ignore it. This allows the avatar
+                        # url to be faithfully set to the given url. All we can do is
+                        # hope that it is not restricted when it finally shows up.
+                        # Guard against other potentials escaping by raising if it
+                        # should occur when unrestricted media begins to be disallowed.
+                        if self.allow_legacy_media:
+                            logger.debug(
+                                "Ignoring media copy request; the media is unknown and "
+                                "will not be treated as restricted"
+                            )
+
+                        else:
+                            # Don't fail the new membership event just because the media
+                            # was not found. Specifically, for:
+                            # * Outgoing remote invites
+                            # * Joins in the context of a new room
+                            # Just remove it, and let the client deal with the lack of
+                            # hint
+                            if effective_membership_state == Membership.INVITE or (
+                                effective_membership_state == Membership.JOIN
+                                and new_room
+                            ):
+                                logger.warning(
+                                    "Unknown media (%s) can not be restricted to "
+                                    "membership event for '%s', dropping avatar from "
+                                    "event",
+                                    avatar_url,
+                                    target,
+                                )
+                                del content[EventContentFields.MEMBERSHIP_AVATAR_URL]
+
+                            else:
+                                # All other types of membership should raise. For
+                                # whatever reason, the media is missing so this should
+                                # not continue
+                                logger.warning(
+                                    "Unknown media (%s) can not be restricted to "
+                                    "membership event for '%s'",
+                                    avatar_url,
+                                    target,
+                                )
+                                raise
+
+                    else:
+                        media_object = await media_repo.get_media_info(new_mxc_uri)
+                        assert isinstance(media_object, LocalMedia)
+                        media_info_for_attachment = {media_object}
+                        content[EventContentFields.MEMBERSHIP_AVATAR_URL] = str(
+                            new_mxc_uri
+                        )
 
         # if this is a join with a 3pid signature, we may need to turn a 3pid
         # invite into a normal invite before we can handle the join.

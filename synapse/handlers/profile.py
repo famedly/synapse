@@ -327,8 +327,22 @@ class ProfileHandler:
             media_info = await self.hs.get_datastores().main.get_cached_remote_media(
                 mxc_uri.server_name, mxc_uri.media_id
             )
+            # When our local user has attempted to set a profile avatar to a remote
+            # piece of media, but the local server has not actually seen it, only
+            # complain if unrestricted media is disabled, otherwise just allow it. Later
+            # when/if the new profile data is propagated to each room's membership
+            # event, it will either be copied/passed along/dropped depending on the
+            # above circumstances
             if not media_info:
-                # There is no data on this, not much can be done until it comes along
+                if self.disable_unrestricted_media:
+                    # The user should have done a COPY on this media previous to this
+                    # attempt to set
+                    raise SynapseError(
+                        HTTPStatus.NOT_FOUND,
+                        "Profile request to update avatar to remote media can not proceed, a /copy request should have happened first",
+                        errcode=Codes.NOT_FOUND,
+                    )
+                # For backwards compatible behavior, treat the media as unrestricted
                 return
 
         if self.disable_unrestricted_media and not media_info.restricted:
