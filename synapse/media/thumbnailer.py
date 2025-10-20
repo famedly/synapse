@@ -390,7 +390,6 @@ class ThumbnailProvider:
                     file_id=media_id,
                     url_cache=bool(media_info.url_cache),
                     thumbnail=info,
-                    sha256=info.sha256,
                 )
 
                 responder = await self.media_storage.fetch_media(file_info)
@@ -526,6 +525,7 @@ class ThumbnailProvider:
             desired_height,
             desired_method,
             desired_type,
+            media_info.sha256 if self.media_repo.use_sha256_paths else None,
         )
 
         if file_path:
@@ -642,7 +642,6 @@ class ThumbnailProvider:
         assert not self.dynamic_thumbnails
 
         if thumbnail_infos:
-            # Not sure if we need to support sha256 search here.
             file_info = self._select_thumbnail(
                 desired_width,
                 desired_height,
@@ -885,7 +884,6 @@ class ThumbnailProvider:
                 thumbnail_info = min(info_list2, key=lambda t: t[:-1])[-1]
 
         if thumbnail_info:
-            # TODO: Do I need the sha256 here as well?
             return FileInfo(
                 file_id=file_id,
                 url_cache=url_cache,

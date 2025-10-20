@@ -194,6 +194,8 @@ class ContentRepositoryConfig(Config):
             config.get("media_store_path", "media_store")
         )
 
+        self.use_sha256_paths = config.get("use_sha256_paths", False)
+
         backup_media_store_path = config.get("backup_media_store_path")
 
         synchronous_backup_media_store = config.get(

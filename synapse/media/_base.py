@@ -526,7 +526,6 @@ class ThumbnailInfo:
     type: str
     # The size of the media file, in bytes.
     length: int
-    sha256: Optional[str] = None
 
 
 @attr.s(slots=True, frozen=True, auto_attribs=True)

@@ -185,14 +185,14 @@ class MediaFilePaths:
     local_media_filepath = _wrap_in_base_path(local_media_filepath_rel)
 
     @_wrap_with_jail_check(relative=True)
-    def local_media_filepath_sha_rel(self, sha256: str) -> str:
+    def filepath_sha_rel(self, sha256: str) -> str:
         return os.path.join(
             _validate_path_component(sha256[0:2]),
             _validate_path_component(sha256[2:4]),
             _validate_path_component(sha256[4:]),
         )
 
-    local_media_filepath_sha = _wrap_in_base_path(local_media_filepath_sha_rel)
+    filepath_sha = _wrap_in_base_path(filepath_sha_rel)
 
     @_wrap_with_jail_check(relative=True)
     def local_media_thumbnail_rel(
@@ -211,7 +211,7 @@ class MediaFilePaths:
     local_media_thumbnail = _wrap_in_base_path(local_media_thumbnail_rel)
 
     @_wrap_with_jail_check(relative=True)
-    def local_media_thumbnail_sha_rel(
+    def thumbnail_sha_rel(
         self, sha256: str, width: int, height: int, content_type: str, method: str
     ) -> str:
         top_level_type, sub_type = content_type.split("/")
@@ -224,7 +224,7 @@ class MediaFilePaths:
             _validate_path_component(file_name),
         )
 
-    local_media_thumbnail_sha = _wrap_in_base_path(local_media_thumbnail_sha_rel)
+    thumbnail_sha = _wrap_in_base_path(thumbnail_sha_rel)
 
     @_wrap_with_jail_check(relative=False)
     def local_media_thumbnail_dir(self, media_id: str) -> str:
@@ -245,7 +245,7 @@ class MediaFilePaths:
         )
 
     @_wrap_with_jail_check(relative=False)
-    def local_media_thumbnail_sha_dir(self, sha256: str) -> str:
+    def thumbnail_sha_dir(self, sha256: str) -> str:
         """
         Retrieve the local store path of thumbnails of a given media_id
 
@@ -275,16 +275,6 @@ class MediaFilePaths:
     remote_media_filepath = _wrap_in_base_path(remote_media_filepath_rel)
 
     @_wrap_with_jail_check(relative=True)
-    def remote_media_filepath_sha_rel(self, sha256: str) -> str:
-        return os.path.join(
-            _validate_path_component(sha256[0:2]),
-            _validate_path_component(sha256[2:4]),
-            _validate_path_component(sha256[4:]),
-        )
-
-    remote_media_filepath_sha = _wrap_in_base_path(remote_media_filepath_sha_rel)
-
-    @_wrap_with_jail_check(relative=True)
     def remote_media_thumbnail_rel(
         self,
         server_name: str,
@@ -306,27 +296,6 @@ class MediaFilePaths:
         )
 
     remote_media_thumbnail = _wrap_in_base_path(remote_media_thumbnail_rel)
-
-    @_wrap_with_jail_check(relative=True)
-    def remote_media_thumbnail_sha_rel(
-        self,
-        sha256: str,
-        width: int,
-        height: int,
-        content_type: str,
-        method: str,
-    ) -> str:
-        top_level_type, sub_type = content_type.split("/")
-        file_name = "%i-%i-%s-%s-%s" % (width, height, top_level_type, sub_type, method)
-        return os.path.join(
-            "thumbnail",
-            _validate_path_component(sha256[0:2]),
-            _validate_path_component(sha256[2:4]),
-            _validate_path_component(sha256[4:]),
-            _validate_path_component(file_name),
-        )
-
-    remote_media_thumbnail_sha = _wrap_in_base_path(remote_media_thumbnail_sha_rel)
 
     # Legacy path that was used to store thumbnails previously.
     # Should be removed after some time, when most of the thumbnails are stored
@@ -355,16 +324,6 @@ class MediaFilePaths:
             _validate_path_component(file_id[0:2]),
             _validate_path_component(file_id[2:4]),
             _validate_path_component(file_id[4:]),
-        )
-
-    @_wrap_with_jail_check(relative=False)
-    def remote_media_thumbnail_sha_dir(self, sha256: str) -> str:
-        return os.path.join(
-            self.base_path,
-            "thumbnail",
-            _validate_path_component(sha256[0:2]),
-            _validate_path_component(sha256[2:4]),
-            _validate_path_component(sha256[4:]),
         )
 
     @_wrap_with_jail_check(relative=True)

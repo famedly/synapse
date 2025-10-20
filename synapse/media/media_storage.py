@@ -177,6 +177,7 @@ class MediaStorage:
         self.storage_providers = storage_providers
         self._spam_checker_module_callbacks = hs.get_module_api_callbacks().spam_checker
         self.clock = hs.get_clock()
+        self.use_sha256_paths = hs.config.media.use_sha256_paths
 
     @trace_with_opname("MediaStorage.store_file")
     async def store_file(self, source: IO, file_info: FileInfo) -> str:
@@ -201,9 +202,6 @@ class MediaStorage:
         """Asynchronously write the `source` to `output`."""
         await defer_to_thread(self.reactor, _write_file_synchronously, source, output)
 
-    def generate_path_from_sha256(self, sha256: str) -> str:
-        return f"{sha256[:2]}/{sha256[2:4]}/{sha256[4:]}"
-
     @trace_with_opname("MediaStorage.store_into_file")
     @contextlib.asynccontextmanager
     async def store_into_file(
@@ -227,14 +225,16 @@ class MediaStorage:
             async with media_storage.store_into_file(info) as (f, fname,):
                 # .. write into f ...
         """
-
-        path = self._file_info_to_path(file_info)
-        fname = os.path.join(self.local_media_directory, path)
-
-        # TODO: use path of sha256
-        if file_info.sha256:
-            path = self.generate_path_from_sha256(file_info.sha256)
+        # New files are stored using SHA256-based paths if enabled
+        if self.use_sha256_paths:
+            if file_info.sha256:
+                path = self._file_info_to_sha256_path(file_info)
+                if path:
+                    fname = os.path.join(self.local_media_directory, path)
+        else:
+            path = self._file_info_to_path(file_info)
             fname = os.path.join(self.local_media_directory, path)
+
         dirname = os.path.dirname(fname)
         os.makedirs(dirname, exist_ok=True)
 
@@ -280,18 +280,18 @@ class MediaStorage:
         Returns:
             Returns a Responder if the file was found, otherwise None.
         """
-        # TODO: fetch file info from sha256 path
-        # also keep the old ones working.
-        # if not the old ones, find by sha256
+        sha256_path = self._file_info_to_sha256_path(file_info)
+        # Build list of paths to check, prioritizing SHA256-based paths
         paths = [self._file_info_to_path(file_info)]
-
-        # if file_info.sha256:
-        #     paths.append(self.filepaths.remote_media_sha_rel(file_info.sha256))
+        if sha256_path:
+            # make sure self._file_info_to_sha256_path(file_info) doesn't return None. if None is added to paths, will throw error
+            paths.append(sha256_path)
         # fallback for remote thumbnails with no method in the filename
         if file_info.thumbnail and file_info.server_name:
             paths.append(
                 self.filepaths.remote_media_thumbnail_rel_legacy(
-                    sha256=file_info.sha256,
+                    server_name=file_info.server_name,
+                    file_id=file_info.file_id,
                     width=file_info.thumbnail.width,
                     height=file_info.thumbnail.height,
                     content_type=file_info.thumbnail.type,
@@ -326,6 +326,15 @@ class MediaStorage:
         Returns:
             Full path to local file
         """
+        # First look up the sha path if enabled
+        if self.use_sha256_paths and file_info.sha256:
+            path = self._file_info_to_sha256_path(file_info)
+            if path:
+                local_path = os.path.join(self.local_media_directory, path)
+            if os.path.exists(local_path):
+                return local_path
+
+        # if the file doesn't exist in sha path, look up the media_id path
         path = self._file_info_to_path(file_info)
         local_path = os.path.join(self.local_media_directory, path)
         if os.path.exists(local_path):
@@ -345,12 +354,6 @@ class MediaStorage:
             if os.path.exists(legacy_local_path):
                 return legacy_local_path
 
-        # TODO: if existing search doesn't work, search by SHA256 by media_id
-        if file_info.sha256:
-            path = self.filepaths.remote_media_filepath_rel(file_info.sha256)
-            if os.path.exists(path):
-                return path
-
         dirname = os.path.dirname(local_path)
         os.makedirs(dirname, exist_ok=True)
 
@@ -368,8 +371,27 @@ class MediaStorage:
         raise NotFoundError()
 
     @trace
+    def _file_info_to_sha256_path(self, file_info: FileInfo) -> str:
+        # add the thumbnail path. We don't change the url_cache directory.
+        # we only update the user uploaded media files.
+        if not file_info.sha256:
+            logger.error("file_info does not have sha256 information.")
+            return ""
+        if file_info.url_cache:
+            # not sure if url_cache is false for any other media.
+            return ""
+        if file_info.thumbnail:
+            return self.filepaths.thumbnail_sha_rel(
+                sha256=file_info.sha256,
+                width=file_info.thumbnail.width,
+                height=file_info.thumbnail.height,
+                content_type=file_info.thumbnail.type,
+                method=file_info.thumbnail.method,
+            )
+        return self.filepaths.filepath_sha_rel(file_info.sha256)
+
+    @trace
     def _file_info_to_path(self, file_info: FileInfo) -> str:
-        # TODO: convert to the sha path!
         """Converts file_info into a relative path.
 
         The path is suitable for storing files under a directory, e.g. used to
@@ -388,11 +410,6 @@ class MediaStorage:
 
         if file_info.server_name:
             if file_info.thumbnail:
-                if file_info.sha256:
-                    return self.filepaths.remote_media_filepath_sha_rel(
-                        sha256=file_info.sha256
-                    )
-
                 return self.filepaths.remote_media_thumbnail_rel(
                     server_name=file_info.server_name,
                     file_id=file_info.file_id,
@@ -406,14 +423,6 @@ class MediaStorage:
             )
 
         if file_info.thumbnail:
-            if file_info.sha256:
-                return self.filepaths.local_media_thumbnail_sha_rel(
-                    sha256=file_info.sha256,
-                    width=file_info.thumbnail.width,
-                    height=file_info.thumbnail.height,
-                    content_type=file_info.thumbnail.type,
-                    method=file_info.thumbnail.method,
-                )
             return self.filepaths.local_media_thumbnail_rel(
                 media_id=file_info.file_id,
                 width=file_info.thumbnail.width,
@@ -421,9 +430,6 @@ class MediaStorage:
                 content_type=file_info.thumbnail.type,
                 method=file_info.thumbnail.method,
             )
-
-        if file_info.sha256:
-            return self.filepaths.local_media_filepath_sha_rel(file_info.sha256)
         return self.filepaths.local_media_filepath_rel(file_info.file_id)
 
 

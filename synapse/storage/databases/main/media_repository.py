@@ -710,7 +710,6 @@ class MediaRepositoryStore(MediaRepositoryBackgroundUpdateStore):
                     "thumbnail_method",
                     "thumbnail_type",
                     "thumbnail_length",
-                    "thumbnail_sha256",
                 ),
                 desc="get_local_media_thumbnails",
             ),
@@ -722,7 +721,6 @@ class MediaRepositoryStore(MediaRepositoryBackgroundUpdateStore):
                 method=row[2],
                 type=row[3],
                 length=row[4],
-                sha256=row[5],
             )
             for row in rows
         ]
@@ -736,7 +734,6 @@ class MediaRepositoryStore(MediaRepositoryBackgroundUpdateStore):
         thumbnail_type: str,
         thumbnail_method: str,
         thumbnail_length: int,
-        thumbnail_sha256: str,
     ) -> None:
         await self.db_pool.simple_upsert(
             table="local_media_repository_thumbnails",
@@ -746,7 +743,6 @@ class MediaRepositoryStore(MediaRepositoryBackgroundUpdateStore):
                 "thumbnail_height": thumbnail_height,
                 "thumbnail_method": thumbnail_method,
                 "thumbnail_type": thumbnail_type,
-                "thumbnail_sha256": thumbnail_sha256,
             },
             values={"thumbnail_length": thumbnail_length},
             desc="store_local_thumbnail",
@@ -870,24 +866,6 @@ class MediaRepositoryStore(MediaRepositoryBackgroundUpdateStore):
             "update_cached_last_access_time", update_cache_txn
         )
 
-    async def get_local_thumbnail_sha256_by_media_id(
-        self, media_id: str
-    ) -> Optional[str]:
-        # get media_id and return sha256 of it if any of them exists.
-        # local_media_repository_thumbnails
-        # remote_media_cache_thumbnails
-
-        row = await self.db_pool.simple_select_one(
-            table="local_media_repository_thumbnails",
-            keyvalues={"media_id": media_id},
-            retcols=("thumbnail_sha256",),
-            allow_none=True,
-            desc="get_thumbnail_sha256_by_media_id",
-        )
-        if row is None:
-            return None
-        return row[0]
-
     async def get_remote_media_thumbnails(
         self, origin: str, media_id: str
     ) -> List[ThumbnailInfo]:
@@ -902,7 +880,6 @@ class MediaRepositoryStore(MediaRepositoryBackgroundUpdateStore):
                     "thumbnail_method",
                     "thumbnail_type",
                     "thumbnail_length",
-                    "thumbnail_sha256",
                 ),
                 desc="get_remote_media_thumbnails",
             ),
@@ -914,7 +891,6 @@ class MediaRepositoryStore(MediaRepositoryBackgroundUpdateStore):
                 method=row[2],
                 type=row[3],
                 length=row[4],
-                sha256=row[5],
             )
             for row in rows
         ]
@@ -945,7 +921,6 @@ class MediaRepositoryStore(MediaRepositoryBackgroundUpdateStore):
                 "thumbnail_method",
                 "thumbnail_type",
                 "thumbnail_length",
-                "thumbnail_sha256",
             ),
             allow_none=True,
             desc="get_remote_media_thumbnail",
@@ -958,7 +933,6 @@ class MediaRepositoryStore(MediaRepositoryBackgroundUpdateStore):
             method=row[2],
             type=row[3],
             length=row[4],
-            sha256=row[5],
         )
 
     @trace
@@ -1349,7 +1323,7 @@ class MediaRepositoryStore(MediaRepositoryBackgroundUpdateStore):
 
     async def get_sha_by_media_id(
         self, media_id: str, server_name: Optional[str] = None
-    ) -> Optional[str]:
+    ) -> str:
         """
         Get the media ID of and return SHA256 hash of given media.
         """
@@ -1371,16 +1345,16 @@ class MediaRepositoryStore(MediaRepositoryBackgroundUpdateStore):
 
         def _get_sha_by_media_id_txn(
             txn: LoggingTransaction,
-        ) -> Optional[str]:
+        ) -> str:
             if server_name and not self.hs.is_mine_server_name(server_name):
                 txn.execute(sql, (server_name, media_id))
             else:
                 txn.execute(sql, (media_id,))
 
             rows = txn.fetchone()
-            if rows:
-                return rows[0]
-            return None
+            if not rows:
+                raise ValueError("media_id %s has no sha256 field", media_id)
+            return rows[0]
 
         return await self.db_pool.runInteraction(
             "get_sha_by_media_id", _get_sha_by_media_id_txn
