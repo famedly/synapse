@@ -1,5 +1,5 @@
-$schema: https://element-hq.github.io/synapse/latest/schema/v1/meta.schema.json
-$id: https://element-hq.github.io/synapse/schema/synapse/v1.139/synapse-config.schema.json
+$schema: https://famedly.github.io/synapse/latest/schema/v1/meta.schema.json
+$id: https://famedly.github.io/synapse/schema/synapse/v1.139/synapse-config.schema.json
 type: object
 properties:
   modules:
@@ -1690,7 +1690,7 @@ properties:
 
 
       If you're using the [example systemd
-      service](https://github.com/element-hq/synapse/blob/develop/contrib/systemd/matrix-synapse.service)
+      service](https://github.com/famedly/synapse/blob/master/contrib/systemd/matrix-synapse.service)
       file in Synapse's `contrib` directory, you can send a `SIGHUP` signal by
       using `systemctl reload matrix-synapse`.
     properties:

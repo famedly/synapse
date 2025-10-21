@@ -1,7 +1,7 @@
 Admin APIs
 ==========
 
-**Note**: The latest documentation can be viewed `here <https://element-hq.github.io/synapse>`_.
+**Note**: The latest documentation can be viewed `here <https://famedly.github.io/synapse>`_.
 See `docs/README.md <../README.md>`_ for more information.
 
 **Please update links to point to the website instead.** Existing files in this directory

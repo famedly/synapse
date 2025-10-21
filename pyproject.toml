@@ -2,7 +2,7 @@
     package = "synapse"
     filename = "CHANGES.md"
     directory = "changelog.d"
-    issue_format = "[\\#{issue}](https://github.com/element-hq/synapse/issues/{issue})"
+    issue_format = "[\\#{issue}](https://github.com/famedly/synapse/issues/{issue})"
 
     [[tool.towncrier.type]]
         directory = "feature"
@@ -106,7 +106,7 @@ description = "Homeserver for the Matrix decentralised comms protocol"
 authors = ["Matrix.org Team and Contributors <packages@matrix.org>"]
 license = "AGPL-3.0-or-later"
 readme = "README.rst"
-repository = "https://github.com/element-hq/synapse"
+repository = "https://github.com/famedly/synapse"
 packages = [
     { include = "synapse" },
 ]

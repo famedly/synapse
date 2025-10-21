@@ -1,18 +1,19 @@
 .. image:: ./docs/element_logo_white_bg.svg
    :height: 60px
 
-**Element Synapse - Matrix homeserver implementation**
+**Famedly Synapse - Matrix homeserver implementation (Fork of Element Synapse)**
 
 |support| |development| |documentation| |license| |pypi| |python|
 
-Synapse is an open source `Matrix <https://matrix.org>`__ homeserver
-implementation, written and maintained by `Element <https://element.io>`_.
+This is Famedly's fork of `Element Synapse <https://github.com/element-hq/synapse>`_,
+an open source `Matrix <https://matrix.org>`__ homeserver implementation.
 `Matrix <https://github.com/matrix-org>`__ is the open standard for
-secure and interoperable real-time communications. You can directly run
-and manage the source code in this repository, available under an AGPL
-license (or alternatively under a commercial license from Element).
-There is no support provided by Element unless you have a
-subscription from Element.
+secure and interoperable real-time communications.
+
+This fork applies additional patches and customizations for Famedly's needs.
+The original Synapse is written and maintained by `Element <https://element.io>`_.
+You can directly run and manage the source code in this repository, available
+under an AGPL license (or alternatively under a commercial license from Element).
 
 Subscription
 ============
@@ -55,17 +56,17 @@ be rebased upon every synapse release. To do this, the following workflow is use
 🛠️ Installation and configuration
 ==================================
 
-The Synapse documentation describes `how to install Synapse <https://element-hq.github.io/synapse/latest/setup/installation.html>`_. We recommend using
-`Docker images <https://element-hq.github.io/synapse/latest/setup/installation.html#docker-images-and-ansible-playbooks>`_ or `Debian packages from Matrix.org
-<https://element-hq.github.io/synapse/latest/setup/installation.html#matrixorg-packages>`_.
+The Synapse documentation describes `how to install Synapse <https://famedly.github.io/synapse/latest/setup/installation.html>`_. We recommend using
+`Docker images <https://famedly.github.io/synapse/latest/setup/installation.html#docker-images-and-ansible-playbooks>`_ or `Debian packages from Matrix.org
+<https://famedly.github.io/synapse/latest/setup/installation.html#matrixorg-packages>`_.
 
 .. _federation:
 
 Synapse has a variety of `config options
-<https://element-hq.github.io/synapse/latest/usage/configuration/config_documentation.html>`_
+<https://famedly.github.io/synapse/latest/usage/configuration/config_documentation.html>`_
 which can be used to customise its behaviour after installation.
 There are additional details on how to `configure Synapse for federation here
-<https://element-hq.github.io/synapse/latest/federate.html>`_.
+<https://famedly.github.io/synapse/latest/federate.html>`_.
 
 .. _reverse-proxy:
 
@@ -81,7 +82,7 @@ It is recommended to put a reverse proxy such as
 doing so is that it means that you can expose the default https port (443) to
 Matrix clients without needing to run Synapse with root privileges.
 For information on configuring one, see `the reverse proxy docs
-<https://element-hq.github.io/synapse/latest/reverse_proxy.html>`_.
+<https://famedly.github.io/synapse/latest/reverse_proxy.html>`_.
 
 Upgrading an existing Synapse
 -----------------------------
@@ -90,7 +91,7 @@ The instructions for upgrading Synapse are in `the upgrade notes`_.
 Please check these instructions as upgrading may require extra steps for some
 versions of Synapse.
 
-.. _the upgrade notes: https://element-hq.github.io/synapse/develop/upgrade.html
+.. _the upgrade notes: https://famedly.github.io/synapse/latest/upgrade.html
 
 
 Platform dependencies
@@ -98,7 +99,7 @@ Platform dependencies
 
 Synapse uses a number of platform dependencies such as Python and PostgreSQL,
 and aims to follow supported upstream versions. See the
-`deprecation policy <https://element-hq.github.io/synapse/latest/deprecation_policy.html>`_
+`deprecation policy <https://famedly.github.io/synapse/latest/deprecation_policy.html>`_
 for more details.
 
 
@@ -152,7 +153,7 @@ from a web client.
 Unless you are running a test instance of Synapse on your local machine, in
 general, you will need to enable TLS support before you can successfully
 connect from a client: see
-`TLS certificates <https://element-hq.github.io/synapse/latest/setup/installation.html#tls-certificates>`_.
+`TLS certificates <https://famedly.github.io/synapse/latest/setup/installation.html#tls-certificates>`_.
 
 An easy way to get started is to login or register via Element at
 https://app.element.io/#/login or https://app.element.io/#/register respectively.
@@ -174,11 +175,11 @@ By default, registration of new users via Matrix clients is disabled. To enable
 it:
 
 1. In the
-   `registration config section <https://element-hq.github.io/synapse/latest/usage/configuration/config_documentation.html#registration>`_
+   `registration config section <https://famedly.github.io/synapse/latest/usage/configuration/config_documentation.html#registration>`_
    set ``enable_registration: true`` in ``homeserver.yaml``.
 2. Then **either**:
 
-   a. set up a `CAPTCHA <https://element-hq.github.io/synapse/latest/CAPTCHA_SETUP.html>`_, or
+   a. set up a `CAPTCHA <https://famedly.github.io/synapse/latest/CAPTCHA_SETUP.html>`_, or
    b. set ``enable_registration_without_verification: true`` in ``homeserver.yaml``.
 
 We **strongly** recommend using a CAPTCHA, particularly if your homeserver is exposed to
@@ -211,9 +212,9 @@ and access the `knowledge base <https://ems-docs.element.io>`_.
 🤝 Community support
 --------------------
 
-The `Admin FAQ <https://element-hq.github.io/synapse/latest/usage/administration/admin_faq.html>`_
+The `Admin FAQ <https://famedly.github.io/synapse/latest/usage/administration/admin_faq.html>`_
 includes tips on dealing with some common problems. For more details, see
-`Synapse's wider documentation <https://element-hq.github.io/synapse/latest/>`_.
+`Synapse's wider documentation <https://famedly.github.io/synapse/latest/>`_.
 
 For additional support installing or managing Synapse, please ask in the community
 support room |room|_ (from a matrix.org account if necessary). We do not use GitHub
@@ -260,15 +261,15 @@ email address.
 
 We welcome contributions to Synapse from the community!
 The best place to get started is our
-`guide for contributors <https://element-hq.github.io/synapse/latest/development/contributing_guide.html>`_.
-This is part of our broader `documentation <https://element-hq.github.io/synapse/latest>`_, which includes
+`guide for contributors <https://famedly.github.io/synapse/latest/development/contributing_guide.html>`_.
+This is part of our broader `documentation <https://famedly.github.io/synapse/latest>`_, which includes
 information for Synapse developers as well as Synapse administrators.
 
 Developers might be particularly interested in:
 
-* `Synapse's database schema <https://element-hq.github.io/synapse/latest/development/database_schema.html>`_,
-* `notes on Synapse's implementation details <https://element-hq.github.io/synapse/latest/development/internal_documentation/index.html>`_, and
-* `how we use git <https://element-hq.github.io/synapse/latest/development/git.html>`_.
+* `Synapse's database schema <https://famedly.github.io/synapse/latest/development/database_schema.html>`_,
+* `notes on Synapse's implementation details <https://famedly.github.io/synapse/latest/development/internal_documentation/index.html>`_, and
+* `how we use git <https://famedly.github.io/synapse/latest/development/git.html>`_.
 
 Alongside all that, join our developer community on Matrix:
 `#synapse-dev:matrix.org <https://matrix.to/#/#synapse-dev:matrix.org>`_, featuring real humans!
@@ -300,7 +301,7 @@ Unless required by applicable law or agreed to in writing, software distributed 
 
 .. |documentation| image:: https://img.shields.io/badge/documentation-%E2%9C%93-success
   :alt: (Rendered documentation on GitHub Pages)
-  :target: https://element-hq.github.io/synapse/latest/
+  :target: https://famedly.github.io/synapse/latest/
 
 .. |license| image:: https://img.shields.io/github/license/element-hq/synapse
   :alt: (check license in LICENSE file)

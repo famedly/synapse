@@ -70,9 +70,7 @@
       "icon": "external link",
       "includeVars": true,
       "keepTime": true,
-      "tags": [
-        "matrix"
-      ],
+      "tags": ["matrix"],
       "title": "Dashboards",
       "type": "dashboards"
     }
@@ -4287,7 +4285,7 @@
             "type": "prometheus",
             "uid": "${DS_PROMETHEUS}"
           },
-          "description": "Triangular growth may indicate a problem with federation sending from the remote host --- but it may also be the case that everyone is asleep and no messages are being sent.\n\nSee https://element-hq.github.io/synapse/latest/usage/configuration/config_documentation.html#federation_metrics_domains",
+          "description": "Triangular growth may indicate a problem with federation sending from the remote host --- but it may also be the case that everyone is asleep and no messages are being sent.\n\nSee https://famedly.github.io/synapse/latest/usage/configuration/config_documentation.html#federation_metrics_domains",
           "fieldConfig": {
             "defaults": {
               "color": {
@@ -4347,9 +4345,7 @@
                   "id": "byNames",
                   "options": {
                     "mode": "exclude",
-                    "names": [
-                      "libera.chat "
-                    ],
+                    "names": ["libera.chat "],
                     "prefix": "All except:",
                     "readOnly": true
                   }
@@ -4409,7 +4405,7 @@
             "type": "prometheus",
             "uid": "${DS_PROMETHEUS}"
           },
-          "description": "Triangular growth may indicate a problem with federation senders on the monitored instance---but it may also be the case that everyone is asleep and no messages are being sent.\n\nSee https://element-hq.github.io/synapse/latest/usage/configuration/config_documentation.html#federation_metrics_domains",
+          "description": "Triangular growth may indicate a problem with federation senders on the monitored instance---but it may also be the case that everyone is asleep and no messages are being sent.\n\nSee https://famedly.github.io/synapse/latest/usage/configuration/config_documentation.html#federation_metrics_domains",
           "fieldConfig": {
             "defaults": {
               "color": {
@@ -4469,9 +4465,7 @@
                   "id": "byNames",
                   "options": {
                     "mode": "exclude",
-                    "names": [
-                      "libera.chat"
-                    ],
+                    "names": ["libera.chat"],
                     "prefix": "All except:",
                     "readOnly": true
                   }
@@ -13300,9 +13294,7 @@
   "refresh": false,
   "schemaVersion": 37,
   "style": "dark",
-  "tags": [
-    "matrix"
-  ],
+  "tags": ["matrix"],
   "templating": {
     "list": [
       {
@@ -13487,17 +13479,7 @@
       "2h",
       "1d"
     ],
-    "time_options": [
-      "5m",
-      "15m",
-      "1h",
-      "6h",
-      "12h",
-      "24h",
-      "2d",
-      "7d",
-      "30d"
-    ]
+    "time_options": ["5m", "15m", "1h", "6h", "12h", "24h", "2d", "7d", "30d"]
   },
   "timezone": "",
   "title": "Synapse",

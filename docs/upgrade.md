@@ -404,9 +404,9 @@ packages or Docker images, no action is required.
 As mentioned previously in [Upgrading to v1.84.0](#upgrading-to-v1840), the following deprecated settings
 are being removed in this release of Synapse:
 
-* [`worker_replication_host`](https://element-hq.github.io/synapse/v1.86/usage/configuration/config_documentation.html#worker_replication_host)
-* [`worker_replication_http_port`](https://element-hq.github.io/synapse/v1.86/usage/configuration/config_documentation.html#worker_replication_http_port)
-* [`worker_replication_http_tls`](https://element-hq.github.io/synapse/v1.86/usage/configuration/config_documentation.html#worker_replication_http_tls)
+* [`worker_replication_host`](https://famedly.github.io/synapse/latest/usage/configuration/config_documentation.html#worker_replication_host)
+* [`worker_replication_http_port`](https://famedly.github.io/synapse/latest/usage/configuration/config_documentation.html#worker_replication_http_port)
+* [`worker_replication_http_tls`](https://famedly.github.io/synapse/latest/usage/configuration/config_documentation.html#worker_replication_http_tls)
 
 Please ensure that you have migrated to using `main` on your shared configuration's `instance_map`
 (or create one if necessary). This is required if you have ***any*** workers at all;
@@ -759,7 +759,7 @@ the names of Prometheus metrics.
 If you want to test your changes before legacy names are disabled by default,
 you may specify `enable_legacy_metrics: false` in your homeserver configuration.
 
-A list of affected metrics is available on the [Metrics How-to page](https://element-hq.github.io/synapse/v1.69/metrics-howto.html?highlight=metrics%20deprecated#renaming-of-metrics--deprecation-of-old-names-in-12).
+A list of affected metrics is available on the [Metrics How-to page](https://famedly.github.io/synapse/latest/metrics-howto.html?highlight=metrics%20deprecated#renaming-of-metrics--deprecation-of-old-names-in-12).
 
 
 ## Deprecation of the `generate_short_term_login_token` module API method
@@ -816,7 +816,7 @@ are not affected.
 
 Building from a source checkout of Synapse now requires a recent Rust compiler
 (currently Rust 1.58.1, but see also the
-[Platform Dependency Policy](https://element-hq.github.io/synapse/latest/deprecation_policy.html)).
+[Platform Dependency Policy](https://famedly.github.io/synapse/latest/deprecation_policy.html)).
 
 Installations using
 
@@ -886,7 +886,7 @@ homeserver administrators more notice of the change.
 To continue to allow users to add email addresses to their homeserver accounts,
 and perform password resets, make sure that Synapse is configured with a working
 email server in the [`email` configuration
-section](https://element-hq.github.io/synapse/latest/usage/configuration/config_documentation.html#email)
+section](https://famedly.github.io/synapse/latest/usage/configuration/config_documentation.html#email)
 (including, at a minimum, a `notif_from` setting.)
 
 Specifying an `email` setting under `account_threepid_delegates` will now cause
@@ -899,7 +899,7 @@ an error at startup.
 Synapse v1.66.0 will remove the ability to delegate the tasks of verifying email address ownership, and password reset confirmation, to an identity server.
 
 If you require your homeserver to verify e-mail addresses or to support password resets via e-mail, please configure your homeserver with SMTP access so that it can send e-mails on its own behalf.
-[Consult the configuration documentation for more information.](https://element-hq.github.io/synapse/latest/usage/configuration/config_documentation.html#email)
+[Consult the configuration documentation for more information.](https://famedly.github.io/synapse/latest/usage/configuration/config_documentation.html#email)
 
 The option that will be removed is `account_threepid_delegates.email`.
 
@@ -1109,7 +1109,7 @@ The names of user devices are no longer visible to users on other homeservers by
 Device IDs are unaffected, as these are necessary to facilitate end-to-end encryption.
 
 To re-enable this functionality, set the
-[`allow_device_name_lookup_over_federation`](https://element-hq.github.io/synapse/v1.59/usage/configuration/config_documentation.html#federation)
+[`allow_device_name_lookup_over_federation`](https://famedly.github.io/synapse/latest/usage/configuration/config_documentation.html#federation)
 homeserver config option to `true`.
 
 
@@ -1228,7 +1228,7 @@ experimental_features:
 
 Synapse now refuses to start when using PostgreSQL with non-`C` values for `COLLATE` and
 `CTYPE` unless the config flag `allow_unsafe_locale`, found in the database section of
-the configuration file, is set to `true`. See the [PostgreSQL documentation](https://element-hq.github.io/synapse/latest/postgres.html#fixing-incorrect-collate-or-ctype)
+the configuration file, is set to `true`. See the [PostgreSQL documentation](https://famedly.github.io/synapse/latest/postgres.html#fixing-incorrect-collate-or-ctype)
 for more information and instructions on how to fix a database with incorrect values.
 
 # Upgrading to v1.55.0
@@ -1267,7 +1267,7 @@ please upgrade Mjolnir to version 1.3.2 or later before upgrading Synapse.
 This release removes support for the `structured: true` logging configuration
 which was deprecated in Synapse v1.23.0. If your logging configuration contains
 `structured: true` then it should be modified based on the
-[structured logging documentation](https://element-hq.github.io/synapse/v1.56/structured_logging.html#upgrading-from-legacy-structured-logging-configuration).
+[structured logging documentation](https://famedly.github.io/synapse/latest/structured_logging.html#upgrading-from-legacy-structured-logging-configuration).
 
 # Upgrading to v1.53.0
 
@@ -1327,10 +1327,10 @@ are now active by default.
 As announced with the release of [Synapse 1.47.0](#deprecation-of-the-user_may_create_room_with_invites-module-callback),
 the deprecated `user_may_create_room_with_invites` module callback has been removed.
 
-Modules relying on it can instead implement [`user_may_invite`](https://element-hq.github.io/synapse/latest/modules/spam_checker_callbacks.html#user_may_invite)
-and use the [`get_room_state`](https://github.com/element-hq/synapse/blob/872f23b95fa980a61b0866c1475e84491991fa20/synapse/module_api/__init__.py#L869-L876)
+Modules relying on it can instead implement [`user_may_invite`](https://famedly.github.io/synapse/latest/modules/spam_checker_callbacks.html#user_may_invite)
+and use the [`get_room_state`](https://github.com/famedly/synapse/blob/872f23b95fa980a61b0866c1475e84491991fa20/synapse/module_api/__init__.py#L869-L876)
 module API to infer whether the invite is happening while creating a room (see [this function](https://github.com/matrix-org/synapse-domain-rule-checker/blob/e7d092dd9f2a7f844928771dbfd9fd24c2332e48/synapse_domain_rule_checker/__init__.py#L56-L89)
-as an example). Alternately, modules can also implement [`on_create_room`](https://element-hq.github.io/synapse/latest/modules/third_party_rules_callbacks.html#on_create_room).
+as an example). Alternately, modules can also implement [`on_create_room`](https://famedly.github.io/synapse/latest/modules/third_party_rules_callbacks.html#on_create_room).
 
 
 # Upgrading to v1.52.0
@@ -1377,14 +1377,14 @@ The following admin APIs were deprecated in [Synapse 1.34](https://github.com/ma
 - `POST /_synapse/admin/v1/<room_id>/delete`
 
 Any scripts still using the above APIs should be converted to use the
-[Delete Room API](https://element-hq.github.io/synapse/latest/admin_api/rooms.html#delete-room-api).
+[Delete Room API](https://famedly.github.io/synapse/latest/admin_api/rooms.html#delete-room-api).
 
 ## Deprecation of the `user_may_create_room_with_invites` module callback
 
 The `user_may_create_room_with_invites` is deprecated and will be removed in a future
 version of Synapse. Modules implementing this callback can instead implement
-[`user_may_invite`](https://element-hq.github.io/synapse/latest/modules/spam_checker_callbacks.html#user_may_invite)
-and use the [`get_room_state`](https://github.com/element-hq/synapse/blob/872f23b95fa980a61b0866c1475e84491991fa20/synapse/module_api/__init__.py#L869-L876)
+[`user_may_invite`](https://famedly.github.io/synapse/latest/modules/spam_checker_callbacks.html#user_may_invite)
+and use the [`get_room_state`](https://github.com/famedly/synapse/blob/872f23b95fa980a61b0866c1475e84491991fa20/synapse/module_api/__init__.py#L869-L876)
 module API method to infer whether the invite is happening in the context of creating a
 room.
 
@@ -1410,7 +1410,7 @@ deleted from any configured storage providers to reclaim space.
 
 ## The spaces summary APIs can now be handled by workers
 
-The [available worker applications documentation](https://element-hq.github.io/synapse/latest/workers.html#available-worker-applications)
+The [available worker applications documentation](https://famedly.github.io/synapse/latest/workers.html#available-worker-applications)
 has been updated to reflect that calls to the `/spaces`, `/hierarchy`, and
 `/summary` endpoints can now be routed to workers for both client API and
 federation requests.
@@ -1426,13 +1426,13 @@ The following admin APIs were deprecated in [Synapse 1.25](https://github.com/ma
 -   `POST /_synapse/admin/v1/shutdown_room/<room_id>`
 
 Any scripts still using the above APIs should be converted to use the
-[Delete Room API](https://element-hq.github.io/synapse/latest/admin_api/rooms.html#delete-room-api).
+[Delete Room API](https://famedly.github.io/synapse/latest/admin_api/rooms.html#delete-room-api).
 
 ## User-interactive authentication fallback templates can now display errors
 
 This may affect you if you make use of custom HTML templates for the
-[reCAPTCHA (`synapse/res/templates/recaptcha.html`)](https://github.com/element-hq/synapse/tree/develop/synapse/res/templates/recaptcha.html) or
-[terms (`synapse/res/templates/terms.html`)](https://github.com/element-hq/synapse/tree/develop/synapse/res/templates/terms.html) fallback pages.
+[reCAPTCHA (`synapse/res/templates/recaptcha.html`)](https://github.com/famedly/synapse/tree/master/synapse/res/templates/recaptcha.html) or
+[terms (`synapse/res/templates/terms.html`)](https://github.com/famedly/synapse/tree/master/synapse/res/templates/terms.html) fallback pages.
 
 The template is now provided an `error` variable if the authentication
 process failed. See the default templates linked above for an example.
@@ -1474,14 +1474,14 @@ The `template_dir` settings in the `sso`, `account_validity` and `email` section
 configuration file are now deprecated. Server admins should use the new
 `templates.custom_template_directory` setting in the configuration file and use one single
 custom template directory for all aforementioned features. Template file names remain
-unchanged. See [the related documentation](https://element-hq.github.io/synapse/latest/templates.html)
+unchanged. See [the related documentation](https://famedly.github.io/synapse/latest/templates.html)
 for more information and examples.
 
 We plan to remove support for these settings in October 2021.
 
 ## `/_synapse/admin/v1/users/{userId}/media` must be handled by media workers
 
-The [media repository worker documentation](https://element-hq.github.io/synapse/latest/workers.html#synapseappmedia_repository)
+The [media repository worker documentation](https://famedly.github.io/synapse/latest/workers.html#synapseappmedia_repository)
 has been updated to reflect that calls to `/_synapse/admin/v1/users/{userId}/media`
 must now be handled by media repository workers. This is due to the new `DELETE` method
 of this endpoint modifying the media store.
@@ -1884,7 +1884,7 @@ lock down external access to the Admin API endpoints.
 This release deprecates use of the `structured: true` logging
 configuration for structured logging. If your logging configuration
 contains `structured: true` then it should be modified based on the
-[structured logging documentation](https://element-hq.github.io/synapse/v1.56/structured_logging.html#upgrading-from-legacy-structured-logging-configuration).
+[structured logging documentation](https://famedly.github.io/synapse/latest/structured_logging.html#upgrading-from-legacy-structured-logging-configuration).
 
 The `structured` and `drains` logging options are now deprecated and
 should be replaced by standard logging configuration of `handlers` and
@@ -1931,7 +1931,7 @@ update your reverse proxy configuration to reflect this change.
 ## New HTML templates
 
 A new HTML template,
-[password_reset_confirmation.html](https://github.com/element-hq/synapse/blob/develop/synapse/res/templates/password_reset_confirmation.html),
+[password_reset_confirmation.html](https://github.com/famedly/synapse/blob/master/synapse/res/templates/password_reset_confirmation.html),
 has been added to the `synapse/res/templates` directory. If you are
 using a custom template directory, you may want to copy the template
 over and modify it.
@@ -1984,7 +1984,7 @@ updated.
 When setting up worker processes, we now recommend the use of a Redis
 server for replication. **The old direct TCP connection method is
 deprecated and will be removed in a future release.** See
-the [worker documentation](https://element-hq.github.io/synapse/v1.66/workers.html) for more details.
+the [worker documentation](https://famedly.github.io/synapse/latest/workers.html) for more details.
 
 # Upgrading to v1.14.0
 
@@ -2030,7 +2030,7 @@ New templates (`sso_auth_confirm.html`, `sso_auth_success.html`, and
 is configured to use SSO and a custom
 `sso_redirect_confirm_template_dir` configuration then these templates
 will need to be copied from
-[`synapse/res/templates`](https://github.com/element-hq/synapse/tree/develop/synapse/res/templates) into that directory.
+[`synapse/res/templates`](https://github.com/famedly/synapse/tree/master/synapse/res/templates) into that directory.
 
 ## Synapse SSO Plugins Method Deprecation
 
@@ -2183,7 +2183,7 @@ included.
 Synapse will expect these files to exist inside the configured template
 directory, and **will fail to start** if they are absent. To view the
 default templates, see
-[synapse/res/templates](https://github.com/element-hq/synapse/tree/master/synapse/res/templates).
+[synapse/res/templates](https://github.com/famedly/synapse/tree/master/synapse/res/templates).
 
 ## 3pid verification changes
 

@@ -45,7 +45,7 @@ docker run -it --rm \
 ```
 
 For information on picking a suitable server name, see
-https://element-hq.github.io/synapse/latest/setup/installation.html.
+https://famedly.github.io/synapse/latest/setup/installation.html.
 
 The above command will generate a `homeserver.yaml` in (typically)
 `/var/lib/docker/volumes/synapse-data/_data`. You should check this file, and
@@ -78,7 +78,7 @@ The following environment variables are supported in `generate` mode:
 
 ## Postgres
 
-By default the config will use SQLite. See the [docs on using Postgres](https://github.com/element-hq/synapse/blob/develop/docs/postgres.md) for more info on how to use Postgres. Until this section is improved [this issue](https://github.com/element-hq/synapse/issues/8304) may provide useful information.
+By default the config will use SQLite. See the [docs on using Postgres](https://github.com/famedly/synapse/blob/master/docs/postgres.md) for more info on how to use Postgres. Until this section is improved [this issue](https://github.com/element-hq/synapse/issues/8304) may provide useful information.
 
 ## Running synapse
 
@@ -154,10 +154,10 @@ is suitable for local testing, but for any practical use, you will either need
 to use a reverse proxy, or configure Synapse to expose an HTTPS port.
 
 For documentation on using a reverse proxy, see
-https://github.com/element-hq/synapse/blob/master/docs/reverse_proxy.md.
+https://github.com/famedly/synapse/blob/master/docs/reverse_proxy.md.
 
 For more information on enabling TLS support in synapse itself, see
-https://element-hq.github.io/synapse/latest/setup/installation.html#tls-certificates. Of
+https://famedly.github.io/synapse/latest/setup/installation.html#tls-certificates. Of
 course, you will need to expose the TLS port from the container with a `-p`
 argument to `docker run`.
 
@@ -245,4 +245,4 @@ healthcheck:
 
 Jemalloc is embedded in the image and will be used instead of the default allocator.
 You can read about jemalloc by reading the Synapse
-[Admin FAQ](https://element-hq.github.io/synapse/latest/usage/administration/admin_faq.html#help-synapse-is-slow-and-eats-all-my-ramcpu).
+[Admin FAQ](https://famedly.github.io/synapse/latest/usage/administration/admin_faq.html#help-synapse-is-slow-and-eats-all-my-ramcpu).

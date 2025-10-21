@@ -9,7 +9,7 @@ This directory contains an `lnav` [log format definition](
     https://docs.lnav.org/en/v0.10.1/formats.html#defining-a-new-format
 ) for Synapse logs as
 emitted by Synapse with the default [logging configuration](
-    https://element-hq.github.io/synapse/latest/usage/configuration/config_documentation.html#log_config
+    https://famedly.github.io/synapse/latest/usage/configuration/config_documentation.html#log_config
 ). It supports lnav 0.10.1 because that's what's packaged by my distribution.
 
 This should allow lnav:
@@ -40,7 +40,7 @@ Within lnav itself:
   down and up.
 - Use `o` and `O` to skip through logs based on the request ID (`POST-1234`, or
   else the value of the [`request_id_header`](
-    https://element-hq.github.io/synapse/latest/usage/configuration/config_documentation.html?highlight=request_id_header#listeners
+    https://famedly.github.io/synapse/latest/usage/configuration/config_documentation.html?highlight=request_id_header#listeners
   ) header). This may get confused if the same request ID is repeated among
   multiple files or process restarts.
 - ???

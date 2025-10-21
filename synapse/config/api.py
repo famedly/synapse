@@ -80,7 +80,7 @@ _ROOM_INVITE_STATE_TYPES_WARNING = """\
 WARNING: The 'room_invite_state_types' configuration setting is now deprecated,
 and replaced with 'room_prejoin_state'. New features may not work correctly
 unless 'room_invite_state_types' is removed. See the config documentation at
-    https://element-hq.github.io/synapse/latest/usage/configuration/config_documentation.html#room_prejoin_state
+    https://famedly.github.io/synapse/latest/usage/configuration/config_documentation.html#room_prejoin_state
 for details of 'room_prejoin_state'.
 --------------------------------------------------------------------------------
 """
