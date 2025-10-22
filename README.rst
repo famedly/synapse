@@ -1,4 +1,4 @@
-.. image:: ./docs/element_logo_white_bg.svg
+.. image:: ./docs/famedly_logo_white_bg.svg
    :height: 60px
 
 **Famedly Synapse - Matrix homeserver implementation (Fork of Element Synapse)**
@@ -13,19 +13,7 @@ secure and interoperable real-time communications.
 This fork applies additional patches and customizations for Famedly's needs.
 The original Synapse is written and maintained by `Element <https://element.io>`_.
 You can directly run and manage the source code in this repository, available
-under an AGPL license (or alternatively under a commercial license from Element).
-
-Subscription
-============
-
-For those that need an enterprise-ready solution, Element
-Server Suite (ESS) is `available via subscription <https://element.io/pricing>`_.
-ESS builds on Synapse to offer a complete Matrix-based backend including the full
-`Admin Console product <https://element.io/enterprise-functionality/admin-console>`_,
-giving admins the power to easily manage an organization-wide
-deployment. It includes advanced identity management, auditing,
-moderation and data retention options as well as Long-Term Support and
-SLAs. ESS supports any Matrix-compatible client.
+under an AGPL license.
 
 .. contents::
 
@@ -203,11 +191,7 @@ desired ``localpart`` in the 'Username' box.
 🚀 Professional support
 -----------------------
 
-Enterprise quality support for Synapse including SLAs is available as part of an
-`Element Server Suite (ESS) <https://element.io/pricing>`_ subscription.
-
-If you are an existing ESS subscriber then you can raise a `support request <https://ems.element.io/support>`_
-and access the `knowledge base <https://ems-docs.element.io>`_.
+For professional support, please sent us a mail at info@famedly.com
 
 🤝 Community support
 --------------------
@@ -280,16 +264,10 @@ Copyright and Licensing
 | Copyright 2014-2017 OpenMarket Ltd
 | Copyright 2017 Vector Creations Ltd
 | Copyright 2017-2025 New Vector Ltd
+| Copyright 2025 Famedly
 |
 
-This software is dual-licensed by New Vector Ltd (Element). It can be used either:
-
-(1) for free under the terms of the GNU Affero General Public License (as published by the Free Software Foundation, either version 3 of the License, or (at your option) any later version); OR
-
-(2) under the terms of a paid-for Element Commercial License agreement between you and Element (the terms of which may vary depending on what you and Element have agreed to).
-
-Unless required by applicable law or agreed to in writing, software distributed under the Licenses is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the Licenses for the specific language governing permissions and limitations under the Licenses.
-
+Licensed under the AGPL.
 
 .. |support| image:: https://img.shields.io/badge/matrix-community%20support-success
   :alt: (get community support in #synapse:matrix.org)
