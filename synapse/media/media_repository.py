@@ -753,8 +753,8 @@ class MediaRepository(AbstractMediaRepository):
             raise NotFoundError("Media ID has expired")
 
     def check_file_path_exists_by_sha256(self, sha256: str) -> bool:
-        file_path = f"{sha256[:2]}/{sha256[2:4]}/{sha256[4:]}"
-        path = self.hs.config.media.media_store_path + file_path
+        file_path = os.path.join(sha256[:2], sha256[2:4], sha256[4:])
+        path = os.path.join(self.hs.config.media.media_store_path, file_path)
         if os.path.exists(path):
             return True
         return False
@@ -793,18 +793,24 @@ class MediaRepository(AbstractMediaRepository):
 
         # check if file path with this sha256 already exists
         is_sha_path_exists = False
-        if sha256:
-            is_sha_path_exists = self.check_file_path_exists_by_sha256(sha256)
-
-        # if the file is not there and if sha256 path is enabled, store with sha path.
-        if not is_sha_path_exists and self.use_sha256_paths:
-            # Generate SHA256 hash first to use as a filepath.
+        if not sha256:
             content.seek(0)
             sha256reader = SHA256TransparentIOReader(content)
             sha256reader.read()
             sha256 = sha256reader.hexdigest()
-            file_info = FileInfo(server_name=None, file_id=sha256, sha256=sha256)
-        else:
+        is_sha_path_exists = self.check_file_path_exists_by_sha256(sha256)
+
+        # if the file is not there and if sha256 path is enabled, store with sha path.
+        if not is_sha_path_exists and self.use_sha256_paths:
+            file_info = FileInfo(server_name=None, file_id=media_id, sha256=sha256)
+            fname = await self.media_storage.store_file(content, file_info)
+            logger.info("Stored media in file %r", fname)
+            is_sha_path_exists = True
+
+        if not is_sha_path_exists and not self.use_sha256_paths:
+            # `is_sha_path_exists` need to be updated to True and need to check here
+            # again, to not break the existing logic and prevent the file being stored
+            # twice with both sha256 and media_id paths.
             file_info = FileInfo(server_name=None, file_id=media_id)
             sha256reader = SHA256TransparentIOReader(content)
             # This implements all of IO as it has a passthrough
@@ -891,31 +897,21 @@ class MediaRepository(AbstractMediaRepository):
 
         old_media_info = await self.get_media_info(existing_mxc)
         if isinstance(old_media_info, RemoteMedia):
-            if self.use_sha256_paths:
-                assert old_media_info.sha256 is not None
-                file_info = FileInfo(
-                    server_name=old_media_info.media_origin,
-                    file_id=old_media_info.sha256,
-                    sha256=old_media_info.sha256,
-                )
-            else:
-                file_info = FileInfo(
-                    server_name=old_media_info.media_origin,
-                    file_id=old_media_info.filesystem_id,
-                )
+            file_info = FileInfo(
+                server_name=old_media_info.media_origin,
+                file_id=old_media_info.filesystem_id,
+                sha256=old_media_info.sha256
+                if self.use_sha256_paths and old_media_info.sha256
+                else None,
+            )
         else:
-            if self.use_sha256_paths:
-                assert old_media_info.sha256 is not None
-                file_info = FileInfo(
-                    server_name=None,
-                    file_id=old_media_info.sha256,
-                    sha256=old_media_info.sha256,
-                )
-            else:
-                file_info = FileInfo(
-                    server_name=None,
-                    file_id=old_media_info.media_id,
-                )
+            file_info = FileInfo(
+                server_name=None,
+                file_id=old_media_info.media_id,
+                sha256=old_media_info.sha256
+                if self.use_sha256_paths and old_media_info.sha256
+                else None,
+            )
 
         # This will ensure that if there is another storage provider containing our old
         # media, it will be in our local cache before the copy takes place.
@@ -931,11 +927,11 @@ class MediaRepository(AbstractMediaRepository):
         # Let existing methods handle creating the new file for us. By not passing a
         # media id, one will be created.
         new_mxc_uri = await self.create_or_update_content(
-            media_type=old_media_info.media_type,
-            upload_name=old_media_info.upload_name,
-            content=io_object,
-            content_length=old_media_info.media_length,
-            auth_user=auth_user,
+            old_media_info.media_type,
+            old_media_info.upload_name,
+            io_object,
+            old_media_info.media_length,
+            auth_user,
             restricted=True,
             sha256=old_media_info.sha256,
         )

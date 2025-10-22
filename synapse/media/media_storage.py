@@ -225,16 +225,13 @@ class MediaStorage:
             async with media_storage.store_into_file(info) as (f, fname,):
                 # .. write into f ...
         """
-        # New files are stored using SHA256-based paths if enabled
-        if self.use_sha256_paths:
-            if file_info.sha256:
-                path = self._file_info_to_sha256_path(file_info)
-                if path:
-                    fname = os.path.join(self.local_media_directory, path)
-        else:
+        path = ""
+        # if use_sha256_paths is enabled, new files are stored using SHA256-based paths
+        if self.use_sha256_paths and file_info.sha256:
+            path = self._file_info_to_sha256_path(file_info)
+        if not path:  # if sha256 path is not found, use the old path
             path = self._file_info_to_path(file_info)
-            fname = os.path.join(self.local_media_directory, path)
-
+        fname = os.path.join(self.local_media_directory, path)
         dirname = os.path.dirname(fname)
         os.makedirs(dirname, exist_ok=True)
 
