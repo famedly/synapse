@@ -65,6 +65,7 @@ from synapse.rest.admin.federation import (
     ListDestinationsRestServlet,
 )
 from synapse.rest.admin.media import ListMediaInRoom, register_servlets_for_media_repo
+from synapse.rest.admin.modules import ModulesRestServlet
 from synapse.rest.admin.registration_tokens import (
     ListRegistrationTokensRestServlet,
     NewRegistrationTokenRestServlet,
@@ -328,6 +329,7 @@ def register_servlets(hs: "HomeServer", http_server: HttpServer) -> None:
     RedactUserStatus(hs).register(http_server)
     UserInvitesCount(hs).register(http_server)
     UserJoinedRoomCount(hs).register(http_server)
+    ModulesRestServlet(hs).register(http_server)
 
     DeviceRestServlet(hs).register(http_server)
     DevicesRestServlet(hs).register(http_server)
