@@ -2,6 +2,22 @@ $schema: https://famedly.github.io/synapse/latest/schema/v1/meta.schema.json
 $id: https://famedly.github.io/synapse/schema/synapse/v1.139/synapse-config.schema.json
 type: object
 properties:
+  famedly_maximum_refresh_token_lifetime:
+    type: [integer, string]
+    description: >-
+      This clamps any values passed via the API to be lower or equal of this maximum.
+      Can either be in milliseconds or a string that will be passed to `parse_duration()`
+    default: "160d"
+    examples:
+      - 3600000
+  experimental_features:
+    type: object
+    description: >-
+      These are largely not documented here as they are changed relatively frequently.
+      They can be found [here](https://github.com/famedly/synapse/blob/master/synapse/config/experimental.py#L368)
+    examples:
+      - feature1: value1
+        feature2: value2
   modules:
     type: array
     description: >-
