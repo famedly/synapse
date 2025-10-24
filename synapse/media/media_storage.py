@@ -277,12 +277,13 @@ class MediaStorage:
         Returns:
             Returns a Responder if the file was found, otherwise None.
         """
-        sha256_path = self._file_info_to_sha256_path(file_info)
         # Build list of paths to check, prioritizing SHA256-based paths
         paths = [self._file_info_to_path(file_info)]
-        if sha256_path:
-            # make sure self._file_info_to_sha256_path(file_info) doesn't return None. if None is added to paths, will throw error
-            paths.append(sha256_path)
+        if self.use_sha256_paths and file_info.sha256:
+            sha256_path = self._file_info_to_sha256_path(file_info)
+            if sha256_path:
+                # make sure self._file_info_to_sha256_path(file_info) doesn't return None. if None is added to paths, will throw error
+                paths.append(sha256_path)
         # fallback for remote thumbnails with no method in the filename
         if file_info.thumbnail and file_info.server_name:
             paths.append(

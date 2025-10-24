@@ -272,6 +272,7 @@ class ThumbnailProvider:
         self.store = hs.get_datastores().main
         self.dynamic_thumbnails = hs.config.media.dynamic_thumbnails
         self.enable_media_restriction = self.hs.config.experimental.msc3911_enabled
+        self.use_sha256_paths = self.media_repo.use_sha256_paths
 
     async def respond_local_thumbnail(
         self,
@@ -331,6 +332,9 @@ class ThumbnailProvider:
             for_federation=for_federation,
             media_info=media_info,
             json_response=restrictions_json,
+            sha256=media_info.sha256
+            if self.use_sha256_paths and media_info.sha256
+            else None,
         )
 
     async def select_or_generate_local_thumbnail(
@@ -594,6 +598,9 @@ class ThumbnailProvider:
             url_cache=False,
             server_name=server_name,
             for_federation=False,
+            sha256=media_info.sha256
+            if self.use_sha256_paths and media_info.sha256
+            else None,
         )
 
     async def _select_and_respond_with_thumbnail(
@@ -611,6 +618,7 @@ class ThumbnailProvider:
         media_info: Optional[LocalMedia] = None,
         server_name: Optional[str] = None,
         json_response: Optional[dict] = None,
+        sha256: Optional[str] = None,
     ) -> None:
         """
         Respond to a request with an appropriate thumbnail from the previously generated thumbnails.
@@ -627,6 +635,7 @@ class ThumbnailProvider:
             server_name: The server name, if this is a remote thumbnail.
             for_federation: whether the request is from the federation /thumbnail request
             media_info: metadata about the media being requested.
+            sha256: The sha256 of the original media that a thumbnail is being requested for.
         """
         logger.debug(
             "_select_and_respond_with_thumbnail: media_id=%s desired=%sx%s (%s) thumbnail_infos=%s",
@@ -640,6 +649,7 @@ class ThumbnailProvider:
         # If `dynamic_thumbnails` is enabled, we expect Synapse to go down a
         # different code path to handle it.
         assert not self.dynamic_thumbnails
+        # TODO: Make sure this is working correctly with sha256 paths
 
         if thumbnail_infos:
             file_info = self._select_thumbnail(
@@ -651,6 +661,7 @@ class ThumbnailProvider:
                 file_id,
                 url_cache,
                 server_name,
+                sha256=sha256 if self.use_sha256_paths and sha256 else None,
             )
             if not file_info:
                 logger.info("Couldn't find a thumbnail matching the desired inputs")
@@ -776,6 +787,7 @@ class ThumbnailProvider:
         file_id: str,
         url_cache: bool,
         server_name: Optional[str],
+        sha256: Optional[str] = None,
     ) -> Optional[FileInfo]:
         """
         Choose an appropriate thumbnail from the previously generated thumbnails.
@@ -789,6 +801,7 @@ class ThumbnailProvider:
             file_id: The ID of the media that a thumbnail is being requested for.
             url_cache: True if this is from a URL cache.
             server_name: The server name, if this is a remote thumbnail.
+            sha256: The sha256 of the originalmedia that a thumbnail is being requested for.
 
         Returns:
              The thumbnail which best matches the desired parameters.
@@ -889,6 +902,7 @@ class ThumbnailProvider:
                 url_cache=url_cache,
                 server_name=server_name,
                 thumbnail=thumbnail_info,
+                sha256=sha256 if self.use_sha256_paths and sha256 else None,
             )
 
         # No matching thumbnail was found.
