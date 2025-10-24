@@ -21,7 +21,7 @@ stages:
 
 lint+mypy+test:
   stage: test
-  image: docker.io/python:3.9-slim
+  image: docker.io/python:3.10-slim
   script:
     - apt-get update && apt-get install -y git build-essential libffi-dev libjpeg-dev libpq-dev libssl-dev libwebp-dev libxml++2.6-dev libxslt1-dev zlib1g-dev curl
     - curl https://sh.rustup.rs -sSf | sh -s -- -y --default-toolchain stable --profile minimal --component clippy --component rustfmt

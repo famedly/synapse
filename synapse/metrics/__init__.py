@@ -669,6 +669,13 @@ build_info.labels(
     " ".join([platform.system(), platform.release()]),
 ).set(1)
 
+# Loaded modules info
+module_instances_info = Gauge(
+    "synapse_module_info",
+    "Information about loaded modules",
+    labelnames=["package_name", "module_name", "module_version", SERVER_NAME_LABEL],
+)
+
 # 3PID send info
 threepid_send_requests = Histogram(
     "synapse_threepid_send_requests_with_tries",

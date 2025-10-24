@@ -29,6 +29,7 @@ from synapse.metrics import (
     LaterGauge,
     all_later_gauges_to_clean_up_on_shutdown,
     generate_latest,
+    module_instances_info,
 )
 from synapse.util.caches.deferred_cache import DeferredCache
 
@@ -402,3 +403,35 @@ def get_latest_metrics() -> Dict[str, str]:
     }
 
     return metric_map
+
+
+class ModuleInstancesInfoTests(unittest.TestCase):
+    def test_module_instances_info_metric(self) -> None:
+        """
+        The synapse_module_info metric reports information about loaded modules.
+        """
+        # Set up a test module metric
+        test_server_name = "test_server"
+        test_module_name = "test.module.TestModule"
+        test_package_name = "test"
+        test_module_version = "1.2.3"
+
+        # Set the metric values
+        module_instances_info.labels(
+            module_name=test_module_name,
+            package_name=test_package_name,
+            module_version=test_module_version,
+            server_name=test_server_name,
+        ).set(1)
+
+        metrics_output = generate_latest(REGISTRY)
+
+        # Check that the metric appears in the output
+        self.assertIn(b"synapse_module_info{", metrics_output)
+        self.assertIn(f'module_name="{test_module_name}"'.encode(), metrics_output)
+        self.assertIn(f'package_name="{test_package_name}"'.encode(), metrics_output)
+        self.assertIn(
+            f'module_version="{test_module_version}"'.encode(), metrics_output
+        )
+        self.assertIn(f'server_name="{test_server_name}"'.encode(), metrics_output)
+        self.assertIn(b"} 1.0", metrics_output)
