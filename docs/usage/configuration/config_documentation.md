@@ -10,6 +10,10 @@ thinking about options, the config as generated sets sensible defaults for all v
 database defaults to SQLite, which is not recommended for production usage. You can read more on this subject
 [here](../../setup/installation.md#using-postgresql).
 
+## Famedly's Synapse specifics
+
+Some config options are specific to Famedly's Synapse version. They can be found [here](#famedlys-synapse-specific-options).
+
 ## Config Conventions
 
 Configuration options that take a time period can be set using a number
@@ -92,6 +96,36 @@ apply if you want your config file to be read properly. A few helpful things to 
   the sub-options, if any, are identified and listed in the body of the section.
   In addition, each setting has an example of its usage, with the proper indentation
   shown.
+---
+## Famedly's Synapse specific options
+
+Those options are specific to Famedly's Synapse version.
+
+---
+### `famedly_maximum_refresh_token_lifetime`
+
+*(integer|string)* This clamps any values passed via the API to be lower or equal of this maximum. Can either be in milliseconds or a string that will be passed to `parse_duration()` Defaults to `"160d"`.
+
+Example configuration:
+```yaml
+famedly_maximum_refresh_token_lifetime: 3600000
+```
+---
+## Experimental features
+
+They all come from Element's Synapse except for `msc3706_enabled`
+
+---
+### `experimental_features`
+
+*(object)* These are largely not documented here as they are changed relatively frequently. They can be found [here](https://github.com/famedly/synapse/blob/master/synapse/config/experimental.py#L368)
+
+Example configuration:
+```yaml
+experimental_features:
+  feature1: value1
+  feature2: value2
+```
 ---
 ## Modules
 
