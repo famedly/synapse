@@ -185,6 +185,16 @@ class MediaFilePaths:
     local_media_filepath = _wrap_in_base_path(local_media_filepath_rel)
 
     @_wrap_with_jail_check(relative=True)
+    def filepath_sha_rel(self, sha256: str) -> str:
+        return os.path.join(
+            _validate_path_component(sha256[0:2]),
+            _validate_path_component(sha256[2:4]),
+            _validate_path_component(sha256[4:]),
+        )
+
+    filepath_sha = _wrap_in_base_path(filepath_sha_rel)
+
+    @_wrap_with_jail_check(relative=True)
     def local_media_thumbnail_rel(
         self, media_id: str, width: int, height: int, content_type: str, method: str
     ) -> str:
@@ -199,6 +209,22 @@ class MediaFilePaths:
         )
 
     local_media_thumbnail = _wrap_in_base_path(local_media_thumbnail_rel)
+
+    @_wrap_with_jail_check(relative=True)
+    def thumbnail_sha_rel(
+        self, sha256: str, width: int, height: int, content_type: str, method: str
+    ) -> str:
+        top_level_type, sub_type = content_type.split("/")
+        file_name = "%i-%i-%s-%s-%s" % (width, height, top_level_type, sub_type, method)
+        return os.path.join(
+            "thumbnails",
+            _validate_path_component(sha256[0:2]),
+            _validate_path_component(sha256[2:4]),
+            _validate_path_component(sha256[4:]),
+            _validate_path_component(file_name),
+        )
+
+    thumbnail_sha = _wrap_in_base_path(thumbnail_sha_rel)
 
     @_wrap_with_jail_check(relative=False)
     def local_media_thumbnail_dir(self, media_id: str) -> str:
@@ -216,6 +242,24 @@ class MediaFilePaths:
             _validate_path_component(media_id[0:2]),
             _validate_path_component(media_id[2:4]),
             _validate_path_component(media_id[4:]),
+        )
+
+    @_wrap_with_jail_check(relative=False)
+    def thumbnail_sha_dir(self, sha256: str) -> str:
+        """
+        Retrieve the local store path of thumbnails of a given media_id
+
+        Args:
+            sha256: The sha256 to query.
+        Returns:
+            Path of local_thumbnails from sha256
+        """
+        return os.path.join(
+            self.base_path,
+            "thumbnails",
+            _validate_path_component(sha256[0:2]),
+            _validate_path_component(sha256[2:4]),
+            _validate_path_component(sha256[4:]),
         )
 
     @_wrap_with_jail_check(relative=True)

@@ -24,10 +24,21 @@ import json
 import os
 import re
 import shutil
+import tempfile
 import time
 from contextlib import nullcontext
 from http import HTTPStatus
-from typing import Any, BinaryIO, ClassVar, Dict, List, Optional, Sequence, Tuple, Type
+from typing import (
+    Any,
+    BinaryIO,
+    ClassVar,
+    Dict,
+    List,
+    Optional,
+    Sequence,
+    Tuple,
+    Type,
+)
 from unittest.mock import AsyncMock, MagicMock, Mock, patch
 from urllib import parse
 from urllib.parse import quote, urlencode
@@ -3076,7 +3087,9 @@ class RestrictedResourceUploadTestCase(unittest.HomeserverTestCase):
         return self.setup_test_homeserver(config=config)
 
     def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
-        self.media_repo = hs.get_media_repository_resource()
+        self.test_dir = tempfile.mkdtemp(prefix="synapse-tests-")
+        self.addCleanup(shutil.rmtree, self.test_dir)
+        self.media_repo = hs.get_media_repository()
         self.register_user("creator", "testpass")
         self.creator_tok = self.login("creator", "testpass")
 
@@ -3142,6 +3155,7 @@ class RestrictedResourceUploadTestCase(unittest.HomeserverTestCase):
             access_token=self.creator_tok,
         )
         assert channel.code == 200, channel.json_body
+        # TODO: why this is failing?
 
         # The other user cannot download the restricted resource in pending state.
         channel = self.make_request(
@@ -5114,3 +5128,431 @@ class RestrictedMediaBackwardCompatTestCase(unittest.HomeserverTestCase):
             custom_headers=[("If-None-Match", etag)],
         )
         self.assertEqual(channel3.code, 404)
+
+
+class MediaStorageSha256PathCompatTestCase(unittest.HomeserverTestCase):
+    servlets = [
+        media.register_servlets,
+        login.register_servlets,
+        admin.register_servlets,
+    ]
+
+    def make_homeserver(self, reactor: MemoryReactor, clock: Clock) -> HomeServer:
+        config = self.default_config()
+        config.setdefault("experimental_features", {})
+        config["experimental_features"].update({"msc3911_enabled": True})
+        self.storage_path = self.mktemp()
+        self.media_store_path = self.mktemp()
+        os.mkdir(self.storage_path)
+        os.mkdir(self.media_store_path)
+        config["media_store_path"] = self.media_store_path
+        config["use_sha256_paths"] = True
+
+        provider_config = {
+            "module": "synapse.media.storage_provider.FileStorageProviderBackend",
+            "store_local": True,
+            "store_synchronous": False,
+            "store_remote": True,
+            "config": {"directory": self.storage_path},
+        }
+
+        config["media_storage_providers"] = [provider_config]
+        # add sha path config
+
+        return self.setup_test_homeserver(config=config)
+
+    # TODO: try local media upload and download with sha256 path
+    # Try remote media download with sha256 path
+
+    # _get_remote_media_impl only being used in
+    # get_remote_media -> Donwload resource /_matrix/media/(r0|v3|v1)/download/ and /_matrix/client/v1/media/download/
+    def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
+        self.test_dir = tempfile.mkdtemp(prefix="synapse-tests-")
+        self.addCleanup(shutil.rmtree, self.test_dir)
+        self.repo = hs.get_media_repository()
+        self.client = hs.get_federation_http_client()
+        self.store = hs.get_datastores().main
+        self.user = self.register_user("user", "pass")
+        self.tok = self.login("user", "pass")
+
+    def _create_local_media_with_sha256_path(self, user: str) -> str:
+        # Confirm that the sha256 path does not exist
+        assert isinstance(self.repo, MediaRepository)
+        expected_path = self.repo.filepaths.filepath_sha(SMALL_PNG_SHA256)
+        mxc_uri = self.get_success(
+            self.repo.create_or_update_content(
+                media_type="image/png",
+                upload_name="test_png_upload",
+                content=io.BytesIO(SMALL_PNG),
+                content_length=67,
+                auth_user=UserID.from_string(user),
+                media_id=None,
+                restricted=True,
+            )
+        )
+        assert os.path.exists(expected_path), f"File does not exist: {expected_path}"
+        assert not os.path.exists(
+            self.repo.filepaths.local_media_filepath(mxc_uri.media_id)
+        )
+        return mxc_uri.media_id
+
+    def _create_local_media_with_media_id_path(self, user: str) -> str:
+        assert isinstance(self.repo, MediaRepository)
+        self.repo.use_sha256_paths = False
+        mxc_uri = self.get_success(
+            self.repo.create_or_update_content(
+                media_type="image/png",
+                upload_name="original_media",
+                content=io.BytesIO(SMALL_PNG),
+                content_length=67,
+                auth_user=UserID.from_string(user),
+                media_id=None,
+                restricted=True,
+            )
+        )
+        media_id = mxc_uri.media_id
+        file_info = FileInfo(
+            server_name=None,
+            file_id=media_id,
+        )
+
+        expected_path = self.repo.filepaths.local_media_filepath(media_id)
+        ctx = self.repo.media_storage.store_into_file(file_info)
+        (f, fname) = self.get_success(ctx.__aenter__())
+        f.write(SMALL_PNG)
+        self.get_success(ctx.__aexit__(None, None, None))
+
+        assert expected_path in fname
+        assert os.path.exists(fname), f"File does not exist: {fname}"
+        assert os.path.exists(expected_path), f"File does not exist: {expected_path}"
+        self.repo.use_sha256_paths = True
+        return media_id
+
+    def test_download_remote_media_with_media_id(self) -> None:
+        async def _mock_federation_download_media(
+            destination: str,
+            media_id: str,
+            output_stream: BinaryIO,
+            max_size: int,
+            max_timeout_ms: int,
+            download_ratelimiter: Ratelimiter,
+            ip_address: str,
+        ) -> Tuple[int, Dict[bytes, List[bytes]]]:
+            output_stream.write(SMALL_PNG)
+            output_stream.flush()
+            headers = {
+                b"Content-Type": [b"image/png"],
+                b"Content-Disposition": [b"attachment; filename=test.png"],
+                b"Content-Length": [b"67"],
+            }
+            return 67, headers
+
+        self.repo.client.federation_download_media = _mock_federation_download_media  # type: ignore
+
+        remote_server = "remote.org"
+        media_id = random_string(24)
+        # first request should go through
+        channel = self.make_request(
+            "GET",
+            f"/_matrix/client/v1/media/download/{remote_server}/{media_id}",
+            shorthand=False,
+            access_token=self.tok,
+        )
+        assert channel.code == 200
+        assert isinstance(self.repo, MediaRepository)
+        assert os.path.exists(self.repo.filepaths.filepath_sha(SMALL_PNG_SHA256))
+
+        # check if the file is saved in the media cache table
+        remote_media = self.get_success(
+            self.repo.store.get_cached_remote_media(remote_server, media_id)
+        )
+        assert remote_media is not None
+        assert not os.path.exists(
+            self.repo.filepaths.remote_media_filepath(
+                remote_server, remote_media.filesystem_id
+            )
+        )
+
+    def test_download_local_media_with_media_id(self) -> None:
+        """Test that getting media with media_id path works correctly, when sha256 path is enabled"""
+        # use /_matrix/client/v1/media/download/
+
+        # save local media with media_id path
+        media_id = self._create_local_media_with_media_id_path(self.user)
+
+        channel = self.make_request(
+            "GET",
+            f"/_matrix/client/v1/media/download/{self.hs.hostname}/{media_id}",
+            shorthand=False,
+            access_token=self.tok,
+        )
+        assert channel.code == 200
+        assert channel.result["body"] == SMALL_PNG
+        assert isinstance(self.repo, MediaRepository)
+        assert os.path.exists(self.repo.filepaths.local_media_filepath(media_id))
+
+    def test_download_local_media_with_sha256_path(self) -> None:
+        """Test that getting media with sha256 path works correctly, when sha256 path is enabled"""
+        # use /_matrix/client/v1/media/download/
+
+        # save local media with media_id path
+        media_id = self._create_local_media_with_sha256_path(self.user)
+
+        channel = self.make_request(
+            "GET",
+            f"/_matrix/client/v1/media/download/{self.hs.hostname}/{media_id}",
+            shorthand=False,
+            access_token=self.tok,
+        )
+        assert channel.code == 200
+        assert channel.result["body"] == SMALL_PNG
+        assert isinstance(self.repo, MediaRepository)
+        assert os.path.exists(self.repo.filepaths.filepath_sha(SMALL_PNG_SHA256))
+
+    def test_copy_remote_media_with_sha256_path(self) -> None:
+        # use /_matrix/client/unstable/org.matrix.msc3911/media/copy
+
+        # _get_remote_media_impl only being used in
+        # get_remote_media_info -> Copy resource /_matrix/client/unstable/org.matrix.msc3911/media/copy
+
+        async def _mock_federation_download_media(
+            destination: str,
+            media_id: str,
+            output_stream: BinaryIO,
+            max_size: int,
+            max_timeout_ms: int,
+            download_ratelimiter: Ratelimiter,
+            ip_address: str,
+        ) -> Tuple[int, Dict[bytes, List[bytes]]]:
+            output_stream.write(SMALL_PNG)
+            output_stream.flush()
+            headers = {
+                b"Content-Type": [b"image/png"],
+                b"Content-Disposition": [b"attachment; filename=test.png"],
+                b"Content-Length": [b"67"],
+            }
+            return 67, headers
+
+        self.repo.client.federation_download_media = _mock_federation_download_media  # type: ignore
+
+        remote_server = "remote.org"
+        media_id = random_string(24)
+        # first request should go through
+        channel = self.make_request(
+            "POST",
+            f"/_matrix/client/unstable/org.matrix.msc3911/media/copy/{remote_server}/{media_id}",
+            shorthand=False,
+            access_token=self.tok,
+        )
+        assert channel.code == 200, channel.result
+        assert "content_uri" in channel.json_body
+        copied_media_mxc_uri = MXCUri.from_str(channel.json_body["content_uri"])
+        assert copied_media_mxc_uri.media_id != media_id
+        # the copy should create a new media id, but does not create another file.
+        # check if media is copied, so there are 2 rows in the media cache table.
+        remote_media = self.get_success(
+            self.repo.store.get_cached_remote_media(remote_server, media_id)
+        )
+        assert remote_media is not None
+        assert remote_media.sha256 == SMALL_PNG_SHA256
+        assert remote_media.filesystem_id == SMALL_PNG_SHA256
+
+        copied_media = self.get_success(
+            self.repo.store.get_local_media(copied_media_mxc_uri.media_id)
+        )
+        assert copied_media is not None
+        assert copied_media.sha256 == SMALL_PNG_SHA256
+
+        assert isinstance(self.repo, MediaRepository)
+        assert os.path.exists(self.repo.filepaths.filepath_sha(SMALL_PNG_SHA256))
+
+        # check if the file is saved in the media cache table
+        assert not os.path.exists(
+            self.repo.filepaths.remote_media_filepath(
+                remote_server, remote_media.filesystem_id
+            )
+        )
+        assert not os.path.exists(
+            self.repo.filepaths.local_media_filepath(copied_media_mxc_uri.media_id)
+        )
+
+    def test_copy_local_media_with_media_id(self) -> None:
+        """Test that copying media with media_id path works correctly, when sha256 path is enabled"""
+        # use /_matrix/client/unstable/org.matrix.msc3911/media/copy
+
+        # save local media with media_id path
+        media_id = self._create_local_media_with_media_id_path(self.user)
+
+        channel = self.make_request(
+            "POST",
+            f"/_matrix/client/unstable/org.matrix.msc3911/media/copy/{self.hs.hostname}/{media_id}",
+            shorthand=False,
+            access_token=self.tok,
+        )
+        assert channel.code == 200, channel.result
+        assert "content_uri" in channel.json_body
+        copied_media_mxc_uri = MXCUri.from_str(channel.json_body["content_uri"])
+        assert copied_media_mxc_uri.media_id != media_id
+
+        # the copy should create a new media id, but does not create another file.
+        # check if media is copied, so there are 2 rows in the media cache table.
+        remote_media = self.get_success(self.repo.store.get_local_media(media_id))
+        assert remote_media is not None
+        assert remote_media.sha256 == SMALL_PNG_SHA256
+
+        copied_media = self.get_success(
+            self.repo.store.get_local_media(copied_media_mxc_uri.media_id)
+        )
+        assert copied_media is not None
+        assert copied_media.sha256 == SMALL_PNG_SHA256
+
+        assert isinstance(self.repo, MediaRepository)
+        assert os.path.exists(self.repo.filepaths.filepath_sha(SMALL_PNG_SHA256))
+
+        assert os.path.exists(self.repo.filepaths.local_media_filepath(media_id))
+        assert not os.path.exists(
+            self.repo.filepaths.local_media_filepath(copied_media_mxc_uri.media_id)
+        )
+
+    def test_copy_local_media_with_sha256_path(self) -> None:
+        """Test that copying media with sha256 path works correctly, when sha256 path is enabled"""
+        # use /_matrix/client/unstable/org.matrix.msc3911/media/copy
+
+        media_id = self._create_local_media_with_sha256_path(self.user)
+        channel = self.make_request(
+            "POST",
+            f"/_matrix/client/unstable/org.matrix.msc3911/media/copy/{self.hs.hostname}/{media_id}",
+            shorthand=False,
+            access_token=self.tok,
+        )
+        assert channel.code == 200, channel.result
+        assert "content_uri" in channel.json_body
+        copied_media_mxc_uri = MXCUri.from_str(channel.json_body["content_uri"])
+        assert copied_media_mxc_uri.media_id != media_id
+
+        # the copy should create a new media id, but does not create another file.
+        # check if media is copied, so there are 2 rows in the media cache table.
+        remote_media = self.get_success(self.repo.store.get_local_media(media_id))
+        assert remote_media is not None
+        assert remote_media.sha256 == SMALL_PNG_SHA256
+
+        copied_media = self.get_success(
+            self.repo.store.get_local_media(copied_media_mxc_uri.media_id)
+        )
+        assert copied_media is not None
+        assert copied_media.sha256 == SMALL_PNG_SHA256
+
+        assert isinstance(self.repo, MediaRepository)
+        assert os.path.exists(self.repo.filepaths.filepath_sha(SMALL_PNG_SHA256))
+
+        assert not os.path.exists(self.repo.filepaths.local_media_filepath(media_id))
+        assert not os.path.exists(
+            self.repo.filepaths.local_media_filepath(copied_media_mxc_uri.media_id)
+        )
+
+    def test_download_local_thumbnail_with_media_id(self) -> None:
+        """Test that downloading thumbnail with media_id path works correctly, when sha256 path is enabled"""
+        # use /_matrix/client/v1/media/thumbnail/
+        media_id = self._create_local_media_with_media_id_path(self.user)
+        channel = self.make_request(
+            "GET",
+            f"/_matrix/client/v1/media/thumbnail/{self.hs.hostname}/{media_id}?width=1&height=1&method=scale",
+            shorthand=False,
+            access_token=self.tok,
+        )
+        assert channel.code == 200, channel.result
+        assert channel.result["body"] is not None
+
+        assert isinstance(self.repo, MediaRepository)
+        assert os.path.exists(
+            self.repo.filepaths.local_media_thumbnail(
+                media_id, 1, 1, "image/png", "scale"
+            )
+        )
+        assert not os.path.exists(
+            self.repo.filepaths.thumbnail_sha(media_id, 1, 1, "image/png", "scale")
+        )
+
+    def test_download_local_thumbnail_with_sha256_path(self) -> None:
+        """Test that downloading thumbnail with sha256 path works correctly, when sha256 path is enabled"""
+        # use /_matrix/client/v1/media/thumbnail/
+        media_id = self._create_local_media_with_sha256_path(self.user)
+        channel = self.make_request(
+            "GET",
+            f"/_matrix/client/v1/media/thumbnail/{self.hs.hostname}/{media_id}?width=1&height=1&method=scale",
+            shorthand=False,
+            access_token=self.tok,
+        )
+        assert channel.code == 200, channel.result
+        assert channel.result["body"] is not None
+
+        assert isinstance(self.repo, MediaRepository)
+        assert os.path.exists(
+            self.repo.filepaths.thumbnail_sha(
+                SMALL_PNG_SHA256, 1, 1, "image/png", "scale"
+            )
+        )
+        assert not os.path.exists(
+            self.repo.filepaths.local_media_thumbnail(
+                media_id, 1, 1, "image/png", "scale"
+            )
+        )
+        thumbnails = self.get_success(
+            self.repo.store.get_local_media_thumbnails(media_id)
+        )
+        assert thumbnails is not None
+        has_1x1_thumbnail = any(
+            thumb.width == 1 and thumb.height == 1 for thumb in thumbnails
+        )
+        assert has_1x1_thumbnail, "No 1x1 thumbnail found"
+
+    def test_download_remote_thumbnail_with_sha256_path(self) -> None:
+        async def _mock_federation_download_media(
+            destination: str,
+            media_id: str,
+            output_stream: BinaryIO,
+            max_size: int,
+            max_timeout_ms: int,
+            download_ratelimiter: Ratelimiter,
+            ip_address: str,
+        ) -> Tuple[int, Dict[bytes, List[bytes]]]:
+            output_stream.write(SMALL_PNG)
+            output_stream.flush()
+            headers = {
+                b"Content-Type": [b"image/png"],
+                b"Content-Disposition": [b"attachment; filename=test.png"],
+                b"Content-Length": [b"67"],
+            }
+            return 67, headers
+
+        self.repo.client.federation_download_media = _mock_federation_download_media  # type: ignore
+
+        remote_server = "remote.org"
+        media_id = random_string(24)
+        channel = self.make_request(
+            "GET",
+            f"/_matrix/client/v1/media/thumbnail/{remote_server}/{media_id}?width=1&height=1&method=scale",
+            shorthand=False,
+            access_token=self.tok,
+        )
+        assert channel.code == 200, channel.result
+        assert channel.result["body"] is not None
+
+        assert isinstance(self.repo, MediaRepository)
+        # check the tables too
+        thumbnail = self.get_success(
+            self.repo.store.get_remote_media_thumbnail(
+                remote_server, media_id, 1, 1, "image/png"
+            )
+        )
+        assert thumbnail is not None
+        assert os.path.exists(
+            self.repo.filepaths.thumbnail_sha(
+                SMALL_PNG_SHA256, 1, 1, "image/png", "scale"
+            )
+        )
+        assert not os.path.exists(
+            self.repo.filepaths.remote_media_thumbnail(
+                remote_server, media_id, 1, 1, "image/png", "scale"
+            )
+        )

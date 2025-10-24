@@ -177,6 +177,7 @@ class MediaStorage:
         self.storage_providers = storage_providers
         self._spam_checker_module_callbacks = hs.get_module_api_callbacks().spam_checker
         self.clock = hs.get_clock()
+        self.use_sha256_paths = hs.config.media.use_sha256_paths
 
     @trace_with_opname("MediaStorage.store_file")
     async def store_file(self, source: IO, file_info: FileInfo) -> str:
@@ -224,10 +225,13 @@ class MediaStorage:
             async with media_storage.store_into_file(info) as (f, fname,):
                 # .. write into f ...
         """
-
-        path = self._file_info_to_path(file_info)
+        path = ""
+        # if use_sha256_paths is enabled, new files are stored using SHA256-based paths
+        if self.use_sha256_paths and file_info.sha256:
+            path = self._file_info_to_sha256_path(file_info)
+        if not path:  # if sha256 path is not found, use the old path
+            path = self._file_info_to_path(file_info)
         fname = os.path.join(self.local_media_directory, path)
-
         dirname = os.path.dirname(fname)
         os.makedirs(dirname, exist_ok=True)
 
@@ -273,8 +277,13 @@ class MediaStorage:
         Returns:
             Returns a Responder if the file was found, otherwise None.
         """
+        # Build list of paths to check, prioritizing SHA256-based paths
         paths = [self._file_info_to_path(file_info)]
-
+        if self.use_sha256_paths and file_info.sha256:
+            sha256_path = self._file_info_to_sha256_path(file_info)
+            if sha256_path:
+                # make sure self._file_info_to_sha256_path(file_info) doesn't return None. if None is added to paths, will throw error
+                paths.append(sha256_path)
         # fallback for remote thumbnails with no method in the filename
         if file_info.thumbnail and file_info.server_name:
             paths.append(
@@ -315,6 +324,15 @@ class MediaStorage:
         Returns:
             Full path to local file
         """
+        # First look up the sha path if enabled
+        if self.use_sha256_paths and file_info.sha256:
+            path = self._file_info_to_sha256_path(file_info)
+            if path:
+                local_path = os.path.join(self.local_media_directory, path)
+            if os.path.exists(local_path):
+                return local_path
+
+        # if the file doesn't exist in sha path, look up the media_id path
         path = self._file_info_to_path(file_info)
         local_path = os.path.join(self.local_media_directory, path)
         if os.path.exists(local_path):
@@ -349,6 +367,26 @@ class MediaStorage:
                 return local_path
 
         raise NotFoundError()
+
+    @trace
+    def _file_info_to_sha256_path(self, file_info: FileInfo) -> str:
+        # add the thumbnail path. We don't change the url_cache directory.
+        # we only update the user uploaded media files.
+        if not file_info.sha256:
+            logger.error("file_info does not have sha256 information.")
+            return ""
+        if file_info.url_cache:
+            # not sure if url_cache is false for any other media.
+            return ""
+        if file_info.thumbnail:
+            return self.filepaths.thumbnail_sha_rel(
+                sha256=file_info.sha256,
+                width=file_info.thumbnail.width,
+                height=file_info.thumbnail.height,
+                content_type=file_info.thumbnail.type,
+                method=file_info.thumbnail.method,
+            )
+        return self.filepaths.filepath_sha_rel(file_info.sha256)
 
     @trace
     def _file_info_to_path(self, file_info: FileInfo) -> str:
