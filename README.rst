@@ -1,4 +1,4 @@
-.. image:: ./docs/famedly_logo_white_bg.svg
+.. image:: ./docs/famedly_logo_light_bg.webp
    :height: 60px
 
 **Famedly Synapse - Matrix homeserver implementation (Fork of Element Synapse)**
