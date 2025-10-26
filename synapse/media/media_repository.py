@@ -1368,7 +1368,7 @@ class MediaRepository(AbstractMediaRepository):
             await self._generate_thumbnails(
                 server_name,
                 media_id,
-                media_info.sha256,
+                media_info.sha256,  # need to hand over sha256 for file_id
                 media_info.media_type,
                 sha256=media_info.sha256,
             )

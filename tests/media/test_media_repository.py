@@ -27,7 +27,6 @@ from synapse.util.stringutils import random_string
 
 from tests import unittest
 from tests.test_utils import SMALL_PNG, SMALL_PNG_SHA256, SMALL_PNG_SHA256_PATH
-from tests.unittest import override_config
 
 if typing.TYPE_CHECKING:
     # conditional imports to avoid import cycle
@@ -296,7 +295,6 @@ class MediaRepositorySha256PathTestCase(unittest.HomeserverTestCase):
         assert isinstance(self.repo, MediaRepository)
         assert not os.path.exists(self.repo.filepaths.local_media_filepath(media_id))
 
-    @override_config({"use_sha256_paths": False})
     def test_copy_media_with_original_path(self) -> None:
         """Test that `copy_media` function can copy media with original path"""
         # Confirm that the sha256 path does not exists yet
@@ -305,9 +303,6 @@ class MediaRepositorySha256PathTestCase(unittest.HomeserverTestCase):
         # Create media with original path
         original_mxc_uri = self._create_media_with_original_path(self.creator)
         assert isinstance(self.repo, MediaRepository)
-        original_media_old_path = self.repo.filepaths.local_media_filepath(
-            original_mxc_uri.media_id
-        )
         # Copy the media with the original path
         copied_mxc_uri = self.get_success(
             self.repo.copy_media(
@@ -315,7 +310,10 @@ class MediaRepositorySha256PathTestCase(unittest.HomeserverTestCase):
             )
         )
         assert copied_mxc_uri.media_id != original_mxc_uri.media_id
-        assert os.path.exists(original_media_old_path)
+        # TODO: Copy should not remove the original media.
+        assert os.path.exists(
+            self.repo.filepaths.local_media_filepath(original_mxc_uri.media_id)
+        )
         assert os.path.exists(os.path.join("media", SMALL_PNG_SHA256_PATH))
         # Make sure the new media is only created with sha256 path and not using the old path
         assert not os.path.exists(
@@ -334,32 +332,11 @@ class MediaRepositorySha256PathTestCase(unittest.HomeserverTestCase):
         )
         assert copied_mxc_uri.media_id != original_mxc_uri.media_id
         assert os.path.exists(os.path.join("media", SMALL_PNG_SHA256_PATH))
-        # Make sure the new media is only created with sha256 path and not using the old path
+        # Make sure the new media is only created with sha256 path and not using the media_id path
         assert isinstance(self.repo, MediaRepository)
         assert not os.path.exists(
             self.repo.filepaths.local_media_filepath(copied_mxc_uri.media_id)
         )
-
-    @override_config({"use_sha256_paths": False})
-    def test_get_local_media_with_original_path(self) -> None:
-        """Test that `get_local_media` can fetch the media with the media_id path successfully"""
-        # Generate the path with media_id
-        mxc_uri = self._create_media_with_original_path(self.creator)
-
-        # Confirm that the sha256 path does not exists yet
-        sha256_path = os.path.join("media", SMALL_PNG_SHA256_PATH)
-        assert not os.path.exists(sha256_path), f"File already exists: {sha256_path}"
-
-        # try `get_local_media` can fetch the media with the media_id path
-        # Test via HTTP request
-        channel = self.make_request(
-            "GET",
-            f"/_matrix/client/v1/media/download/{self.hs.hostname}/{mxc_uri.media_id}",
-            access_token=self.creator_tok,
-        )
-
-        assert channel.code == 200, channel.json_body
-        assert channel.result["body"] == SMALL_PNG
 
     def test_get_local_media_with_sha256_path(self) -> None:
         """Test that `get_local_media` can fetch the media with the sha256 path successfully"""
@@ -381,114 +358,6 @@ class MediaRepositorySha256PathTestCase(unittest.HomeserverTestCase):
 
         self.assertEqual(channel.code, 200)
         self.assertEqual(channel.result["body"], SMALL_PNG)
-
-    @override_config({"use_sha256_paths": False})
-    def test_get_remote_media_impl_with_original_path_cache_hit(self) -> None:
-        # 2. Media exists in local, return media info
-        server_name = "other_server.com"
-
-        # Generate remote media with media_id path
-        media_id = self._create_remote_media_with_media_id_path(server_name)
-        # Confirm that the sha256 path does not exists yet
-        sha256_path = os.path.join("media", SMALL_PNG_SHA256_PATH)
-        assert not os.path.exists(sha256_path), f"File already exists: {sha256_path}"
-
-        assert isinstance(self.repo, MediaRepository)
-        responder, remote_media = self.get_success(
-            self.repo._get_remote_media_impl(
-                server_name,
-                media_id,
-                1000,
-                AsyncMock(),
-                "127.0.0.1",
-                False,
-                True,
-            )
-        )
-
-        assert responder is not None
-        assert isinstance(responder, FileResponder)
-        responder.open_file.seek(0)
-        content = responder.open_file.read()
-        assert content == SMALL_PNG
-        assert remote_media is not None
-        assert remote_media.media_id == media_id
-        assert remote_media.media_length == 67
-        assert remote_media.upload_name == "other_server_media"
-        assert remote_media.sha256 == SMALL_PNG_SHA256
-
-    @override_config({"use_sha256_paths": False})
-    def test_get_remote_media_impl_with_original_path_proper_mock(self) -> None:
-        async def _mock_download_media(
-            destination: str,
-            media_id: str,
-            output_stream: BinaryIO,
-            max_size: int,
-            max_timeout_ms: int,
-            download_ratelimiter: "Ratelimiter",
-            ip_address: str,
-        ) -> Tuple[int, Dict[bytes, List[bytes]]]:
-            output_stream.write(SMALL_PNG)
-            output_stream.flush()
-            headers = {
-                b"Content-Type": [b"image/png"],
-                b"Content-Disposition": [b"attachment; filename=test.png"],
-                b"Content-Length": [b"67"],
-            }
-            return 67, headers
-
-        self.repo.client.download_media = _mock_download_media  # type: ignore
-        server_name = "other_server.com"
-        media_id = random_string(24)  # remote server's media id
-        max_timeout_ms = 1000
-        ratelimiter = AsyncMock()
-        ip_address = "127.0.0.1"
-        assert isinstance(self.repo, MediaRepository)
-        self.repo.use_sha256_paths = False
-        # Call the method
-        responder, media_info = self.get_success(
-            self.repo._get_remote_media_impl(
-                server_name=server_name,
-                media_id=media_id,
-                max_timeout_ms=max_timeout_ms,
-                download_ratelimiter=ratelimiter,
-                ip_address=ip_address,
-                use_federation_endpoint=False,
-                allow_authenticated=True,
-            )
-        )
-        assert isinstance(responder, FileResponder)
-        responder.open_file.seek(0)
-        content = responder.open_file.read()
-        assert content == SMALL_PNG
-        assert media_info.media_id == media_id
-        assert media_info.media_origin == server_name
-        assert media_info.upload_name == "test.png"
-        assert media_info.sha256 == SMALL_PNG_SHA256
-
-        # check if the file is saved in the media cache table
-        remote_media = self.get_success(
-            self.repo.store.get_cached_remote_media(server_name, media_id)
-        )
-        assert remote_media is not None
-
-        # Get the filesystem id of the remote media
-        filesystem_id = remote_media.filesystem_id
-        # check if the file is saved in the media store
-        assert os.path.exists(
-            self.repo.filepaths.remote_media_filepath(server_name, filesystem_id)
-        )
-
-        # check if the thumbnails are generated
-        assert os.path.exists(
-            self.repo.filepaths.remote_media_thumbnail_dir(server_name, filesystem_id)
-        )
-        thumbnail = self.get_success(
-            self.repo.store.get_remote_media_thumbnail(
-                server_name, media_id, 1, 1, "image/png"
-            )
-        )
-        assert thumbnail is not None
 
     def test_get_remote_media_impl_with_sha256_path_cache_hit(self) -> None:
         server_name = "other_server.com"
