@@ -1,6 +1,7 @@
 import io
 import os
 import shutil
+import typing
 from typing import (
     BinaryIO,
     Dict,
@@ -14,7 +15,6 @@ from matrix_common.types.mxc_uri import MXCUri
 from twisted.test.proto_helpers import MemoryReactor
 from twisted.web.resource import Resource
 
-from synapse.handlers.room_member import Ratelimiter
 from synapse.media._base import FileInfo
 from synapse.media.media_repository import MediaRepository
 from synapse.media.media_storage import FileResponder
@@ -28,6 +28,10 @@ from synapse.util.stringutils import random_string
 from tests import unittest
 from tests.test_utils import SMALL_PNG, SMALL_PNG_SHA256, SMALL_PNG_SHA256_PATH
 from tests.unittest import override_config
+
+if typing.TYPE_CHECKING:
+    # conditional imports to avoid import cycle
+    from synapse.handlers.room_member import Ratelimiter
 
 
 class MediaRepositorySha256PathTestCase(unittest.HomeserverTestCase):
@@ -53,6 +57,7 @@ class MediaRepositorySha256PathTestCase(unittest.HomeserverTestCase):
         return config
 
     def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
+        self.safe_cleanup_media()  # clean up the media directory if it exists
         # self.test_dir = tempfile.mkdtemp(prefix="media")
         # self.test_dir = "media/"
         self.addCleanup(self.safe_cleanup_media)
@@ -422,7 +427,7 @@ class MediaRepositorySha256PathTestCase(unittest.HomeserverTestCase):
             output_stream: BinaryIO,
             max_size: int,
             max_timeout_ms: int,
-            download_ratelimiter: Ratelimiter,
+            download_ratelimiter: "Ratelimiter",
             ip_address: str,
         ) -> Tuple[int, Dict[bytes, List[bytes]]]:
             output_stream.write(SMALL_PNG)
@@ -525,7 +530,7 @@ class MediaRepositorySha256PathTestCase(unittest.HomeserverTestCase):
             output_stream: BinaryIO,
             max_size: int,
             max_timeout_ms: int,
-            download_ratelimiter: Ratelimiter,
+            download_ratelimiter: "Ratelimiter",
             ip_address: str,
         ) -> Tuple[int, Dict[bytes, List[bytes]]]:
             output_stream.write(SMALL_PNG)

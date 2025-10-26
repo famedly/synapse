@@ -753,11 +753,11 @@ class MediaRepository(AbstractMediaRepository):
             raise NotFoundError("Media ID has expired")
 
     def check_file_path_exists_by_sha256(self, sha256: str) -> bool:
+        if not self.use_sha256_paths:
+            logger.debug("sha256 path is not enabled.")
         file_path = os.path.join(sha256[:2], sha256[2:4], sha256[4:])
         path = os.path.join(self.hs.config.media.media_store_path, file_path)
-        if os.path.exists(path):
-            return True
-        return False
+        return os.path.exists(path)
 
     @trace
     async def create_or_update_content(
@@ -791,8 +791,12 @@ class MediaRepository(AbstractMediaRepository):
         if media_id is None:
             media_id = random_string(24)
 
+        # first save as it was.
+        # and then if sha256 path is enabled, update the path to sha256 path.
+
         # check if file path with this sha256 already exists
         is_sha_path_exists = False
+        # if self.use_sha256_paths and sha256 is None:
         if not sha256:
             content.seek(0)
             sha256reader = SHA256TransparentIOReader(content)

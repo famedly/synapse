@@ -573,12 +573,6 @@ class FileInfo:
             return None
         return self.thumbnail.length
 
-    @property
-    def sha256_path(self) -> Optional[str]:
-        if not self.sha256:
-            return None
-        return f"{self.sha256[:2]}/{self.sha256[2:4]}/{self.sha256[4:]}"
-
 
 def get_filename_from_headers(headers: Dict[bytes, List[bytes]]) -> Optional[str]:
     """
