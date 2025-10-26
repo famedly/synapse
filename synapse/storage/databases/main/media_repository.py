@@ -716,11 +716,7 @@ class MediaRepositoryStore(MediaRepositoryBackgroundUpdateStore):
         )
         return [
             ThumbnailInfo(
-                width=row[0],
-                height=row[1],
-                method=row[2],
-                type=row[3],
-                length=row[4],
+                width=row[0], height=row[1], method=row[2], type=row[3], length=row[4]
             )
             for row in rows
         ]
@@ -886,11 +882,7 @@ class MediaRepositoryStore(MediaRepositoryBackgroundUpdateStore):
         )
         return [
             ThumbnailInfo(
-                width=row[0],
-                height=row[1],
-                method=row[2],
-                type=row[3],
-                length=row[4],
+                width=row[0], height=row[1], method=row[2], type=row[3], length=row[4]
             )
             for row in rows
         ]
@@ -928,11 +920,7 @@ class MediaRepositoryStore(MediaRepositoryBackgroundUpdateStore):
         if row is None:
             return None
         return ThumbnailInfo(
-            width=row[0],
-            height=row[1],
-            method=row[2],
-            type=row[3],
-            length=row[4],
+            width=row[0], height=row[1], method=row[2], type=row[3], length=row[4]
         )
 
     @trace

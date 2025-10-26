@@ -58,7 +58,6 @@ from synapse.rest.client import login, media
 from synapse.server import HomeServer
 from synapse.types import JsonDict, RoomAlias
 from synapse.util import Clock
-from synapse.util.stringutils import random_string
 
 from tests import unittest
 from tests.server import FakeChannel
@@ -369,7 +368,8 @@ class MediaRepoTests(unittest.HomeserverTestCase):
     def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
         self.store = hs.get_datastores().main
         self.media_repo = hs.get_media_repository()
-
+        assert isinstance(self.media_repo, MediaRepository)
+        self.media_storage = self.media_repo.media_storage
         self.media_id = "example.com/12345"
 
     def create_resource_dict(self) -> Dict[str, Resource]:
@@ -418,6 +418,15 @@ class MediaRepoTests(unittest.HomeserverTestCase):
         self.assertEqual(channel.code, 200)
 
         return channel
+
+    def _store_media_with_path(self, file_info: FileInfo, expected_path: str) -> None:
+        ctx = self.media_storage.store_into_file(file_info)
+        (f, fname) = self.get_success(ctx.__aenter__())
+        f.write(SMALL_PNG)
+        self.get_success(ctx.__aexit__(None, None, None))
+
+        assert expected_path in fname
+        assert os.path.exists(fname), f"File does not exist: {fname}"
 
     @unittest.override_config(
         {
@@ -854,6 +863,41 @@ class MediaRepoTests(unittest.HomeserverTestCase):
 
         self.pump()
         self.assertEqual(channel.code, 200)
+
+    @unittest.override_config(
+        {
+            "enable_authenticated_media": False,
+            "use_sha256_paths": True,
+        }
+    )
+    def test_ensure_media_storage_is_compatible_with_sha256_path(self) -> None:
+        """Test that `ensure_media_is_in_local_cache` and `fetch_media` works with sha256 path."""
+        # Create local media with sha256 path.
+        expected_path = self.media_storage.filepaths.filepath_sha_rel(
+            sha256=SMALL_PNG_SHA256,
+        )
+        file_info = FileInfo(
+            server_name="example.com",
+            file_id=SMALL_PNG_SHA256,
+            url_cache=False,
+            sha256=SMALL_PNG_SHA256,
+        )
+        self._store_media_with_path(file_info, expected_path)
+
+        # Check if `ensure_media_is_in_local_cache` can find the media.
+        local_path = self.get_success(
+            self.media_storage.ensure_media_is_in_local_cache(file_info)
+        )
+        assert expected_path in local_path
+        assert os.path.exists(local_path), f"File does not exist: {local_path}"
+
+        # Check if `fetch_media` can fetch the media.
+        responder = self.get_success(self.media_storage.fetch_media(file_info))
+        assert responder is not None
+        assert isinstance(responder, FileResponder)
+        responder.open_file.seek(0)
+        content = responder.open_file.read()
+        assert content == SMALL_PNG
 
 
 class TestSpamCheckerLegacy:
@@ -1402,165 +1446,3 @@ class MediaRepoSizeModuleCallbackTestCase(unittest.HomeserverTestCase):
         self.helper.upload_media(SMALL_PNG, tok=self.tok, expect_code=413)
         assert self.last_user_id == self.user
         assert self.last_size == len(SMALL_PNG)
-
-
-class MediaStorageSha256PathCompatTestCase(unittest.HomeserverTestCase):
-    servlets = [media.register_servlets]
-    test_image: ClassVar[TestImage]
-    hijack_auth = True
-    user_id = "@test:user"
-
-    def make_homeserver(self, reactor: MemoryReactor, clock: Clock) -> HomeServer:
-        self.fetches: List[
-            Tuple[
-                "Deferred[Tuple[bytes, Tuple[int, Dict[bytes, List[bytes]]]]]",
-                str,
-                str,
-                Optional[QueryParams],
-            ]
-        ] = []
-
-        def get_file(
-            destination: str,
-            path: str,
-            output_stream: BinaryIO,
-            download_ratelimiter: Ratelimiter,
-            ip_address: Any,
-            max_size: int,
-            args: Optional[QueryParams] = None,
-            retry_on_dns_fail: bool = True,
-            ignore_backoff: bool = False,
-            follow_redirects: bool = False,
-        ) -> "Deferred[Tuple[int, Dict[bytes, List[bytes]]]]":
-            """A mock for MatrixFederationHttpClient.get_file."""
-
-            def write_to(
-                r: Tuple[bytes, Tuple[int, Dict[bytes, List[bytes]]]],
-            ) -> Tuple[int, Dict[bytes, List[bytes]]]:
-                data, response = r
-                output_stream.write(data)
-                return response
-
-            def write_err(f: Failure) -> Failure:
-                f.trap(HttpResponseException)
-                output_stream.write(f.value.response)
-                return f
-
-            d: Deferred[Tuple[bytes, Tuple[int, Dict[bytes, List[bytes]]]]] = Deferred()
-            self.fetches.append((d, destination, path, args))
-            # Note that this callback changes the value held by d.
-            d_after_callback = d.addCallbacks(write_to, write_err)
-            return make_deferred_yieldable(d_after_callback)
-
-        # Mock out the homeserver's MatrixFederationHttpClient
-        client = Mock()
-        client.get_file = get_file
-
-        self.storage_path = self.mktemp()
-        self.media_store_path = self.mktemp()
-        os.mkdir(self.storage_path)
-        os.mkdir(self.media_store_path)
-
-        config = self.default_config()
-        config["media_store_path"] = self.media_store_path
-        config["max_image_pixels"] = 2000000
-        config["use_sha256_paths"] = True
-
-        provider_config = {
-            "module": "synapse.media.storage_provider.FileStorageProviderBackend",
-            "store_local": True,
-            "store_synchronous": False,
-            "store_remote": True,
-            "config": {"directory": self.storage_path},
-        }
-        config["media_storage_providers"] = [provider_config]
-
-        hs = self.setup_test_homeserver(config=config, federation_http_client=client)
-
-        return hs
-
-    def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
-        self.test_dir = tempfile.mkdtemp(prefix="synapse-tests-")
-        self.addCleanup(shutil.rmtree, self.test_dir)
-
-        self.primary_base_path = os.path.join(self.test_dir, "primary")
-        self.secondary_base_path = os.path.join(self.test_dir, "secondary")
-
-        hs.config.media.media_store_path = self.primary_base_path
-
-        storage_providers = [FileStorageProviderBackend(hs, self.secondary_base_path)]
-
-        self.filepaths = MediaFilePaths(self.primary_base_path)
-        self.media_storage = MediaStorage(
-            hs, self.primary_base_path, self.filepaths, storage_providers
-        )
-
-        self.store = hs.get_datastores().main
-        self.media_repo = hs.get_media_repository()
-
-    def create_resource_dict(self) -> Dict[str, Resource]:
-        resources = super().create_resource_dict()
-        resources["/_matrix/media"] = self.hs.get_media_repository_resource()
-        return resources
-
-    def _store_media_with_path(self, file_info: FileInfo, expected_path: str) -> None:
-        ctx = self.media_storage.store_into_file(file_info)
-        (f, fname) = self.get_success(ctx.__aenter__())
-        f.write(SMALL_PNG)
-        self.get_success(ctx.__aexit__(None, None, None))
-
-        assert expected_path in fname
-        assert os.path.exists(fname), f"File does not exist: {fname}"
-
-    def test_ensure_media_is_in_local_cache_compatible_with_original_path(self) -> None:
-        """Test that the media is saved as original media_id path."""
-        file_id = random_string(24)
-        expected_path = self.filepaths.remote_media_filepath_rel(
-            server_name="example.com",
-            file_id=file_id,
-        )
-        file_info = FileInfo(
-            server_name="example.com",
-            file_id=file_id,
-            url_cache=False,
-        )
-        self._store_media_with_path(file_info, expected_path)
-
-        local_path = self.get_success(
-            self.media_storage.ensure_media_is_in_local_cache(file_info)
-        )
-        assert expected_path in local_path
-        assert os.path.exists(local_path), f"File does not exist: {local_path}"
-
-        responder = self.get_success(self.media_storage.fetch_media(file_info))
-        assert responder is not None
-        # Read the file content
-        assert isinstance(responder, FileResponder)
-        responder.open_file.seek(0)
-        content = responder.open_file.read()
-        assert content == SMALL_PNG
-
-    def test_ensure_media_is_in_local_cache_compatible_with_sha256_path(self) -> None:
-        expected_path = self.filepaths.filepath_sha_rel(
-            sha256=SMALL_PNG_SHA256,
-        )
-        file_info = FileInfo(
-            server_name="example.com",
-            file_id=SMALL_PNG_SHA256,
-            url_cache=False,
-            sha256=SMALL_PNG_SHA256,
-        )
-        self._store_media_with_path(file_info, expected_path)
-
-        local_path = self.get_success(
-            self.media_storage.ensure_media_is_in_local_cache(file_info)
-        )
-        assert expected_path in local_path
-        assert os.path.exists(local_path), f"File does not exist: {local_path}"
-
-        responder = self.get_success(self.media_storage.fetch_media(file_info))
-        assert responder is not None
-        assert isinstance(responder, FileResponder)
-        responder.open_file.seek(0)
-        content = responder.open_file.read()
-        assert content == SMALL_PNG
