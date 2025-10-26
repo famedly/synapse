@@ -251,7 +251,6 @@ class MediaRepositorySha256PathTestCase(unittest.HomeserverTestCase):
         old_path = self.repo.filepaths.local_media_filepath(mxc_uri.media_id)
         assert not os.path.exists(old_path)
 
-    @override_config({"use_sha256_paths": False})
     def test_create_or_update_content_updates_content_with_original_path(self) -> None:
         """Test that `create_or_update_content` function can update existing media with media_id path"""
         # Create media with original path
@@ -271,10 +270,9 @@ class MediaRepositorySha256PathTestCase(unittest.HomeserverTestCase):
                 restricted=True,
             )
         )
-        # TODO: I think I better delete the original path since I generated the new one.
         assert mxc_uri.media_id == updated_mxc_uri.media_id
         assert os.path.exists(os.path.join("media", SMALL_PNG_SHA256_PATH))
-        assert os.path.exists(self.repo.filepaths.local_media_filepath(media_id))
+        assert not os.path.exists(self.repo.filepaths.local_media_filepath(media_id))
 
     def test_create_or_update_content_updates_content_with_sha256_path(self) -> None:
         """Test that `create_or_update_content` function can update existing media with sha256 path"""

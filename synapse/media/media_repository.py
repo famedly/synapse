@@ -755,9 +755,7 @@ class MediaRepository(AbstractMediaRepository):
     def check_file_path_exists_by_sha256(self, sha256: str) -> bool:
         if not self.use_sha256_paths:
             logger.debug("sha256 path is not enabled.")
-        file_path = os.path.join(sha256[:2], sha256[2:4], sha256[4:])
-        path = os.path.join(self.hs.config.media.media_store_path, file_path)
-        return os.path.exists(path)
+        return os.path.exists(self.filepaths.filepath_sha(sha256))
 
     @trace
     async def create_or_update_content(
@@ -791,43 +789,30 @@ class MediaRepository(AbstractMediaRepository):
         if media_id is None:
             media_id = random_string(24)
 
-        # first save as it was.
-        # and then if sha256 path is enabled, update the path to sha256 path.
-
-        # check if file path with this sha256 already exists
-        is_sha_path_exists = False
-        # if self.use_sha256_paths and sha256 is None:
-        if not sha256:
-            content.seek(0)
-            sha256reader = SHA256TransparentIOReader(content)
-            sha256reader.read()
-            sha256 = sha256reader.hexdigest()
-        is_sha_path_exists = self.check_file_path_exists_by_sha256(sha256)
-
-        # if the file is not there and if sha256 path is enabled, store with sha path.
-        if not is_sha_path_exists and self.use_sha256_paths:
-            file_info = FileInfo(server_name=None, file_id=media_id, sha256=sha256)
-            # TODO: This would be the file id should be sha256..?
-            fname = await self.media_storage.store_file(content, file_info)
-            logger.info("Stored media in file %r", fname)
-            is_sha_path_exists = True
-
-        if not is_sha_path_exists and not self.use_sha256_paths:
-            # `is_sha_path_exists` need to be updated to True and need to check here
-            # again, to not break the existing logic and prevent the file being stored
-            # twice with both sha256 and media_id paths.
-            file_info = FileInfo(server_name=None, file_id=media_id)
-            sha256reader = SHA256TransparentIOReader(content)
-            # This implements all of IO as it has a passthrough
-            fname = await self.media_storage.store_file(sha256reader.wrap(), file_info)
-            sha256 = sha256reader.hexdigest()
-            logger.info("Stored local media in file %r", fname)
-
+        file_info = FileInfo(server_name=None, file_id=media_id)
+        sha256reader = SHA256TransparentIOReader(content)
+        # This implements all of IO as it has a passthrough
+        fname = await self.media_storage.store_file(sha256reader.wrap(), file_info)
+        sha256 = sha256reader.hexdigest()
         should_quarantine = await self.store.get_is_hash_quarantined(sha256)
+
+        logger.info("Stored local media in file %r", fname)
+
         if should_quarantine:
             logger.warning(
                 "Media has been automatically quarantined as it matched existing quarantined media"
             )
+
+        # If we enabled sha256 paths, we create a new file with sha256 path, and delete
+        # the original media_id path.
+        if self.use_sha256_paths:
+            if not self.check_file_path_exists_by_sha256(sha256):
+                file_info = FileInfo(server_name=None, file_id=media_id, sha256=sha256)
+                sha256_fname = await self.media_storage.store_file(content, file_info)
+                logger.info("Stored media in file %r", sha256_fname)
+            else:
+                logger.info("File already exists in sha256 path.")
+            os.remove(fname)
 
         # Check that the user has not exceeded any of the media upload limits.
 
@@ -911,7 +896,6 @@ class MediaRepository(AbstractMediaRepository):
             file_info = FileInfo(
                 server_name=old_media_info.media_origin,
                 file_id=old_media_info.filesystem_id,
-                # TODO: filesystem_id should be sha256 if sha256 path is enabled. Otherwise, it should be media_id.
                 sha256=old_media_info.sha256
                 if self.use_sha256_paths and old_media_info.sha256
                 else None,
