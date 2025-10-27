@@ -5153,9 +5153,6 @@ class MediaStorageSha256PathCompatTestCase(unittest.HomeserverTestCase):
         config["media_storage_providers"] = [provider_config]
         return self.setup_test_homeserver(config=config)
 
-    # TODO: try local media upload and download with sha256 path
-    # Try remote media download with sha256 path
-
     def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
         self.test_dir = tempfile.mkdtemp(prefix="synapse-tests-")
         self.addCleanup(shutil.rmtree, self.test_dir)
@@ -5326,10 +5323,7 @@ class MediaStorageSha256PathCompatTestCase(unittest.HomeserverTestCase):
         )
         assert remote_media is not None
         assert remote_media.sha256 == SMALL_PNG_SHA256
-        assert (
-            remote_media.filesystem_id == SMALL_PNG_SHA256
-        )  # TODO: How come while copying, here the filesystem_id is the sha256?
-
+        assert remote_media.filesystem_id == SMALL_PNG_SHA256
         copied_media = self.get_success(
             self.repo.store.get_local_media(copied_media_mxc_uri.media_id)
         )
@@ -5381,7 +5375,7 @@ class MediaStorageSha256PathCompatTestCase(unittest.HomeserverTestCase):
         assert os.path.exists(self.repo.filepaths.filepath_sha(SMALL_PNG_SHA256))
         assert os.path.exists(
             self.repo.filepaths.local_media_filepath(media_id)
-        )  # TODO: This does not delete the origial file with media_id path.
+        )  # Copy operation does not delete the original file with media_id path.
         assert not os.path.exists(
             self.repo.filepaths.local_media_filepath(copied_media_mxc_uri.media_id)
         )
@@ -5422,6 +5416,34 @@ class MediaStorageSha256PathCompatTestCase(unittest.HomeserverTestCase):
             self.repo.filepaths.local_media_filepath(copied_media_mxc_uri.media_id)
         )
 
+    def test_upload_local_media_with_sha256_path(self) -> None:
+        """Test uploading local media with sha256 path."""
+        # Upload local media.
+        channel = self.make_request(
+            "POST",
+            "_matrix/client/unstable/org.matrix.msc3911/media/upload?filename=test_png_upload",
+            SMALL_PNG,
+            self.tok,
+            shorthand=False,
+            content_type=b"image/png",
+            custom_headers=[("Content-Length", str(67))],
+        )
+        self.assertEqual(channel.code, 200, channel.json_body)
+
+        res = channel.json_body.get("content_uri")
+        assert res is not None
+        _, media_id = res.rsplit("/", maxsplit=1)
+
+        # Check if the media is saved in the media table.
+        media = self.get_success(self.repo.store.get_local_media(media_id))
+        assert media is not None
+        assert media.sha256 == SMALL_PNG_SHA256
+
+        # Check if the file is saved in the sha256 path.
+        assert isinstance(self.repo, MediaRepository)
+        assert os.path.exists(self.repo.filepaths.filepath_sha(SMALL_PNG_SHA256))
+        assert not os.path.exists(self.repo.filepaths.local_media_filepath(media_id))
+
     def test_download_local_thumbnail_with_media_id(self) -> None:
         """Test downloading thumbnail of local media with media_id path."""
         # Create local media with media_id path.
@@ -5446,7 +5468,7 @@ class MediaStorageSha256PathCompatTestCase(unittest.HomeserverTestCase):
         )
         assert not os.path.exists(
             self.repo.filepaths.thumbnail_sha(media_id, 1, 1, "image/png", "scale")
-        )  # TODO: Do I need to remove the file and save it in the sha256 path and than create the thumbnail with sha256 path?
+        )
 
     def test_download_local_thumbnail_with_sha256_path(self) -> None:
         """Test downloading thumbnail of local media with sha256 path."""
