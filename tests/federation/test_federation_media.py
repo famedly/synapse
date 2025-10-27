@@ -202,9 +202,9 @@ class FederationMediaDownloadsTest(unittest.FederatingHomeserverTestCase):
 
     @override_config({"use_sha256_paths": True})
     def test_federation_download_remote_file_with_sha256_path(self) -> None:
-        # `_get_remote_media_impl` look up the media in local cache first.
-        # if it's not there, it tries download from remote server.
-        # test it with federation True
+        """Test `_get_remote_media_impl` function with federation endpoint can download remote media in sha256 path."""
+
+        # Mock the federation download media function of the client.
         async def _mock_federation_download_media(
             destination: str,
             media_id: str,
@@ -227,12 +227,12 @@ class FederationMediaDownloadsTest(unittest.FederatingHomeserverTestCase):
             _mock_federation_download_media
         )
 
+        # Download remote media using `_get_remote_media_impl`
         server_name = "other_server.com"
-        media_id = random_string(24)  # remote server's media id
+        media_id = random_string(24)  # media id from the remote server
         max_timeout_ms = 1000
         ratelimiter = AsyncMock()
         ip_address = "127.0.0.1"
-        # Call the method
         assert isinstance(self.media_repo, MediaRepository)
         responder, media_info = self.get_success(
             self.media_repo._get_remote_media_impl(
@@ -254,16 +254,16 @@ class FederationMediaDownloadsTest(unittest.FederatingHomeserverTestCase):
         assert media_info.upload_name == "test.png"
         assert media_info.sha256 == SMALL_PNG_SHA256
 
-        # check if the file is saved in the media cache table
+        # Check if the file is saved in the media  table
         remote_media = self.get_success(
             self.media_repo.store.get_cached_remote_media(server_name, media_id)
         )
         assert remote_media is not None
 
-        # check if the file is saved in the media store
+        # Check if the file is saved in the filesystem with sha256 path
         assert os.path.exists(self.media_repo.filepaths.filepath_sha(SMALL_PNG_SHA256))
 
-        # check if the thumbnails are generated
+        # Check if the thumbnails are generated in the sha256 path
         assert os.path.exists(
             self.media_repo.filepaths.thumbnail_sha_dir(SMALL_PNG_SHA256)
         )

@@ -1345,14 +1345,15 @@ class MediaRepository(AbstractMediaRepository):
             await self.is_media_visible(requester.user, media_info)
 
         file_id = media_info.filesystem_id
-        # TODO: Remember, origianlly Remote media's file_id should be filesystem_id
-        # But should it be the same with the new sha256 path???
+
         if not media_info.media_type:
             media_info = attr.evolve(media_info, media_type="application/octet-stream")
 
         file_info = FileInfo(
             server_name,
-            file_id,
+            media_info.sha256
+            if self.use_sha256_paths and media_info.sha256
+            else file_id,
             sha256=media_info.sha256
             if self.use_sha256_paths and media_info.sha256
             else None,
@@ -1366,10 +1367,10 @@ class MediaRepository(AbstractMediaRepository):
         if self.use_sha256_paths:
             assert media_info.sha256 is not None
             await self._generate_thumbnails(
-                server_name,
-                media_id,
-                media_info.sha256,  # need to hand over sha256 for file_id
-                media_info.media_type,
+                server_name=server_name,
+                media_id=media_id,
+                file_id=media_info.sha256,  # Passing over sha256 for file_id if sha256 path is enabled.
+                media_type=media_info.media_type,
                 sha256=media_info.sha256,
             )
         else:
@@ -1493,7 +1494,7 @@ class MediaRepository(AbstractMediaRepository):
         else:
             authenticated = False
 
-        # if self.use_sha256_paths, calculate sha256 and move to sha256 path, delete original media_id path.
+        # If sha256 paths are enabled, rename the file to sha256 path and delete the original media_id path.
         if self.use_sha256_paths:
             rel_path = self.filepaths.filepath_sha(sha256)
             abs_path = os.path.join(self.hs.config.media.media_store_path, rel_path)
@@ -1676,7 +1677,7 @@ class MediaRepository(AbstractMediaRepository):
         else:
             authenticated = False
 
-        # if self.use_sha256_paths, calculate sha256 and move to sha256 path, delete original media_id path.
+        # If sha256 paths are enabled, rename the file to sha256 path and delete the original media_id path.
         if self.use_sha256_paths:
             rel_path = self.filepaths.filepath_sha(sha256)
             abs_path = os.path.join(self.hs.config.media.media_store_path, rel_path)
@@ -1923,10 +1924,11 @@ class MediaRepository(AbstractMediaRepository):
             server_name: The server name if remote media, else None if local
             media_id: The media ID of the content. (This is the same as
                 the file_id for local content)
-            file_id: Local file ID
+            file_id: Local file ID. If sha256 path is enabled, this will be the sha256 of the media.
             media_type: The content type of the file
             url_cache: If we are thumbnailing images downloaded for the URL cache,
                 used exclusively by the url previewer
+            sha256: The sha256 of the media. This will be used as the path, if sha256 path is enabled.
 
         Returns:
             Dict with "width" and "height" keys of original image or None if the
@@ -1938,7 +1940,7 @@ class MediaRepository(AbstractMediaRepository):
 
         file_info = FileInfo(
             server_name,
-            file_id,  # This would be sha256 if sha256 path is enabled. Otherwise, it would be media_id.
+            file_id,  # This will be the sha256 if sha256 path is enabled. Otherwise, it will be the file_id.
             url_cache=url_cache,
             sha256=sha256 if self.use_sha256_paths and sha256 else None,
         )
@@ -2021,7 +2023,9 @@ class MediaRepository(AbstractMediaRepository):
 
                 file_info = FileInfo(
                     server_name=server_name,
-                    file_id=sha256 if self.use_sha256_paths and sha256 else file_id,
+                    file_id=sha256
+                    if self.use_sha256_paths and sha256
+                    else file_id,  # Saving the thumbnail with sha256 path if sha256 path is enabled.
                     url_cache=url_cache,
                     thumbnail=ThumbnailInfo(
                         width=t_width,

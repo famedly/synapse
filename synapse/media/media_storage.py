@@ -277,12 +277,11 @@ class MediaStorage:
         Returns:
             Returns a Responder if the file was found, otherwise None.
         """
-        # Build list of paths to check, prioritizing SHA256-based paths
         paths = [self._file_info_to_path(file_info)]
+        # Add sha256 path to the list of paths to check
         if self.use_sha256_paths and file_info.sha256:
             sha256_path = self._file_info_to_sha256_path(file_info)
-            if sha256_path:
-                # make sure self._file_info_to_sha256_path(file_info) doesn't return None. if None is added to paths, will throw error
+            if sha256_path is not None:
                 paths.append(sha256_path)
         # fallback for remote thumbnails with no method in the filename
         if file_info.thumbnail and file_info.server_name:
@@ -370,13 +369,12 @@ class MediaStorage:
 
     @trace
     def _file_info_to_sha256_path(self, file_info: FileInfo) -> str:
-        # add the thumbnail path. We don't change the url_cache directory.
-        # we only update the user uploaded media files.
+        """Converts file_info into a relative sha256 path."""
         if not file_info.sha256:
             logger.error("file_info does not have sha256 information.")
             return ""
         if file_info.url_cache:
-            # not sure if url_cache is false for any other media.
+            logger.error("use media_id path for url cache storage.")
             return ""
         if file_info.thumbnail:
             return self.filepaths.thumbnail_sha_rel(

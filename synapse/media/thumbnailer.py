@@ -649,7 +649,6 @@ class ThumbnailProvider:
         # If `dynamic_thumbnails` is enabled, we expect Synapse to go down a
         # different code path to handle it.
         assert not self.dynamic_thumbnails
-        # TODO: Make sure this is working correctly with sha256 paths
 
         if thumbnail_infos:
             file_info = self._select_thumbnail(
