@@ -1103,7 +1103,7 @@ class ProfileMediaAttachmentTestCase(unittest.HomeserverTestCase):
     )
     def test_attaching_unrestricted_media_to_profile_fails(self) -> None:
         """
-        Test that attaching unrestricted media to user profile fails when unrestircted
+        Test that attaching unrestricted media to user profile fails when unrestricted
         media is banned by configuration.
         """
         # Create unrestricted media.

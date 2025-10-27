@@ -190,6 +190,15 @@ class FederationMediaDownloadsTest(unittest.FederatingHomeserverTestCase):
 
 
 class FederationRestrictedMediaDownloadsTest(unittest.FederatingHomeserverTestCase):
+    """
+    Test that answering a federation download media request behaves appropriately
+
+    More specifically, test that:
+    * downloads are achieved if restrictions are set
+    * downloads are blocked if restrictions are not set
+    * downloads are blocked if restrictions are malformed
+    """
+
     def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
         super().prepare(reactor, clock, hs)
         self.test_dir = tempfile.mkdtemp(prefix="synapse-tests-")
@@ -221,6 +230,10 @@ class FederationRestrictedMediaDownloadsTest(unittest.FederatingHomeserverTestCa
         return config
 
     def test_restricted_media_download_with_restrictions_field(self) -> None:
+        """
+        Test that a federation download media is request can succeed and is shaped as
+        expected.
+        """
         content = io.BytesIO(SMALL_PNG)
         content_uri = self.get_success(
             self.media_repo.create_or_update_content(
@@ -276,6 +289,13 @@ class FederationRestrictedMediaDownloadsTest(unittest.FederatingHomeserverTestCa
         self.assertTrue(found_file)
 
     def test_restricted_media_download_without_restrictions_field_fails(self) -> None:
+        """
+        Test that restricted media with no restrictions defined is denied over federation
+        """
+        # More specifically, restricted is marked True in the database, but the
+        # associated table of attachments has no entries. Do not confuse this with the
+        # potential of restricted being True, but the restrictions being defined but
+        # empty(as `{}`)
         content = io.BytesIO(SMALL_PNG)
         content_uri = self.get_success(
             self.media_repo.create_or_update_content(

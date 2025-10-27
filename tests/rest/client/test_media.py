@@ -3017,6 +3017,9 @@ class DisableUnrestrictedResourceTestCase(unittest.HomeserverTestCase):
         self.media_repo = hs.get_media_repository_resource()
 
     def create_resource_dict(self) -> dict[str, Resource]:
+        # Important detail: while we are specifically testing these endpoints are
+        # logically disabled, if we do not load them then this would test the wrong
+        # thing.
         resources = super().create_resource_dict()
         resources["/_matrix/media"] = self.hs.get_media_repository_resource()
         return resources
@@ -3084,6 +3087,7 @@ class RestrictedResourceUploadTestCase(unittest.HomeserverTestCase):
         self.other_user_tok = self.login("random_user", "testpass")
 
     def create_resource_dict(self) -> dict[str, Resource]:
+        # Need this for test_async_upload_restricted_resource()
         resources = super().create_resource_dict()
         resources["/_matrix/media"] = self.hs.get_media_repository_resource()
         return resources
