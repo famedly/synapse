@@ -407,10 +407,7 @@ To prepare a Pull Request, please:
 2. [sign off](#sign-off) your contribution;
 3. `git push` your commit to your fork of Synapse;
 4. on GitHub, [create the Pull Request](https://docs.github.com/en/github/collaborating-with-issues-and-pull-requests/creating-a-pull-request);
-5. add a [changelog entry](#changelog) and push it to your Pull Request;
-6. that's it for now, a non-draft pull request will automatically request review from the team;
-7. if you need to update your PR, please avoid rebasing and just add new commits to your branch.
-
+5. that's it for now, a non-draft pull request will automatically request review from the team;
 
 ## Changelog
 
@@ -495,19 +492,21 @@ separate pull requests.)
 
 ## Sign off
 
-After you make a PR a comment from @CLAassistant will appear asking you to sign
-the [CLA](https://cla-assistant.io/element-hq/synapse).
-This will link a page to allow you to confirm that you have read and agreed to
-the CLA by signing in with GitHub.
+The sign-off is a simple line at the end of the explanation for the patch, which certifies that you wrote it or otherwise have the right to pass it on as a free software patch. The rules are pretty simple: if you can certify the below [Developer's Certificate of Origin 1.1](https://developercertificate.org/):
 
-Alternatively, you can sign off before opening a PR by going to
-<https://cla-assistant.io/element-hq/synapse>.
+By making a contribution to this project, I certify that:
 
-We accept contributions under a legally identifiable name, such as
-your name on government documentation or common-law names (names
-claimed by legitimate usage or repute). Unfortunately, we cannot
-accept anonymous contributions at this time.
+1. The contribution was created in whole or in part by me and I have the right to submit it under the open source license indicated in the file; or
+2. The contribution is based upon previous work that, to the best of my knowledge, is covered under an appropriate open source license and I have the right under that license to submit that work with modifications, whether created in whole or in part by me, under the same open source license (unless I am permitted to submit under a different license), as indicated in the file; or
+3. The contribution was provided directly to me by some other person who certified (1), (2) or (3) and I have not modified it.
+4. I understand and agree that this project and the contribution are public and that a record of the contribution (including all personal information I submit with it, including my sign-off) is maintained indefinitely and may be redistributed consistent with this project or the open source license(s) involved.
 
+then you just add a line saying:
+```
+Signed-off-by: Random J Developer <random@developer.example.org>
+```
+
+using your real name (sorry, no pseudonyms or anonymous contributions.) This will be done for you automatically if you use `git commit -s`.
 
 # 10. Turn feedback into better code.
 
