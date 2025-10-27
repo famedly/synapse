@@ -22,7 +22,6 @@ from typing import Optional
 from matrix_common.types.mxc_uri import MXCUri
 
 from twisted.internet.testing import MemoryReactor
-from twisted.web.resource import Resource
 
 from synapse.api.constants import (
     EventContentFields,
@@ -80,11 +79,6 @@ class RestrictedResourceThumbnailTestCase(unittest.HomeserverTestCase):
             "profile_test_user", "testpass"
         )
         self.other_profile_test_user_tok = self.login("profile_test_user", "testpass")
-
-    def create_resource_dict(self) -> dict[str, Resource]:
-        resources = super().create_resource_dict()
-        resources["/_matrix/media"] = self.hs.get_media_repository_resource()
-        return resources
 
     def _create_restricted_media(self, user: str) -> MXCUri:
         """

@@ -31,7 +31,6 @@ from synapse.media.storage_provider import (
     FileStorageProviderBackend,
     StorageProviderWrapper,
 )
-from synapse.rest.client import login
 from synapse.server import HomeServer
 from synapse.storage.database import LoggingTransaction
 from synapse.types import JsonDict, UserID
@@ -191,10 +190,6 @@ class FederationMediaDownloadsTest(unittest.FederatingHomeserverTestCase):
 
 
 class FederationRestrictedMediaDownloadsTest(unittest.FederatingHomeserverTestCase):
-    servlets = [
-        login.register_servlets,
-    ]
-
     def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
         super().prepare(reactor, clock, hs)
         self.test_dir = tempfile.mkdtemp(prefix="synapse-tests-")

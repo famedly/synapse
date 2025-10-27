@@ -1330,11 +1330,6 @@ class ProfileMediaAttachmentReplicationTestCase(BaseMultiWorkerStreamTestCase):
         config["experimental_features"].update({"msc3911_enabled": True})
         return config
 
-    def create_resource_dict(self) -> dict[str, Resource]:
-        resources = super().create_resource_dict()
-        resources["/_matrix/media"] = self.hs.get_media_repository_resource()
-        return resources
-
     def create_media_and_set_restricted_flag(self, user_id: str) -> MXCUri:
         """
         Create media without using an endpoint, and set the restricted flag.

@@ -3233,11 +3233,6 @@ class CopyRestrictedResourceTestCase(unittest.HomeserverTestCase):
         self.other_user = self.register_user("other", "testpass")
         self.other_user_tok = self.login("other", "testpass")
 
-    def create_resource_dict(self) -> dict[str, Resource]:
-        resources = super().create_resource_dict()
-        resources["/_matrix/media"] = self.hs.get_media_repository_resource()
-        return resources
-
     def fetch_media(
         self,
         mxc_uri: MXCUri,
@@ -3622,7 +3617,6 @@ class RestrictedMediaVisibilityTestCase(unittest.HomeserverTestCase):
         login.register_servlets,
         media.register_servlets,
         room.register_servlets,
-        room.register_deprecated_servlets,
     ]
 
     def default_config(self) -> JsonDict:
@@ -3641,12 +3635,6 @@ class RestrictedMediaVisibilityTestCase(unittest.HomeserverTestCase):
 
         self.alice_user_id = self.register_user("alice", "password")
         self.alice_tok = self.login("alice", "password")
-
-    def create_resource_dict(self) -> Dict[str, Resource]:
-        resources = super().create_resource_dict()
-        # The old endpoints are not loaded with the register_servlets above
-        resources["/_matrix/media"] = self.hs.get_media_repository_resource()
-        return resources
 
     def create_restricted_media(self, user: Optional[str] = None) -> MXCUri:
         mxc_uri = self.get_success(
