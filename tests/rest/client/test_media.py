@@ -3001,17 +3001,17 @@ class DisableUnrestrictedResourceTestCase(unittest.HomeserverTestCase):
     limited when `msc3911_unrestricted_media_upload_disabled` is configured to be True.
     """
 
-    extra_config = {
-        "experimental_features": {"msc3911_unrestricted_media_upload_disabled": True}
-    }
     servlets = [
         media.register_servlets,
     ]
 
-    def make_homeserver(self, reactor: MemoryReactor, clock: Clock) -> HomeServer:
-        config = self.default_config()
-        config.update(self.extra_config)
-        return self.setup_test_homeserver(config=config)
+    def default_config(self) -> JsonDict:
+        config = super().default_config()
+        config.setdefault("experimental_features", {})
+        config["experimental_features"].update(
+            {"msc3911_unrestricted_media_upload_disabled": True}
+        )
+        return config
 
     def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
         self.media_repo = hs.get_media_repository_resource()
@@ -3064,19 +3064,17 @@ class RestrictedResourceUploadTestCase(unittest.HomeserverTestCase):
     configured to be True.
     """
 
-    extra_config = {
-        "experimental_features": {"msc3911_enabled": True},
-    }
     servlets = [
         media.register_servlets,
         login.register_servlets,
         admin.register_servlets,
     ]
 
-    def make_homeserver(self, reactor: MemoryReactor, clock: Clock) -> HomeServer:
-        config = self.default_config()
-        config.update(self.extra_config)
-        return self.setup_test_homeserver(config=config)
+    def default_config(self) -> JsonDict:
+        config = super().default_config()
+        config.setdefault("experimental_features", {})
+        config["experimental_features"].update({"msc3911_enabled": True})
+        return config
 
     def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
         self.media_repo = hs.get_media_repository_resource()
@@ -3213,10 +3211,6 @@ class CopyRestrictedResourceTestCase(unittest.HomeserverTestCase):
     Tests copy API when `msc3911_enabled` is configured to be True.
     """
 
-    extra_config = {
-        "experimental_features": {"msc3911_enabled": True},
-    }
-
     servlets = [
         media.register_servlets,
         login.register_servlets,
@@ -3224,10 +3218,11 @@ class CopyRestrictedResourceTestCase(unittest.HomeserverTestCase):
         room.register_servlets,
     ]
 
-    def make_homeserver(self, reactor: MemoryReactor, clock: Clock) -> HomeServer:
-        config = self.default_config()
-        config.update(self.extra_config)
-        return self.setup_test_homeserver(config=config)
+    def default_config(self) -> JsonDict:
+        config = super().default_config()
+        config.setdefault("experimental_features", {})
+        config["experimental_features"].update({"msc3911_enabled": True})
+        return config
 
     def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
         self.media_repo = hs.get_media_repository()
