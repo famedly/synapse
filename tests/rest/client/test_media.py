@@ -3103,12 +3103,12 @@ class RestrictedResourceUploadTestCase(unittest.HomeserverTestCase):
         media_id = channel.json_body["content_uri"].split("/")[-1]
 
         # Check the `restricted` field is True.
-        media = self.get_success(
+        local_media = self.get_success(
             self.hs.get_datastores().main.get_local_media(media_id)
         )
-        assert media is not None
-        self.assertEqual(media.media_id, media_id)
-        self.assertTrue(media.restricted)
+        assert local_media is not None
+        self.assertEqual(local_media.media_id, media_id)
+        self.assertTrue(local_media.restricted)
 
     def test_upload_restricted_resource(self) -> None:
         """
@@ -3127,12 +3127,12 @@ class RestrictedResourceUploadTestCase(unittest.HomeserverTestCase):
         media_id = channel.json_body["content_uri"].split("/")[-1]
 
         # Check the `restricted` field is True.
-        media = self.get_success(
+        local_media = self.get_success(
             self.hs.get_datastores().main.get_local_media(media_id)
         )
-        assert media is not None
-        self.assertEqual(media.media_id, media_id)
-        self.assertTrue(media.restricted)
+        assert local_media is not None
+        self.assertEqual(local_media.media_id, media_id)
+        self.assertTrue(local_media.restricted)
 
         # The media is not attached to any event yet, only creator can see it.
         # The creator can download the restricted resource.
@@ -3179,12 +3179,12 @@ class RestrictedResourceUploadTestCase(unittest.HomeserverTestCase):
         self.assertEqual(channel.code, 200)
 
         # Check the `restricted` field is True.
-        media = self.get_success(
+        local_media = self.get_success(
             self.hs.get_datastores().main.get_local_media(media_id)
         )
-        assert media is not None
-        self.assertEqual(media.media_id, media_id)
-        self.assertTrue(media.restricted)
+        assert local_media is not None
+        self.assertEqual(local_media.media_id, media_id)
+        self.assertTrue(local_media.restricted)
 
         # Media is not attached to any event yet, only creator can see it.
         # The creator can download the restricted resource.
