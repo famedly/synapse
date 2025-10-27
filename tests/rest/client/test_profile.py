@@ -1308,7 +1308,6 @@ class ProfileMediaAttachmentReplicationTestCase(BaseMultiWorkerStreamTestCase):
         admin.register_servlets,
         login.register_servlets,
         media.register_servlets,
-        # profile.register_servlets,
         room.register_servlets,
     ]
 
@@ -1329,8 +1328,6 @@ class ProfileMediaAttachmentReplicationTestCase(BaseMultiWorkerStreamTestCase):
         config = super().default_config()
         config.setdefault("experimental_features", {})
         config["experimental_features"].update({"msc3911_enabled": True})
-        # config["media_repo_instances"] = [MAIN_PROCESS_INSTANCE_NAME]
-
         return config
 
     def create_resource_dict(self) -> dict[str, Resource]:
@@ -1360,9 +1357,6 @@ class ProfileMediaAttachmentReplicationTestCase(BaseMultiWorkerStreamTestCase):
     ) -> HomeServer:
         worker_hs = super().make_worker_hs(worker_app, extra_config, **kwargs)
         # Mount the room resource onto the worker.
-        # worker_hs.get_media_repository_resource().register_servlets(
-        #     self._hs_to_site[worker_hs].resource, worker_hs
-        # )
         room.register_servlets(worker_hs, self._hs_to_site[worker_hs].resource)
         profile.register_servlets(worker_hs, self._hs_to_site[worker_hs].resource)
         return worker_hs
