@@ -1103,7 +1103,7 @@ class ProfileMediaAttachmentTestCase(unittest.HomeserverTestCase):
     )
     def test_attaching_unrestricted_media_to_profile_fails(self) -> None:
         """
-        Test that attaching unrestricted media to user profile fails when unrestircted
+        Test that attaching unrestricted media to user profile fails when unrestricted
         media is banned by configuration.
         """
         # Create unrestricted media.
@@ -1308,7 +1308,6 @@ class ProfileMediaAttachmentReplicationTestCase(BaseMultiWorkerStreamTestCase):
         admin.register_servlets,
         login.register_servlets,
         media.register_servlets,
-        # profile.register_servlets,
         room.register_servlets,
     ]
 
@@ -1329,14 +1328,7 @@ class ProfileMediaAttachmentReplicationTestCase(BaseMultiWorkerStreamTestCase):
         config = super().default_config()
         config.setdefault("experimental_features", {})
         config["experimental_features"].update({"msc3911_enabled": True})
-        # config["media_repo_instances"] = [MAIN_PROCESS_INSTANCE_NAME]
-
         return config
-
-    def create_resource_dict(self) -> dict[str, Resource]:
-        resources = super().create_resource_dict()
-        resources["/_matrix/media"] = self.hs.get_media_repository_resource()
-        return resources
 
     def create_media_and_set_restricted_flag(self, user_id: str) -> MXCUri:
         """
@@ -1360,9 +1352,6 @@ class ProfileMediaAttachmentReplicationTestCase(BaseMultiWorkerStreamTestCase):
     ) -> HomeServer:
         worker_hs = super().make_worker_hs(worker_app, extra_config, **kwargs)
         # Mount the room resource onto the worker.
-        # worker_hs.get_media_repository_resource().register_servlets(
-        #     self._hs_to_site[worker_hs].resource, worker_hs
-        # )
         room.register_servlets(worker_hs, self._hs_to_site[worker_hs].resource)
         profile.register_servlets(worker_hs, self._hs_to_site[worker_hs].resource)
         return worker_hs
