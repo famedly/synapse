@@ -24,7 +24,6 @@ from typing import TYPE_CHECKING
 import attr
 
 from synapse.metrics import SERVER_NAME_LABEL
-from synapse.metrics.background_process_metrics import run_as_background_process
 
 if TYPE_CHECKING:
     from synapse.server import HomeServer
@@ -94,6 +93,7 @@ class CommonUsageMetricsManager:
         self.server_name = hs.hostname
         self._store = hs.get_datastores().main
         self._clock = hs.get_clock()
+        self._hs = hs
 
     async def get_metrics(self) -> CommonUsageMetrics:
         """Get the CommonUsageMetrics object. If no collection has happened yet, do it
@@ -106,16 +106,14 @@ class CommonUsageMetricsManager:
 
     async def setup(self) -> None:
         """Keep the gauges for common usage metrics up to date."""
-        run_as_background_process(
+        self._hs.run_as_background_process(
             desc="common_usage_metrics_update_gauges",
-            server_name=self.server_name,
             func=self._update_gauges,
         )
         self._clock.looping_call(
-            run_as_background_process,
+            self._hs.run_as_background_process,
             5 * 60 * 1000,
             desc="common_usage_metrics_update_gauges",
-            server_name=self.server_name,
             func=self._update_gauges,
         )
 
