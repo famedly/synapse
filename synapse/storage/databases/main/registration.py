@@ -1625,7 +1625,7 @@ class RegistrationWorkerStore(StatsStore, CacheInvalidationWorkerStore):
         Raises:
             StoreError if there was a problem updating this.
         """
-        now = self._clock.time_msec() - 100
+        now = self.clock.time_msec() - 100
 
         def f(txn: LoggingTransaction) -> None:
             self.db_pool.simple_update_one_txn(
@@ -2132,7 +2132,7 @@ class RegistrationWorkerStore(StatsStore, CacheInvalidationWorkerStore):
             device_id: the id of the device owning the refresh token
         """
 
-        now = self._clock.time_msec() - 100
+        now = self.clock.time_msec() - 100
         await self.db_pool.simple_update(
             "refresh_tokens",
             {"user_id": user_id, "device_id": device_id},

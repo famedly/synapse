@@ -234,7 +234,7 @@ class ServerMetricsStore(EventPushActionsWorkerStore, SQLBaseStore):
         """
         Counts the number of users who used this homeserver in the last 7 days.
         """
-        seven_days_ago = int(self._clock.time_msec()) - (1000 * 60 * 60 * 24 * 7)
+        seven_days_ago = int(self.clock.time_msec()) - (1000 * 60 * 60 * 24 * 7)
         return await self.db_pool.runInteraction(
             "count_weekly_users", self._count_users, seven_days_ago
         )
@@ -519,7 +519,7 @@ class ServerMetricsStore(EventPushActionsWorkerStore, SQLBaseStore):
                 ) AS r30_users;
             """
             thirty_days_in_ms = 86400 * 30 * 1000
-            now_ms = int(self._clock.time()) * 1000
+            now_ms = int(self.clock.time()) * 1000
             sixty_days_ago_in_ms = now_ms - 2 * thirty_days_in_ms
             one_day_from_now_in_ms = now_ms + (86400 * 1000)
             txn.execute(
