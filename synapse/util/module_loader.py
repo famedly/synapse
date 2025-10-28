@@ -20,6 +20,7 @@
 
 import importlib
 import importlib.util
+from importlib.metadata import PackageNotFoundError, packages_distributions, version
 from types import ModuleType
 from typing import Any, Tuple, Type
 
@@ -114,3 +115,26 @@ def _wrap_config_error(msg: str, prefix: StrSequence, e: ConfigError) -> "Config
     e1.__cause__ = Exception(e.msg)
     e1.__cause__.__cause__ = e.__cause__
     return e1
+
+
+def get_loaded_module_information(module: Type) -> Tuple[str, str, str]:
+    """Extract the module name and version from a loaded module.
+
+    Args:
+        module: The module class to extract information from
+
+    Returns:
+        Tuple of (module_name, module_version) where module_name is in the format
+        "module_path.ClassName" and module_version is the version string or "unknown"
+    """
+    # this is needed and intended
+    # for example, calling module.__module__ on mjolnir return mjolnir.antispam
+    # the packages_distributions() only have the first bit in the key of its dictionary (mjolnir)
+    package_name = packages_distributions()[module.__module__.split(".")[0]][0]
+    module_name = module.__module__ + "." + module.__name__
+    try:
+        module_version = version(package_name)
+    except PackageNotFoundError:
+        module_version = getattr(module, "__version__", "unknown")
+
+    return package_name, module_name, module_version
