@@ -13,6 +13,16 @@ users from being able to upload or download media.
 No significant changes since 1.140.0rc1.
 
 
+### Famedly additions for v1.140.0_1
+- feat: expose loaded modules over the admin API ([\#165](https://github.com/famedly/synapse/pull/165)) (FrenchGithubUser)
+- feat: include loaded module info in prometheus endpoint ([\#163](https://github.com/famedly/synapse/pull/163)) (FrenchGithubUser)
+- bump: python version to 3.10 (FrenchgGithubUser)
+- docs: update contribution process ([\#179](https://github.com/famedly/synapse/pull/179)) (FrenchGithubUser)
+- fix: logo path ([\#181](https://github.com/famedly/synapse/pull/181)) (FrenchGithubUser)
+- docs: mention configuration option changes from upstream ([\#180](https://github.com/famedly/synapse/pull/180)) (FrenchGithubUser)
+- docs: use Famedly's branding and contact ([\#178](https://github.com/famedly/synapse/pull/178)) (FrenchGithubUser)
+- docs: host Famedly's version, support latest mdbook and use internally approved github actions ([\#157](https://github.com/famedly/synapse/pull/157)) (FrenchGithubUser)
+- docs: mention fork relationship, update all appropriate references to new repo and update contribution guidelines (FrenchGithubUser)
 
 
 # Synapse 1.140.0rc1 (2025-10-10)
