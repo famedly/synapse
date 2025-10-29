@@ -153,9 +153,13 @@ class AbstractMediaRepository:
                 mxc_uri.server_name, mxc_uri.media_id
             )
         if not media_info:
-            raise SynapseError(404, "Media not found", errcode="M_NOT_FOUND")
+            raise SynapseError(
+                HTTPStatus.NOT_FOUND, "Media not found", errcode=Codes.NOT_FOUND
+            )
         if media_info.quarantined_by:
-            raise SynapseError(404, "Media not found", errcode="M_NOT_FOUND")
+            raise SynapseError(
+                HTTPStatus.NOT_FOUND, "Media not found", errcode=Codes.NOT_FOUND
+            )
         return media_info
 
     async def create_or_update_content(

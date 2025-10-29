@@ -5269,6 +5269,53 @@ class RoomsCreateMediaAttachmentTestCase(unittest.HomeserverTestCase):
         room_id = self.create_room_with_avatar(avatar_mxc="junk", expected_code=400)
         assert room_id is None
 
+    @override_config(
+        {"experimental_features": {"msc3911_unrestricted_media_upload_disabled": True}}
+    )
+    def test_create_room_with_missing_profile_avatar_media_succeeds(self) -> None:
+        """
+        Test that a profile avatar that should automatically be included in a room
+        creator's join event does not break the room when the actual media of the avatar
+        is missing.
+        """
+        # First inject a profile avatar url directly into the database. The handler
+        # functions for such can not be used as they do validation, and it would fail as
+        # the media does not actually exist.
+        avatar_mxc_uri = MXCUri.from_str("mxc://fake-domain/whatever")
+        # Make sure to add the restrictions too
+        self.get_success_or_raise(
+            self.hs.get_datastores().main.set_media_restricted_to_user_profile(
+                avatar_mxc_uri.server_name,
+                avatar_mxc_uri.media_id,
+                self.user,
+            )
+        )
+        self.get_success_or_raise(
+            self.store.set_profile_avatar_url(
+                UserID.from_string(self.user), str(avatar_mxc_uri)
+            )
+        )
+
+        # try and create room. This should succeed, but the avatar will have been
+        # stripped from the join event of the creator
+        room_id = self.helper.create_room_as(
+            self.user,
+            tok=self.tok,
+        )
+        assert room_id is not None
+        # Make sure the avatar is not on the event
+        membership_as_set = self.get_success_or_raise(
+            self.store.get_membership_event_ids_for_user(self.user, room_id)
+        )
+        join_event_id = membership_as_set.pop()
+        join_event = self.get_success_or_raise(self.store.get_event(join_event_id))
+        assert join_event.content["membership"] == Membership.JOIN
+        assert "avatar_url" not in join_event.content
+
+        # The display name would have been added, see if that is still there
+        assert "displayname" in join_event.content
+        assert join_event.content["displayname"] == "david"
+
 
 class RoomMemberEventMediaAttachmentTestCase(unittest.HomeserverTestCase):
     servlets = [
@@ -5489,8 +5536,6 @@ class RoomMemberEventMediaAttachmentTestCase(unittest.HomeserverTestCase):
         assert channel.code == 200, channel.result["body"]
 
         # Get the member event of the invite just occurred.
-        # creator_event_ids = self.get_success(self.store.get_membership_event_ids_for_user(self.user, room_id))
-        # assert len(creator_event_ids) == 1
         invitee_event_ids = self.get_success(
             self.store.get_membership_event_ids_for_user(self.other_user, room_id)
         )
@@ -5502,7 +5547,7 @@ class RoomMemberEventMediaAttachmentTestCase(unittest.HomeserverTestCase):
         assert event.type == EventTypes.Member
 
         # Verify that this event a different mxc
-        assert event.content.get(EventContentFields.MEMBERSHIP_DISPLAYNAME) != str(
+        assert event.content.get(EventContentFields.MEMBERSHIP_AVATAR_URL) != str(
             invitee_avatar_mxc_uri
         )
 

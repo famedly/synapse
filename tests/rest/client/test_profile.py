@@ -1015,7 +1015,7 @@ class ProfileMediaAttachmentTestCase(unittest.HomeserverTestCase):
         assert restrictions.event_id is None
         assert restrictions.profile_user_id == UserID.from_string(self.user)
 
-    def test_attaching_nonexistent_media_to_profile_fails(self) -> None:
+    def test_attaching_nonexistent_local_media_to_profile_fails(self) -> None:
         """
         Test that media that does not exist is not allowed to be attached to a user profile.
         """
@@ -1031,6 +1031,42 @@ class ProfileMediaAttachmentTestCase(unittest.HomeserverTestCase):
         assert channel.code == HTTPStatus.BAD_REQUEST, channel.json_body
         assert channel.json_body["errcode"] == Codes.INVALID_PARAM
         assert "does not exist" in channel.json_body["error"]
+
+    def test_attaching_unreachable_remote_media_to_profile_might_succeed(self) -> None:
+        """
+        Test that media that can not be retrieved can be attached to a user profile, if
+        legacy unrestricted media is allowed.
+        """
+        # Generate non-existing media.
+        nonexistent_mxc_uri = MXCUri.from_str("mxc://remote/fakeMediaId")
+        channel = self.make_request(
+            "PUT",
+            f"/_matrix/client/v3/profile/{self.user}/avatar_url",
+            access_token=self.tok,
+            content={"avatar_url": str(nonexistent_mxc_uri)},
+        )
+
+        assert channel.code == HTTPStatus.OK, channel.json_body
+
+    @override_config(
+        {"experimental_features": {"msc3911_unrestricted_media_upload_disabled": True}}
+    )
+    def test_attaching_unreachable_remote_media_to_profile_fails(self) -> None:
+        """
+        Test that media that can not be retrieved will fail to be attached to a user
+        profile when legacy unrestricted media is disabled.
+        """
+        # Generate non-existing media.
+        nonexistent_mxc_uri = MXCUri.from_str("mxc://remote/fakeMediaId_2")
+        channel = self.make_request(
+            "PUT",
+            f"/_matrix/client/v3/profile/{self.user}/avatar_url",
+            access_token=self.tok,
+            content={"avatar_url": str(nonexistent_mxc_uri)},
+        )
+
+        assert channel.code == HTTPStatus.NOT_FOUND, channel.json_body
+        assert channel.json_body["errcode"] == Codes.NOT_FOUND
 
     def test_attaching_unrestricted_media_to_profile(self) -> None:
         """
