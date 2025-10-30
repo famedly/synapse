@@ -63,6 +63,7 @@ class AdminHandler:
     def __init__(self, hs: "HomeServer"):
         self._store = hs.get_datastores().main
         self._device_handler = hs.get_device_handler()
+        self._media_repository = hs.get_media_repository()
         self._storage_controllers = hs.get_storage_controllers()
         self._state_storage_controller = self._storage_controllers.state
         self._msc3866_enabled = hs.config.experimental.msc3866.enabled
@@ -504,6 +505,10 @@ class AdminHandler:
                         prev_event_ids=[event.event_id],
                         ratelimit=False,
                     )
+                    media_ids = await self._store.get_media_ids_attached_to_event(
+                        event.event_id
+                    )
+                    await self._media_repository.delete_local_media_ids(media_ids)
                 except Exception as ex:
                     logger.info(
                         "Redaction of event %s failed due to: %s", event.event_id, ex

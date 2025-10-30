@@ -1325,6 +1325,7 @@ class RoomRedactEventRestServlet(TransactionRestServlet):
         self.event_creation_handler = hs.get_event_creation_handler()
         self.auth = hs.get_auth()
         self._store = hs.get_datastores().main
+        self._media_repository = hs.get_media_repository()
         self._relation_handler = hs.get_relations_handler()
         self._msc3912_enabled = hs.config.experimental.msc3912_enabled
 
@@ -1383,6 +1384,10 @@ class RoomRedactEventRestServlet(TransactionRestServlet):
                 event = await self.event_creation_handler.get_event_from_transaction(
                     requester, txn_id, room_id
                 )
+
+            # Delete any media associated with the event being redacted.
+            media_ids = await self._store.get_media_ids_attached_to_event(event_id)
+            await self._media_repository.delete_local_media_ids(media_ids)
 
             # Event is not yet redacted, create a new event to redact it.
             if event is None:

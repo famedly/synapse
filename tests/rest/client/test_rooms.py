@@ -25,6 +25,7 @@
 
 import io
 import json
+import os
 import time
 from http import HTTPStatus
 from typing import Any, Dict, Iterable, List, Literal, Optional, Tuple, Union
@@ -49,6 +50,7 @@ from synapse.api.errors import Codes, HttpResponseException
 from synapse.appservice import ApplicationService
 from synapse.events import EventBase
 from synapse.events.snapshot import EventContext
+from synapse.media.media_repository import MediaRepository
 from synapse.rest import admin
 from synapse.rest.client import (
     account,
@@ -5772,3 +5774,112 @@ class RoomMemberEventMediaAttachmentTestCase(unittest.HomeserverTestCase):
             server_name=self.server_name, media_id=copied_media_id
         )
         self.assert_media_is_identical(mxc_uri, new_media_mxc_uri, self.other_tok)
+
+
+class MediaDeletionOnRedactionTests(unittest.HomeserverTestCase):
+    servlets = [
+        admin.register_servlets,
+        login.register_servlets,
+        room.register_servlets,
+    ]
+
+    def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
+        self.admin_handler = hs.get_admin_handler()
+        self.store = hs.get_datastores().main
+        self.media_repo = hs.get_media_repository()
+        self.bad_user = self.register_user("bad_user", "hackme")
+        self.bad_user_tok = self.login("bad_user", "hackme")
+        self.user = self.register_user("user", "pass")
+        self.user_tok = self.login("user", "pass")
+
+        self.room = self.helper.create_room_as(
+            room_creator=self.user, tok=self.user_tok, room_version="11"
+        )
+
+    @override_config({"experimental_features": {"msc3911_enabled": True}})
+    def test_redacting_event_deletes_attached_media(self) -> None:
+        """Test non-admin redaction, any user with a power level greater than or
+        equal to the `m.room.redaction` event power level may send redaction events
+        in the room.
+        """
+        event_ids = []
+        media_ids = []
+        # Bad user joins and sends a message with media
+        self.helper.join(self.room, self.bad_user, tok=self.bad_user_tok)
+        for _ in range(2):
+            # Create a media
+            mxc_uri = self.get_success(
+                self.media_repo.create_or_update_content(
+                    "image/png",
+                    "test_png_upload",
+                    io.BytesIO(SMALL_PNG),
+                    67,
+                    UserID.from_string(self.bad_user),
+                    restricted=True,
+                )
+            )
+            assert mxc_uri is not None
+            assert isinstance(self.media_repo, MediaRepository)
+            media_path = self.media_repo.filepaths.local_media_filepath(
+                mxc_uri.media_id
+            )
+            self.assertTrue(os.path.exists(media_path))
+            media_ids.append(mxc_uri.media_id)
+
+            # Send message with media attached
+            image = {
+                "body": "test_png_upload",
+                "info": {"h": 1, "mimetype": "image/png", "size": 67, "w": 1},
+                "msgtype": "m.image",
+                "url": str(mxc_uri),
+            }
+            res = self.helper.send_event(
+                self.room,
+                "m.room.message",
+                image,
+                tok=self.bad_user_tok,
+                expect_code=200,
+                attach_media_mxc=str(mxc_uri),
+            )
+            assert "event_id" in res
+            event_ids.append(res["event_id"])
+
+            # Verify media is attached to event
+            media = self.get_success(self.store.get_local_media(mxc_uri.media_id))
+            assert media is not None
+            assert media.attachments is not None
+            assert media.attachments.event_id == res["event_id"]
+
+        # A user who has higher power level can redact the bad user
+        channel = self.make_request(
+            "PUT",
+            f"/_matrix/client/v3/rooms/{self.room}/redact/{event_ids[0]}/1",
+            content={"reason": "bad user"},
+            access_token=self.user_tok,
+        )
+        self.assertEqual(channel.code, 200)
+
+        # Check the media ids are deleted
+        media = self.get_success(self.store.get_local_media(media_ids[0]))
+        assert media is None
+        assert isinstance(self.media_repo, MediaRepository)
+        assert not os.path.exists(
+            self.media_repo.filepaths.local_media_filepath(media_ids[0])
+        )
+
+        # Bad user can redact their own
+        channel = self.make_request(
+            "PUT",
+            f"/_matrix/client/v3/rooms/{self.room}/redact/{event_ids[1]}/1",
+            access_token=self.bad_user_tok,
+            content={"reason": "I don't like my media"},
+        )
+        self.assertEqual(channel.code, 200)
+
+        # Check the media ids are deleted
+        media = self.get_success(self.store.get_local_media(media_ids[1]))
+        assert media is None
+        assert isinstance(self.media_repo, MediaRepository)
+        assert not os.path.exists(
+            self.media_repo.filepaths.local_media_filepath(media_ids[1])
+        )
