@@ -867,7 +867,7 @@ class MediaRepoTests(unittest.HomeserverTestCase):
     @unittest.override_config(
         {
             "enable_authenticated_media": False,
-            "use_sha256_paths": True,
+            "enable_local_media_storage_deduplication": True,
         }
     )
     def test_ensure_media_storage_is_compatible_with_sha256_path(self) -> None:

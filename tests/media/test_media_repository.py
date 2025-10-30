@@ -48,7 +48,7 @@ class MediaRepositorySha256PathTestCase(unittest.HomeserverTestCase):
         config = super().default_config()
         config.setdefault("experimental_features", {})
         config["experimental_features"].update({"msc3911_enabled": True})
-        config["use_sha256_paths"] = True
+        config["enable_local_media_storage_deduplication"] = True
 
         return config
 
@@ -77,7 +77,7 @@ class MediaRepositorySha256PathTestCase(unittest.HomeserverTestCase):
 
     def _create_local_media_with_media_id_path(self, user: str) -> MXCUri:
         assert isinstance(self.repo, MediaRepository)
-        self.repo.use_sha256_paths = False
+        self.repo.enable_local_media_storage_deduplication = False
         mxc_uri = self.get_success(
             self.repo.create_or_update_content(
                 media_type="image/png",
@@ -98,7 +98,7 @@ class MediaRepositorySha256PathTestCase(unittest.HomeserverTestCase):
         expected_path = self.repo.filepaths.local_media_filepath(media_id)
         self._store_media_with_path(file_info, expected_path)
         assert os.path.exists(expected_path), f"File does not exist: {expected_path}"
-        self.repo.use_sha256_paths = True
+        self.repo.enable_local_media_storage_deduplication = True
         return mxc_uri
 
     def _create_local_media_with_sha256_path(self, user: str) -> MXCUri:
@@ -374,7 +374,7 @@ class MediaRepositorySha256PathTestCase(unittest.HomeserverTestCase):
     def test_get_remote_media_impl_with_sha256_path_cache_miss_no_federation(
         self,
     ) -> None:
-        """Test that `get_remote_media_impl` can fetch the media with sha256 path successfully"""
+        """Test that `_get_remote_media_impl` can fetch the media with sha256 path successfully"""
 
         # Mock the download media function of the client.
         async def _mock_download_media(

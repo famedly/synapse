@@ -5137,12 +5137,12 @@ class MediaStorageSha256PathCompatTestCase(unittest.HomeserverTestCase):
         config = self.default_config()
         config.setdefault("experimental_features", {})
         config["experimental_features"].update({"msc3911_enabled": True})
+        config["enable_local_media_storage_deduplication"] = True
         self.storage_path = self.mktemp()
         self.media_store_path = self.mktemp()
         os.mkdir(self.storage_path)
         os.mkdir(self.media_store_path)
         config["media_store_path"] = self.media_store_path
-        config["use_sha256_paths"] = True
         provider_config = {
             "module": "synapse.media.storage_provider.FileStorageProviderBackend",
             "store_local": True,
@@ -5182,7 +5182,7 @@ class MediaStorageSha256PathCompatTestCase(unittest.HomeserverTestCase):
 
     def _create_local_media_with_media_id_path(self) -> str:
         assert isinstance(self.repo, MediaRepository)
-        self.repo.use_sha256_paths = False
+        self.repo.enable_local_media_storage_deduplication = False
         mxc_uri = self.get_success(
             self.repo.create_or_update_content(
                 media_type="image/png",
@@ -5209,7 +5209,7 @@ class MediaStorageSha256PathCompatTestCase(unittest.HomeserverTestCase):
         assert expected_path == fname
         assert os.path.exists(fname), f"File does not exist: {fname}"
         assert os.path.exists(expected_path), f"File does not exist: {expected_path}"
-        self.repo.use_sha256_paths = True
+        self.repo.enable_local_media_storage_deduplication = True
         return media_id
 
     async def _mock_federation_download_media(

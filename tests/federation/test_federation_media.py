@@ -200,7 +200,7 @@ class FederationMediaDownloadsTest(unittest.FederatingHomeserverTestCase):
         self.assertEqual(channel.is_finished(), True)
         self.assertNotIn("body", channel.result)
 
-    @override_config({"use_sha256_paths": True})
+    @override_config({"enable_local_media_storage_deduplication": True})
     def test_federation_download_remote_file_with_sha256_path(self) -> None:
         """Test `_get_remote_media_impl` function with federation endpoint can download remote media in sha256 path."""
 

@@ -540,6 +540,7 @@ class FileInfo:
     url_cache: bool = False
     # Whether the file is a thumbnail or not.
     thumbnail: Optional[ThumbnailInfo] = None
+    # The sha256 of the media. When enable_local_media_storage_deduplication is True, this will be generating the filepath.
     sha256: Optional[str] = None
 
     # The below properties exist to maintain compatibility with third-party modules.

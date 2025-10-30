@@ -177,7 +177,9 @@ class MediaStorage:
         self.storage_providers = storage_providers
         self._spam_checker_module_callbacks = hs.get_module_api_callbacks().spam_checker
         self.clock = hs.get_clock()
-        self.use_sha256_paths = hs.config.media.use_sha256_paths
+        self.enable_local_media_storage_deduplication = (
+            hs.config.media.enable_local_media_storage_deduplication
+        )
 
     @trace_with_opname("MediaStorage.store_file")
     async def store_file(self, source: IO, file_info: FileInfo) -> str:
@@ -225,12 +227,8 @@ class MediaStorage:
             async with media_storage.store_into_file(info) as (f, fname,):
                 # .. write into f ...
         """
-        path = ""
-        # if use_sha256_paths is enabled, new files are stored using SHA256-based paths
-        if self.use_sha256_paths and file_info.sha256:
-            path = self._file_info_to_sha256_path(file_info)
-        if not path:  # if sha256 path is not found, use the old path
-            path = self._file_info_to_path(file_info)
+        # If enable_local_media_storage_deduplication is enabled, new files are stored using SHA256-based paths
+        path = self._generate_file_path(file_info)
         fname = os.path.join(self.local_media_directory, path)
         dirname = os.path.dirname(fname)
         os.makedirs(dirname, exist_ok=True)
@@ -277,12 +275,14 @@ class MediaStorage:
         Returns:
             Returns a Responder if the file was found, otherwise None.
         """
-        paths = [self._file_info_to_path(file_info)]
-        # Add sha256 path to the list of paths to check
-        if self.use_sha256_paths and file_info.sha256:
-            sha256_path = self._file_info_to_sha256_path(file_info)
-            if sha256_path is not None:
-                paths.append(sha256_path)
+        paths = list(
+            set(
+                {
+                    self._generate_file_path(file_info),
+                    self._generate_file_path_with_media_id(file_info),
+                }
+            )
+        )
         # fallback for remote thumbnails with no method in the filename
         if file_info.thumbnail and file_info.server_name:
             paths.append(
@@ -323,19 +323,20 @@ class MediaStorage:
         Returns:
             Full path to local file
         """
-        # First look up the sha path if enabled
-        if self.use_sha256_paths and file_info.sha256:
-            path = self._file_info_to_sha256_path(file_info)
-            if path:
-                local_path = os.path.join(self.local_media_directory, path)
+        # Collect all possible paths
+        paths = list(
+            set(
+                {
+                    self._generate_file_path(file_info),
+                    self._generate_file_path_with_media_id(file_info),
+                }
+            )
+        )
+
+        for path in paths:
+            local_path = os.path.join(self.local_media_directory, path)
             if os.path.exists(local_path):
                 return local_path
-
-        # if the file doesn't exist in sha path, look up the media_id path
-        path = self._file_info_to_path(file_info)
-        local_path = os.path.join(self.local_media_directory, path)
-        if os.path.exists(local_path):
-            return local_path
 
         # Fallback for paths without method names
         # Should be removed in the future
@@ -368,26 +369,22 @@ class MediaStorage:
         raise NotFoundError()
 
     @trace
-    def _file_info_to_sha256_path(self, file_info: FileInfo) -> str:
+    def _generate_file_path(self, file_info: FileInfo) -> str:
         """Converts file_info into a relative sha256 path."""
-        if not file_info.sha256:
-            logger.error("file_info does not have sha256 information.")
-            return ""
-        if file_info.url_cache:
-            logger.error("use media_id path for url cache storage.")
-            return ""
-        if file_info.thumbnail:
-            return self.filepaths.thumbnail_sha_rel(
-                sha256=file_info.sha256,
-                width=file_info.thumbnail.width,
-                height=file_info.thumbnail.height,
-                content_type=file_info.thumbnail.type,
-                method=file_info.thumbnail.method,
-            )
-        return self.filepaths.filepath_sha_rel(file_info.sha256)
+        if self.enable_local_media_storage_deduplication and file_info.sha256:
+            if file_info.thumbnail:
+                return self.filepaths.thumbnail_sha_rel(
+                    sha256=file_info.sha256,
+                    width=file_info.thumbnail.width,
+                    height=file_info.thumbnail.height,
+                    content_type=file_info.thumbnail.type,
+                    method=file_info.thumbnail.method,
+                )
+            return self.filepaths.filepath_sha_rel(file_info.sha256)
+        return self._generate_file_path_with_media_id(file_info)
 
     @trace
-    def _file_info_to_path(self, file_info: FileInfo) -> str:
+    def _generate_file_path_with_media_id(self, file_info: FileInfo) -> str:
         """Converts file_info into a relative path.
 
         The path is suitable for storing files under a directory, e.g. used to
