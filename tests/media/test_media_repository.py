@@ -77,7 +77,7 @@ class MediaRepositorySha256PathTestCase(unittest.HomeserverTestCase):
 
     def _create_local_media_with_media_id_path(self, user: str) -> MXCUri:
         assert isinstance(self.repo, MediaRepository)
-        self.repo.enable_local_media_storage_deduplication = False
+        self.repo.use_sha256_path = False
         mxc_uri = self.get_success(
             self.repo.create_or_update_content(
                 media_type="image/png",
@@ -98,7 +98,7 @@ class MediaRepositorySha256PathTestCase(unittest.HomeserverTestCase):
         expected_path = self.repo.filepaths.local_media_filepath(media_id)
         self._store_media_with_path(file_info, expected_path)
         assert os.path.exists(expected_path), f"File does not exist: {expected_path}"
-        self.repo.enable_local_media_storage_deduplication = True
+        self.repo.use_sha256_path = True
         return mxc_uri
 
     def _create_local_media_with_sha256_path(self, user: str) -> MXCUri:
@@ -112,6 +112,7 @@ class MediaRepositorySha256PathTestCase(unittest.HomeserverTestCase):
                 auth_user=UserID.from_string(user),
                 media_id=None,
                 restricted=True,
+                sha256=SMALL_PNG_SHA256,
             )
         )
         assert os.path.exists(expected_path), f"File does not exist: {expected_path}"
@@ -184,21 +185,6 @@ class MediaRepositorySha256PathTestCase(unittest.HomeserverTestCase):
         assert remote_media.sha256 == SMALL_PNG_SHA256
         return media_id
 
-    def test_check_file_path_exists_by_sha256(self) -> None:
-        """Test that `check_file_path_exists_by_sha256` returns False if the sha256 path does not exist"""
-        assert isinstance(self.repo, MediaRepository)
-        assert not self.repo.check_file_path_exists_by_sha256("invalid_sha256")
-
-        # Create a file with the sha256 path
-        file_info = FileInfo(
-            server_name=None,
-            file_id=random_string(24),
-            sha256=SMALL_PNG_SHA256,
-        )
-        expected_path = os.path.join("media", SMALL_PNG_SHA256_PATH)
-        self._store_media_with_path(file_info, expected_path)
-        assert self.repo.check_file_path_exists_by_sha256(SMALL_PNG_SHA256)
-
     def test_create_or_update_content_creates_new_content_with_sha256_path(
         self,
     ) -> None:
@@ -265,6 +251,7 @@ class MediaRepositorySha256PathTestCase(unittest.HomeserverTestCase):
                 auth_user=UserID.from_string(self.creator),
                 media_id=media_id,
                 restricted=True,
+                sha256=SMALL_PNG_SHA256,
             )
         )
         assert mxc_uri.media_id == updated_mxc_uri.media_id

@@ -5182,7 +5182,7 @@ class MediaStorageSha256PathCompatTestCase(unittest.HomeserverTestCase):
 
     def _create_local_media_with_media_id_path(self) -> str:
         assert isinstance(self.repo, MediaRepository)
-        self.repo.enable_local_media_storage_deduplication = False
+        self.repo.use_sha256_path = False
         mxc_uri = self.get_success(
             self.repo.create_or_update_content(
                 media_type="image/png",
@@ -5209,7 +5209,7 @@ class MediaStorageSha256PathCompatTestCase(unittest.HomeserverTestCase):
         assert expected_path == fname
         assert os.path.exists(fname), f"File does not exist: {fname}"
         assert os.path.exists(expected_path), f"File does not exist: {expected_path}"
-        self.repo.enable_local_media_storage_deduplication = True
+        self.repo.use_sha256_path = True
         return media_id
 
     async def _mock_federation_download_media(

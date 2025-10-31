@@ -20,6 +20,7 @@
 #
 #
 import errno
+import io
 import logging
 import os
 import shutil
@@ -167,6 +168,7 @@ class AbstractMediaRepository:
         auth_user: UserID,
         media_id: Optional[str] = None,
         restricted: bool = False,
+        sha256: Optional[str] = None,
     ) -> MXCUri:
         raise NotImplementedError(
             "Sorry Mario, your MediaRepository related function is in another castle"
@@ -613,9 +615,7 @@ class MediaRepository(AbstractMediaRepository):
             hs.config.media.media_retention_remote_media_lifetime_ms
         )
 
-        self.enable_local_media_storage_deduplication = (
-            hs.config.media.enable_local_media_storage_deduplication
-        )
+        self.use_sha256_path = hs.config.media.enable_local_media_storage_deduplication
 
         # Check whether local or remote media retention is configured
         if (
@@ -754,11 +754,6 @@ class MediaRepository(AbstractMediaRepository):
         if media.created_ts < expired_time_ms:
             raise NotFoundError("Media ID has expired")
 
-    def check_file_path_exists_by_sha256(self, sha256: str) -> bool:
-        if not self.enable_local_media_storage_deduplication:
-            logger.debug("sha256 path is not enabled.")
-        return os.path.exists(self.filepaths.filepath_sha(sha256))
-
     @trace
     async def create_or_update_content(
         self,
@@ -791,11 +786,17 @@ class MediaRepository(AbstractMediaRepository):
         if media_id is None:
             media_id = random_string(24)
 
-        file_info = FileInfo(server_name=None, file_id=media_id)
+        # if self.use_sha256_path and media_id and not sha256:
+        #     sha256 = await self.store.get_sha_by_media_id(media_id)
+
+        file_info = FileInfo(server_name=None, file_id=media_id, sha256=sha256)
+
         sha256reader = SHA256TransparentIOReader(content)
-        # This implements all of IO as it has a passthrough
-        fname = await self.media_storage.store_file(sha256reader.wrap(), file_info)
+        data = sha256reader.read()
         sha256 = sha256reader.hexdigest()
+
+        # This implements all of IO as it has a passthrough
+        fname = await self.media_storage.store_file(io.BytesIO(data), file_info)
         should_quarantine = await self.store.get_is_hash_quarantined(sha256)
 
         logger.info("Stored local media in file %r", fname)
@@ -807,14 +808,14 @@ class MediaRepository(AbstractMediaRepository):
 
         # If we enabled sha256 paths, we create a new file with sha256 path, and delete
         # the original media_id path.
-        if self.enable_local_media_storage_deduplication:
-            if not self.check_file_path_exists_by_sha256(sha256):
+        if self.use_sha256_path:
+            if not os.path.exists(self.filepaths.filepath_sha(sha256)):
                 file_info = FileInfo(server_name=None, file_id=media_id, sha256=sha256)
                 sha256_fname = await self.media_storage.store_file(content, file_info)
                 logger.info("Stored media in file %r", sha256_fname)
+                os.remove(fname)
             else:
                 logger.info("File already exists in sha256 path.")
-            os.remove(fname)
 
         # Check that the user has not exceeded any of the media upload limits.
 
@@ -872,13 +873,9 @@ class MediaRepository(AbstractMediaRepository):
             await self._generate_thumbnails(
                 server_name=None,
                 media_id=media_id,
-                file_id=sha256
-                if self.enable_local_media_storage_deduplication
-                else media_id,
+                file_id=sha256 if self.use_sha256_path else media_id,
                 media_type=media_type,
-                sha256=sha256
-                if self.enable_local_media_storage_deduplication
-                else None,
+                sha256=sha256 if self.use_sha256_path else None,
             )
         except Exception as e:
             logger.info("Failed to generate thumbnails: %s", e)
@@ -902,19 +899,13 @@ class MediaRepository(AbstractMediaRepository):
             file_info = FileInfo(
                 server_name=old_media_info.media_origin,
                 file_id=old_media_info.filesystem_id,
-                sha256=old_media_info.sha256
-                if self.enable_local_media_storage_deduplication
-                and old_media_info.sha256
-                else None,
+                sha256=old_media_info.sha256,
             )
         else:
             file_info = FileInfo(
                 server_name=None,
                 file_id=old_media_info.media_id,
-                sha256=old_media_info.sha256
-                if self.enable_local_media_storage_deduplication
-                and old_media_info.sha256
-                else None,
+                sha256=old_media_info.sha256,
             )
 
         # This will ensure that if there is another storage provider containing our old
@@ -1075,9 +1066,7 @@ class MediaRepository(AbstractMediaRepository):
             None,
             media_id,
             url_cache=bool(url_cache),
-            sha256=media_info.sha256
-            if self.enable_local_media_storage_deduplication
-            else None,
+            sha256=media_info.sha256,
         )
 
         responder = await self.media_storage.fetch_media(file_info)
@@ -1294,13 +1283,7 @@ class MediaRepository(AbstractMediaRepository):
             # seen the file then reuse the existing ID, otherwise generate a new
             # one.
             file_id = media_info.filesystem_id
-            file_info = FileInfo(
-                server_name,
-                file_id,
-                sha256=media_info.sha256
-                if self.enable_local_media_storage_deduplication and media_info.sha256
-                else None,
-            )
+            file_info = FileInfo(server_name, file_id, sha256=media_info.sha256)
 
             if media_info.quarantined_by:
                 logger.info("Media is quarantined")
@@ -1360,13 +1343,11 @@ class MediaRepository(AbstractMediaRepository):
             media_info = attr.evolve(media_info, media_type="application/octet-stream")
 
         file_info = FileInfo(
-            server_name,
-            media_info.sha256
-            if self.enable_local_media_storage_deduplication and media_info.sha256
+            server_name=server_name,
+            file_id=media_info.sha256
+            if self.use_sha256_path and media_info.sha256
             else file_id,
-            sha256=media_info.sha256
-            if self.enable_local_media_storage_deduplication and media_info.sha256
-            else None,
+            sha256=media_info.sha256,
         )
         # We generate thumbnails even if another process downloaded the media
         # as a) it's conceivable that the other download request dies before it
@@ -1374,7 +1355,7 @@ class MediaRepository(AbstractMediaRepository):
         # have finished being generated before responding to the client,
         # otherwise they'll request thumbnails and get a 404 if they're not
         # ready yet.
-        if self.enable_local_media_storage_deduplication:
+        if self.use_sha256_path:
             assert media_info.sha256 is not None
             await self._generate_thumbnails(
                 server_name=server_name,
@@ -1493,9 +1474,7 @@ class MediaRepository(AbstractMediaRepository):
                 time_now_ms=time_now_ms,
                 upload_name=upload_name,
                 media_length=length,
-                filesystem_id=sha256
-                if self.enable_local_media_storage_deduplication
-                else file_id,
+                filesystem_id=sha256 if self.use_sha256_path else file_id,
                 sha256=sha256,
             )
 
@@ -1507,7 +1486,7 @@ class MediaRepository(AbstractMediaRepository):
             authenticated = False
 
         # If sha256 paths are enabled, rename the file to sha256 path and delete the original media_id path.
-        if self.enable_local_media_storage_deduplication:
+        if self.use_sha256_path:
             rel_path = self.filepaths.filepath_sha(sha256)
             abs_path = os.path.join(self.hs.config.media.media_store_path, rel_path)
             os.makedirs(os.path.dirname(abs_path), exist_ok=True)
@@ -1521,9 +1500,7 @@ class MediaRepository(AbstractMediaRepository):
             media_length=length,
             upload_name=upload_name,
             created_ts=time_now_ms,
-            filesystem_id=sha256
-            if self.enable_local_media_storage_deduplication
-            else file_id,
+            filesystem_id=sha256 if self.use_sha256_path else file_id,
             last_access_ts=time_now_ms,
             quarantined_by=None,
             authenticated=authenticated,
@@ -1665,9 +1642,7 @@ class MediaRepository(AbstractMediaRepository):
                 time_now_ms=time_now_ms,
                 upload_name=upload_name,
                 media_length=length,
-                filesystem_id=sha256
-                if self.enable_local_media_storage_deduplication
-                else file_id,
+                filesystem_id=sha256 if self.use_sha256_path else file_id,
                 sha256=sha256,
                 restricted=restricted,
             )
@@ -1694,7 +1669,7 @@ class MediaRepository(AbstractMediaRepository):
             authenticated = False
 
         # If sha256 paths are enabled, rename the file to sha256 path and delete the original media_id path.
-        if self.enable_local_media_storage_deduplication:
+        if self.use_sha256_path:
             rel_path = self.filepaths.filepath_sha(sha256)
             abs_path = os.path.join(self.hs.config.media.media_store_path, rel_path)
             os.makedirs(os.path.dirname(abs_path), exist_ok=True)
@@ -1708,9 +1683,7 @@ class MediaRepository(AbstractMediaRepository):
             media_length=length,
             upload_name=upload_name,
             created_ts=time_now_ms,
-            filesystem_id=sha256
-            if self.enable_local_media_storage_deduplication
-            else file_id,
+            filesystem_id=sha256 if self.use_sha256_path else file_id,
             last_access_ts=time_now_ms,
             quarantined_by=None,
             authenticated=authenticated,
@@ -1775,9 +1748,7 @@ class MediaRepository(AbstractMediaRepository):
                 None,
                 media_id,
                 url_cache=url_cache,
-                sha256=sha256
-                if self.enable_local_media_storage_deduplication and sha256
-                else None,
+                sha256=sha256,
             )
         )
 
@@ -1808,9 +1779,7 @@ class MediaRepository(AbstractMediaRepository):
             try:
                 file_info = FileInfo(
                     server_name=None,
-                    file_id=sha256
-                    if self.enable_local_media_storage_deduplication and sha256
-                    else media_id,
+                    file_id=sha256 if self.use_sha256_path and sha256 else media_id,
                     url_cache=url_cache,
                     thumbnail=ThumbnailInfo(
                         width=t_width,
@@ -1819,9 +1788,7 @@ class MediaRepository(AbstractMediaRepository):
                         type=t_type,
                         length=t_byte_source.tell(),
                     ),
-                    sha256=sha256
-                    if self.enable_local_media_storage_deduplication and sha256
-                    else None,
+                    sha256=sha256,
                 )
 
                 output_path = await self.media_storage.store_file(
@@ -1863,9 +1830,7 @@ class MediaRepository(AbstractMediaRepository):
             FileInfo(
                 server_name,
                 file_id,
-                sha256=sha256
-                if self.enable_local_media_storage_deduplication and sha256
-                else None,
+                sha256=sha256,
             )
         )
 
@@ -1905,9 +1870,7 @@ class MediaRepository(AbstractMediaRepository):
                         type=t_type,
                         length=t_byte_source.tell(),
                     ),
-                    sha256=sha256
-                    if self.enable_local_media_storage_deduplication and sha256
-                    else None,
+                    sha256=sha256,
                 )
 
                 output_path = await self.media_storage.store_file(
@@ -1970,9 +1933,7 @@ class MediaRepository(AbstractMediaRepository):
             server_name,
             file_id,  # This will be the sha256 if sha256 path is enabled. Otherwise, it will be the file_id.
             url_cache=url_cache,
-            sha256=sha256
-            if self.enable_local_media_storage_deduplication and sha256
-            else None,
+            sha256=sha256,
         )
         input_path = await self.media_storage.ensure_media_is_in_local_cache(file_info)
 
@@ -2054,7 +2015,7 @@ class MediaRepository(AbstractMediaRepository):
                 file_info = FileInfo(
                     server_name=server_name,
                     file_id=sha256
-                    if self.enable_local_media_storage_deduplication and sha256
+                    if self.use_sha256_path and sha256
                     else file_id,  # Saving the thumbnail with sha256 path if sha256 path is enabled.
                     url_cache=url_cache,
                     thumbnail=ThumbnailInfo(
@@ -2064,9 +2025,7 @@ class MediaRepository(AbstractMediaRepository):
                         type=t_type,
                         length=t_byte_source.tell(),
                     ),
-                    sha256=sha256
-                    if self.enable_local_media_storage_deduplication and sha256
-                    else None,
+                    sha256=sha256,
                 )
 
                 async with self.media_storage.store_into_file(file_info) as (f, fname):

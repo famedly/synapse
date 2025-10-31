@@ -272,9 +272,7 @@ class ThumbnailProvider:
         self.store = hs.get_datastores().main
         self.dynamic_thumbnails = hs.config.media.dynamic_thumbnails
         self.enable_media_restriction = self.hs.config.experimental.msc3911_enabled
-        self.enable_local_media_storage_deduplication = (
-            self.media_repo.enable_local_media_storage_deduplication
-        )
+        self.use_sha256_path = self.media_repo.use_sha256_path
 
     async def respond_local_thumbnail(
         self,
@@ -529,9 +527,7 @@ class ThumbnailProvider:
             desired_height,
             desired_method,
             desired_type,
-            media_info.sha256
-            if self.enable_local_media_storage_deduplication
-            else None,
+            media_info.sha256 if self.use_sha256_path else None,
         )
 
         if file_path:
@@ -601,7 +597,7 @@ class ThumbnailProvider:
             server_name=server_name,
             for_federation=False,
             sha256=media_info.sha256
-            if self.enable_local_media_storage_deduplication and media_info.sha256
+            if self.use_sha256_path and media_info.sha256
             else None,
         )
 
@@ -662,9 +658,7 @@ class ThumbnailProvider:
                 file_id,
                 url_cache,
                 server_name,
-                sha256=sha256
-                if self.enable_local_media_storage_deduplication and sha256
-                else None,
+                sha256=sha256 if self.use_sha256_path and sha256 else None,
             )
             if not file_info:
                 logger.info("Couldn't find a thumbnail matching the desired inputs")
@@ -712,7 +706,7 @@ class ThumbnailProvider:
             # still. This will throw a 404 if we don't.
             # TODO: We should refetch the thumbnails for remote media.
             await self.media_storage.ensure_media_is_in_local_cache(
-                FileInfo(server_name, file_id, url_cache=url_cache)
+                FileInfo(server_name, file_id, url_cache=url_cache, sha256=sha256)
             )
 
             if server_name:
@@ -905,9 +899,7 @@ class ThumbnailProvider:
                 url_cache=url_cache,
                 server_name=server_name,
                 thumbnail=thumbnail_info,
-                sha256=sha256
-                if self.enable_local_media_storage_deduplication and sha256
-                else None,
+                sha256=sha256,
             )
 
         # No matching thumbnail was found.
