@@ -38,7 +38,6 @@ from synapse.metrics import (
     known_rooms_gauge,
     locally_joined_rooms_gauge,
 )
-from synapse.metrics.background_process_metrics import run_as_background_process
 from synapse.storage.databases.main.state_deltas import StateDelta
 from synapse.types import JsonDict
 from synapse.util.events import get_plain_text_topic_from_event_content
@@ -80,7 +79,10 @@ class StatsHandler:
 
             # We kick this off so that we don't have to wait for a change before
             # we start populating stats
-            self.clock.call_later(0, self.notify_new_event)
+            self.clock.call_later(
+                0,
+                self.notify_new_event,
+            )
 
     def notify_new_event(self) -> None:
         """Called when there may be more deltas to process"""
@@ -95,7 +97,7 @@ class StatsHandler:
             finally:
                 self._is_processing = False
 
-        run_as_background_process("stats.notify_new_event", self.server_name, process)
+        self.hs.run_as_background_process("stats.notify_new_event", process)
 
     async def _unsafe_process(self) -> None:
         # If self.pos is None then means we haven't fetched it from DB
