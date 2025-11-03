@@ -14,6 +14,8 @@ No significant changes since 1.140.0rc1.
 
 
 ### Famedly additions for v1.140.0_1
+- bump: Synapse Invite Checker to 0.4.10 (Jason Little)
+- fix: adjust for Clock attribute being renamed (Jason Little)
 - feat: expose loaded modules over the admin API ([\#165](https://github.com/famedly/synapse/pull/165)) (FrenchGithubUser)
 - feat: include loaded module info in prometheus endpoint ([\#163](https://github.com/famedly/synapse/pull/163)) (FrenchGithubUser)
 - bump: python version to 3.10 (FrenchgGithubUser)
