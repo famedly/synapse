@@ -13,6 +13,11 @@ users from being able to upload or download media.
 No significant changes since 1.140.0rc1.
 
 
+### Famedly additions for v1.140.0_2
+- bump: Update module versions (Jason Little)
+  - Synapse Invite Checker is bumped to v0.2.2 for TIM 1.1 and v0.4.11 for TIM Pro
+  - Synapse Token Authenticator is bumped to v0.12.0 for TIM 1.1
+
 ### Famedly additions for v1.140.0_1
 - bump: Synapse Invite Checker to 0.4.10 (Jason Little)
 - fix: adjust for Clock attribute being renamed (Jason Little)
