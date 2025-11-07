@@ -42,7 +42,6 @@ all_mod_pack_versions = {
     "mod001": {"sic-version": "0.2.0", "sta-version": "0.5.0"},
     "mod002": {"sic-version": "0.2.0", "sta-version": "0.6.0"},
     "mod003": {"sic-version": "0.2.0", "sta-version": "0.8.1"},
-    # mod004 should be the final TIM 1.1
     "mod004": {"sic-version": "0.2.0", "sta-version": "0.9.0"},
     "mod005": {"sic-version": "0.4.1", "sta-version": "0.9.0"},
     "mod006": {"sic-version": "0.4.1", "sta-version": "0.11.0"},
@@ -56,11 +55,13 @@ all_mod_pack_versions = {
     "mod014": {"sic-version": "0.4.8", "sta-version": "0.12.0"},
     "mod015": {"sic-version": "0.4.9", "sta-version": "0.12.0"},
     "mod016": {"sic-version": "0.4.10", "sta-version": "0.12.0"},
+    "mod017": {"sic-version": "0.2.2", "sta-version": "0.12.0"},
+    "mod018": {"sic-version": "0.4.11", "sta-version": "0.12.0"},
 }
 
 # Adjust this section to decide what gets built and layered on top
 # THIS IS THE SECTION TO EDIT, after you have added the new versions above
-current_mod_packs_to_build = ["mod004", "mod016"]
+current_mod_packs_to_build = ["mod017", "mod018"]
 
 generated_jobs: list[dict[str, Any]] = []
 for mod_pack_job in current_mod_packs_to_build:
