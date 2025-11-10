@@ -76,47 +76,107 @@ class MediaRepositorySha256PathTestCase(unittest.HomeserverTestCase):
         assert os.path.exists(fname), f"File does not exist: {fname}"
 
     def _create_local_media_with_media_id_path(self, user: str) -> MXCUri:
+        """
+        Force creation of a media object at the specific place based on the media id
+        path. This does assert that the file exists where it is expected to be
+        """
         assert isinstance(self.repo, MediaRepository)
-        self.repo.use_sha256_path = False
-        mxc_uri = self.get_success(
-            self.repo.create_or_update_content(
-                media_type="image/png",
-                upload_name="original_media",
-                content=io.BytesIO(SMALL_PNG),
-                content_length=67,
-                auth_user=UserID.from_string(user),
-                media_id=None,
-                restricted=True,
-            )
-        )
-        media_id = mxc_uri.media_id
+        media_id = random_string(24)
+        # Curate a specialized FileInfo that is lacking sha256 data, then file will be
+        # forced to the old media_id path
         file_info = FileInfo(
             server_name=None,
             file_id=media_id,
         )
-        assert isinstance(self.repo, MediaRepository)
+
         expected_path = self.repo.filepaths.local_media_filepath(media_id)
-        self._store_media_with_path(file_info, expected_path)
+        ctx = self.repo.media_storage.store_into_file(file_info)
+        (f, fname) = self.get_success(ctx.__aenter__())
+        f.write(SMALL_PNG)
+        self.get_success(ctx.__aexit__(None, None, None))
+
+        # Insert the appropriate data into the database, so lookups work as expected
+        self.get_success(
+            self.repo.store.store_local_media(
+                media_id=media_id,
+                media_type="image/png",
+                time_now_ms=self.clock.time_msec(),
+                upload_name="original_media",
+                media_length=67,
+                user_id=UserID.from_string(user),
+                sha256=SMALL_PNG_SHA256,
+                quarantined_by=None,
+                restricted=False,
+            )
+        )
+        assert expected_path == fname
+        assert os.path.exists(fname), f"File does not exist: {fname}"
         assert os.path.exists(expected_path), f"File does not exist: {expected_path}"
-        self.repo.use_sha256_path = True
-        return mxc_uri
+
+        self.get_success(
+            self.repo._generate_thumbnails(
+                server_name=None,
+                media_id=media_id,
+                file_id=media_id,
+                media_type="image/png",
+                # We purposely do not use the sha256 here, as it directly causes the sha256
+                # path for thumbnails to be populated, and that is not what we are looking
+                # for.
+                sha256=None,
+            )
+        )
+        return MXCUri(server_name=self.hs.config.server.server_name, media_id=media_id)
 
     def _create_local_media_with_sha256_path(self, user: str) -> MXCUri:
-        expected_path = os.path.join("media", SMALL_PNG_SHA256_PATH)
-        mxc_uri = self.get_success(
-            self.repo.create_or_update_content(
+        assert isinstance(self.repo, MediaRepository)
+        media_id = random_string(24)
+        # Curate a specialized FileInfo that includes sha256 data, then file will be
+        # forced to the new sha256 path
+        file_info = FileInfo(
+            server_name=None,
+            file_id=media_id,
+            sha256=SMALL_PNG_SHA256,
+        )
+
+        expected_path = self.repo.filepaths.filepath_sha(SMALL_PNG_SHA256)
+        ctx = self.repo.media_storage.store_into_file(file_info)
+        (f, fname) = self.get_success(ctx.__aenter__())
+        f.write(SMALL_PNG)
+        self.get_success(ctx.__aexit__(None, None, None))
+
+        # Insert the appropriate data into the database, so lookups work as expected
+        self.get_success(
+            self.repo.store.store_local_media(
+                media_id=media_id,
                 media_type="image/png",
-                upload_name="test_png_upload",
-                content=io.BytesIO(SMALL_PNG),
-                content_length=67,
-                auth_user=UserID.from_string(user),
-                media_id=None,
-                restricted=True,
+                time_now_ms=self.clock.time_msec(),
+                upload_name="original_media",
+                media_length=67,
+                user_id=UserID.from_string(user),
+                sha256=SMALL_PNG_SHA256,
+                quarantined_by=None,
+                restricted=False,
+            )
+        )
+        assert expected_path == fname
+        assert os.path.exists(fname), f"File does not exist: {fname}"
+        assert os.path.exists(expected_path), f"File does not exist: {expected_path}"
+
+        # Some tests expect thumbnails, remember to generate them
+        self.get_success(
+            self.repo._generate_thumbnails(
+                server_name=None,
+                media_id=media_id,
+                file_id=media_id,
+                media_type="image/png",
+                # We purposely do not use the sha256 here, as it directly causes the sha256
+                # path for thumbnails to be populated, and that is not what we are looking
+                # for.
                 sha256=SMALL_PNG_SHA256,
             )
         )
-        assert os.path.exists(expected_path), f"File does not exist: {expected_path}"
-        return mxc_uri
+
+        return MXCUri(server_name=self.hs.config.server.server_name, media_id=media_id)
 
     def _create_remote_media_with_media_id_path(self, server_name: str) -> str:
         media_id = random_string(24)
@@ -213,6 +273,10 @@ class MediaRepositorySha256PathTestCase(unittest.HomeserverTestCase):
 
     def test_create_or_update_content_updates_content_with_media_id_path(self) -> None:
         """Test that `create_or_update_content` function can update existing media with media_id path"""
+        # Strictly speaking, this is not an operation that is supposed to be supported,
+        # but is currently possible. In the case it becomes necessary, the behavior
+        # should not be unexpected.
+
         # Create media with media_id path
         mxc_uri = self._create_local_media_with_media_id_path(self.creator)
         media_id = mxc_uri.media_id
@@ -230,13 +294,15 @@ class MediaRepositorySha256PathTestCase(unittest.HomeserverTestCase):
             )
         )
         assert mxc_uri.media_id == updated_mxc_uri.media_id
-        assert os.path.exists(os.path.join("media", SMALL_PNG_SHA256_PATH))
-        # TODO: update removes the file with media_id path, and replace it with the new file with sha256 path.
         assert isinstance(self.repo, MediaRepository)
-        assert not os.path.exists(self.repo.filepaths.local_media_filepath(media_id))
+        assert os.path.exists(self.repo.filepaths.local_media_filepath(media_id))
 
     def test_create_or_update_content_updates_content_with_sha256_path(self) -> None:
         """Test that `create_or_update_content` function can update existing media with sha256 path"""
+        # Strictly speaking, this is not an operation that is supposed to be supported,
+        # but is currently possible. In the case it becomes necessary, the behavior
+        # should not be unexpected.
+
         # Create media with sha256 path
         mxc_uri = self._create_local_media_with_sha256_path(self.creator)
         media_id = mxc_uri.media_id
@@ -251,7 +317,6 @@ class MediaRepositorySha256PathTestCase(unittest.HomeserverTestCase):
                 auth_user=UserID.from_string(self.creator),
                 media_id=media_id,
                 restricted=True,
-                sha256=SMALL_PNG_SHA256,
             )
         )
         assert mxc_uri.media_id == updated_mxc_uri.media_id
@@ -331,7 +396,7 @@ class MediaRepositorySha256PathTestCase(unittest.HomeserverTestCase):
 
     def test_get_remote_media_impl_with_sha256_path_cache_hit(self) -> None:
         server_name = "other_server.com"
-        # Generate remote media with media_id path
+        # Generate remote media with sha256 path
         media_id = self._create_remote_media_with_sha256_path(server_name)
 
         assert isinstance(self.repo, MediaRepository)

@@ -392,6 +392,7 @@ class ThumbnailProvider:
                     file_id=media_id,
                     url_cache=bool(media_info.url_cache),
                     thumbnail=info,
+                    sha256=media_info.sha256,
                 )
 
                 responder = await self.media_storage.fetch_media(file_info)
@@ -507,6 +508,7 @@ class ThumbnailProvider:
                     server_name=server_name,
                     file_id=file_id,
                     thumbnail=info,
+                    sha256=media_info.sha256,
                 )
 
                 responder = await self.media_storage.fetch_media(file_info)
@@ -527,7 +529,7 @@ class ThumbnailProvider:
             desired_height,
             desired_method,
             desired_type,
-            media_info.sha256 if self.use_sha256_path else None,
+            media_info.sha256,
         )
 
         if file_path:
@@ -596,9 +598,7 @@ class ThumbnailProvider:
             url_cache=False,
             server_name=server_name,
             for_federation=False,
-            sha256=media_info.sha256
-            if self.use_sha256_path and media_info.sha256
-            else None,
+            sha256=media_info.sha256,
         )
 
     async def _select_and_respond_with_thumbnail(
@@ -658,7 +658,7 @@ class ThumbnailProvider:
                 file_id,
                 url_cache,
                 server_name,
-                sha256=sha256 if self.use_sha256_path and sha256 else None,
+                sha256=sha256,
             )
             if not file_info:
                 logger.info("Couldn't find a thumbnail matching the desired inputs")

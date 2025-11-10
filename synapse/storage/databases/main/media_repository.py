@@ -1333,8 +1333,9 @@ class MediaRepositoryStore(MediaRepositoryBackgroundUpdateStore):
             json_dict=json_object,
         )
 
-    async def get_sha_by_media_id(
-        self, media_id: str, server_name: Optional[str] = None
+    async def get_sha_for_local_media_id(
+        self,
+        media_id: str,
     ) -> str:
         """
         Get the media ID of and return SHA256 hash of given media.
@@ -1346,22 +1347,10 @@ class MediaRepositoryStore(MediaRepositoryBackgroundUpdateStore):
         LIMIT 1
         """
 
-        if server_name and not self.hs.is_mine_server_name(server_name):
-            sql = """
-            SELECT sha256
-            FROM remote_media_cache
-            WHERE media_origin = ? AND media_id = ?
-            ORDER BY created_ts ASC
-            LIMIT 1
-            """
-
-        def _get_sha_by_media_id_txn(
+        def _get_sha_for_local_media_id_txn(
             txn: LoggingTransaction,
         ) -> str:
-            if server_name and not self.hs.is_mine_server_name(server_name):
-                txn.execute(sql, (server_name, media_id))
-            else:
-                txn.execute(sql, (media_id,))
+            txn.execute(sql, (media_id,))
 
             rows = txn.fetchone()
             if not rows:
@@ -1369,5 +1358,58 @@ class MediaRepositoryStore(MediaRepositoryBackgroundUpdateStore):
             return rows[0]
 
         return await self.db_pool.runInteraction(
-            "get_sha_by_media_id", _get_sha_by_media_id_txn
+            "get_sha_for_local_media_id", _get_sha_for_local_media_id_txn
+        )
+
+    async def get_sha_for_remote_media_id(self, server_name: str, media_id: str) -> str:
+        """
+        Get the media ID of and return SHA256 hash of given media.
+        """
+        assert not self.hs.is_mine_server_name(server_name), (
+            "Can not run against own server"
+        )
+        sql = """
+        SELECT sha256
+        FROM remote_media_cache
+        WHERE media_origin = ? AND media_id = ?
+        ORDER BY created_ts ASC
+        LIMIT 1
+        """
+
+        def _get_sha_for_remote_media_id_txn(
+            txn: LoggingTransaction,
+        ) -> str:
+            txn.execute(sql, (server_name, media_id))
+
+            rows = txn.fetchone()
+            if not rows:
+                raise ValueError("media_id %s has no sha256 field", media_id)
+            return rows[0]
+
+        return await self.db_pool.runInteraction(
+            "get_sha_for_remote_media_id", _get_sha_for_remote_media_id_txn
+        )
+
+    async def get_media_reference_count_for_sha256(self, sha256: str) -> int:
+        """Get total number of local + remote media entries for this SHA256."""
+
+        def _get_reference_count_txn(txn: LoggingTransaction) -> int:
+            sql = """
+            SELECT SUM(total_rows) AS grand_total_rows
+            FROM (
+                SELECT COUNT(*) AS total_rows FROM local_media_repository WHERE sha256 = ?
+                UNION ALL
+                SELECT COUNT(*) AS total_rows FROM remote_media_cache WHERE sha256 = ?
+            ) AS combined_counts
+            """
+
+            txn.execute(sql, (sha256, sha256))
+            row_tuple = txn.fetchone()
+            if row_tuple is not None:
+                (row,) = row_tuple
+                return row
+            return 0
+
+        return await self.db_pool.runInteraction(
+            "get_media_reference_count_for_sha256", _get_reference_count_txn
         )
