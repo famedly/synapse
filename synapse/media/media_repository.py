@@ -2098,22 +2098,42 @@ class MediaRepository(AbstractMediaRepository):
             logger.info("Deleting: %r", key)
 
             # TODO: Should we delete from the backup store
+            #  Jason: Probably, we literally don't delete from it anywhere else
 
             async with self.remote_media_linearizer.queue(key):
-                full_path = self.filepaths.remote_media_filepath(origin, file_id)
-                try:
-                    os.remove(full_path)
-                except OSError as e:
-                    logger.warning("Failed to remove file: %r", full_path)
-                    if e.errno == errno.ENOENT:
-                        pass
-                    else:
-                        continue
+                paths = [self.filepaths.remote_media_filepath(origin, file_id)]
+                thumbnail_paths = [
+                    self.filepaths.remote_media_thumbnail_dir(origin, file_id)
+                ]
 
-                thumbnail_dir = self.filepaths.remote_media_thumbnail_dir(
-                    origin, file_id
+                sha256 = await self.store.get_sha_for_remote_media_id(origin, media_id)
+                associated_local_media_ids = (
+                    await self.store.get_local_media_ids_for_sha256(sha256)
                 )
-                shutil.rmtree(thumbnail_dir, ignore_errors=True)
+                associated_remote_media_ids = (
+                    await self.store.get_remote_media_ids_for_sha256(sha256)
+                )
+                # In the interest of removing media that was de-duplicated, only purge
+                # the actual media object if there are no more references to it in the
+                # database. Otherwise, the actual media id's related are irrelevant
+                if (
+                    len(associated_local_media_ids) + len(associated_remote_media_ids)
+                    <= 1
+                ):
+                    paths.append(self.filepaths.filepath_sha(sha256))
+                    thumbnail_paths.append(self.filepaths.thumbnail_sha_dir(sha256))
+
+                for full_path in paths:
+                    try:
+                        os.remove(full_path)
+                    except OSError as e:
+                        logger.warning("Failed to remove file: %r", full_path)
+                        if e.errno == errno.ENOENT:
+                            pass
+                        else:
+                            continue
+                for thumbnail_path in thumbnail_paths:
+                    shutil.rmtree(thumbnail_path, ignore_errors=True)
 
                 await self.store.delete_remote_media(origin, media_id)
                 deleted += 1
@@ -2124,10 +2144,10 @@ class MediaRepository(AbstractMediaRepository):
         self, media_ids: List[str]
     ) -> Tuple[List[str], int]:
         """
-        Delete the given local or remote media ID from this server
+        Delete the given local media ID from this server
 
         Args:
-            media_id: The media ID to delete.
+            media_ids: The list of media IDs to delete.
         Returns:
             A tuple of (list of deleted media IDs, total deleted media IDs).
         """
@@ -2142,7 +2162,7 @@ class MediaRepository(AbstractMediaRepository):
         delete_protected_media: bool = False,
     ) -> Tuple[List[str], int]:
         """
-        Delete local or remote media from this server by size and timestamp. Removes
+        Delete local media from this server by size and timestamp. Removes
         media files, any thumbnails and cached URLs.
 
         Args:
@@ -2170,7 +2190,7 @@ class MediaRepository(AbstractMediaRepository):
         self, media_ids: List[str]
     ) -> Tuple[List[str], int]:
         """
-        Delete local or remote media from this server. Removes media files,
+        Delete local media from this server. Removes media files,
         any thumbnails and cached URLs.
 
         Args:
@@ -2181,11 +2201,25 @@ class MediaRepository(AbstractMediaRepository):
         removed_media = []
         for media_id in media_ids:
             logger.info("Deleting media with ID '%s'", media_id)
-            sha256 = await self.store.get_sha_by_media_id(media_id, None)
             paths = [
                 self.filepaths.local_media_filepath(media_id),
-                self.filepaths.filepath_sha(sha256),
             ]
+            thumbnail_paths = [self.filepaths.local_media_thumbnail_dir(media_id)]
+
+            sha256 = await self.store.get_sha_for_local_media_id(media_id)
+            associated_local_media_ids = (
+                await self.store.get_local_media_ids_for_sha256(sha256)
+            )
+            associated_remote_media_ids = (
+                await self.store.get_remote_media_ids_for_sha256(sha256)
+            )
+            # In the interest of removing media that was de-duplicated, only purge
+            # the actual media object if there are no more references to it in the
+            # database. Otherwise, the actual media id's related are irrelevant
+            if len(associated_local_media_ids) + len(associated_remote_media_ids) <= 1:
+                paths.append(self.filepaths.filepath_sha(sha256))
+                thumbnail_paths.append(self.filepaths.thumbnail_sha_dir(sha256))
+
             for path in paths:
                 try:
                     os.remove(path)
@@ -2196,14 +2230,14 @@ class MediaRepository(AbstractMediaRepository):
                     else:
                         continue
 
-            thumbnail_dir = self.filepaths.local_media_thumbnail_dir(media_id)
-            thumbnail_dir_sha = self.filepaths.thumbnail_sha_dir(sha256)
-            shutil.rmtree(thumbnail_dir, ignore_errors=True)
-            shutil.rmtree(thumbnail_dir_sha, ignore_errors=True)
-
+            for thumbnail_path in thumbnail_paths:
+                shutil.rmtree(thumbnail_path, ignore_errors=True)
+            # Poorly named, this deletes media *from this server* that is somehow
+            # considered "remote". Observe the server name argument below
             await self.store.delete_remote_media(self.server_name, media_id)
 
             await self.store.delete_url_cache((media_id,))
+            # Poorly named, but this is the one that cleans out local media metadata
             await self.store.delete_url_cache_media((media_id,))
 
             removed_media.append(media_id)
