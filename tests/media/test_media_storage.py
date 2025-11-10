@@ -18,6 +18,7 @@
 # [This file includes modifications made by New Vector Limited]
 #
 #
+import hashlib
 import os
 import shutil
 import tempfile
@@ -66,10 +67,15 @@ from tests.unittest import override_config
 from tests.utils import default_config
 
 
+@parameterized_class(("use_dedupe",), [(True,), (False,)])
 class MediaStorageTests(unittest.HomeserverTestCase):
+    use_dedupe: bool
     needs_threadpool = True
 
     def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
+        """
+        "enable_local_media_storage_deduplication": False,
+        """
         self.test_dir = tempfile.mkdtemp(prefix="synapse-tests-")
         self.addCleanup(shutil.rmtree, self.test_dir)
 
@@ -77,6 +83,7 @@ class MediaStorageTests(unittest.HomeserverTestCase):
         self.secondary_base_path = os.path.join(self.test_dir, "secondary")
 
         hs.config.media.media_store_path = self.primary_base_path
+        hs.config.media.enable_local_media_storage_deduplication = self.use_dedupe
 
         storage_providers = [FileStorageProviderBackend(hs, self.secondary_base_path)]
 
@@ -85,24 +92,73 @@ class MediaStorageTests(unittest.HomeserverTestCase):
             hs, self.primary_base_path, self.filepaths, storage_providers
         )
 
-    def test_ensure_media_is_in_local_cache(self) -> None:
-        media_id = "some_media_id"
-        test_body = "Test\n"
+        self.media_id = "some_media_id"
+        self.test_body = b"Test\n"
+        self.sha256 = hashlib.sha256(self.test_body).hexdigest()
+        self.file_info = FileInfo(None, self.media_id, sha256=self.sha256)
 
-        # First we create a file that is in a storage provider but not in the
-        # local primary media store
-        rel_path = self.filepaths.local_media_filepath_rel(media_id)
+        self.expected_relative_media_id_path_fragment = (
+            self.filepaths.local_media_filepath_rel(self.media_id)
+        )
+        self.expected_relative_sha256_path_fragment = self.filepaths.filepath_sha_rel(
+            self.sha256
+        )
+
+    def write_media_to_storage_provider(self) -> str:
+        """Write a media file to the configured storage provider"""
+        # Storage providers only get to work with the provided relative directory
+        rel_path = self.expected_relative_media_id_path_fragment
         secondary_path = os.path.join(self.secondary_base_path, rel_path)
 
         os.makedirs(os.path.dirname(secondary_path))
 
-        with open(secondary_path, "w") as f:
-            f.write(test_body)
+        with open(secondary_path, "wb") as f:
+            f.write(self.test_body)
 
-        # Now we run ensure_media_is_in_local_cache, which should copy the file
-        # to the local cache.
-        file_info = FileInfo(None, media_id)
+        return secondary_path
 
+    def write_media_to_local_media_cache(self) -> str:
+        """Write a media file to the local media cache directory"""
+        if self.use_dedupe:
+            rel_path = self.expected_relative_sha256_path_fragment
+        else:
+            rel_path = self.expected_relative_media_id_path_fragment
+        primary_path = os.path.join(self.primary_base_path, rel_path)
+
+        os.makedirs(os.path.dirname(primary_path))
+
+        with open(primary_path, "wb") as f:
+            f.write(self.test_body)
+
+        return primary_path
+
+    def write_media_to_local_media_cache_fallback(self) -> str:
+        """
+        Unlike write_media_to_local_media_cache() above, this writes it to the opposite
+        path that was expected. So if de-duplication is not enabled, it is written to
+        the media ID path instead. This allows testing of flipping the switch
+        """
+        if not self.use_dedupe:
+            rel_path = self.expected_relative_sha256_path_fragment
+        else:
+            rel_path = self.expected_relative_media_id_path_fragment
+        primary_path = os.path.join(self.primary_base_path, rel_path)
+
+        os.makedirs(os.path.dirname(primary_path))
+
+        with open(primary_path, "wb") as f:
+            f.write(self.test_body)
+
+        return primary_path
+
+    def run_ensure_media_is_in_local_cache_to_completion(
+        self, file_info: FileInfo
+    ) -> str:
+        """
+        ensure_media_is_in_local_cache() runs on a dedicated thread pool, which is
+        normally disabled during testing. This TestCase has it turned on, so care must
+        be taken to make sure it finishes.
+        """
         # This uses a real blocking threadpool so we have to wait for it to be
         # actually done :/
         x = defer.ensureDeferred(
@@ -112,7 +168,22 @@ class MediaStorageTests(unittest.HomeserverTestCase):
         # Hotloop until the threadpool does its job...
         self.wait_on_thread(x)
 
-        local_path = self.get_success(x)
+        return self.get_success(x)
+
+    def test_ensure_media_is_in_local_cache(self) -> None:
+        """
+        Test ensure_media_is_in_local_cache() behavior when copying media to the local
+        cache
+        """
+        # First we create a file that is in a storage provider but not in the
+        # local primary media store
+        self.write_media_to_storage_provider()
+
+        # Now we run ensure_media_is_in_local_cache(), which should copy the file
+        # to the local cache.
+        local_path = self.run_ensure_media_is_in_local_cache_to_completion(
+            self.file_info
+        )
 
         self.assertTrue(os.path.exists(local_path))
 
@@ -122,10 +193,55 @@ class MediaStorageTests(unittest.HomeserverTestCase):
             self.primary_base_path,
         )
 
-        with open(local_path) as f:
+        with open(local_path, "rb") as f:
             body = f.read()
 
-        self.assertEqual(test_body, body)
+        self.assertEqual(self.test_body, body)
+
+    def test_fetch_media_from_local_media_cache(self) -> None:
+        """Tests that fetch_media() can retrieve media from any local media cache path"""
+        # First we create a file that is in the local primary media store based on the
+        # path dictated by the de-duplication setting
+        self.write_media_to_local_media_cache()
+        # Now we run fetch_media(), which should return a responder with the file
+        responder = self.get_success(self.media_storage.fetch_media(self.file_info))
+        assert responder is not None
+        assert isinstance(responder, FileResponder)
+        # Use the context manager, so it will close the responder for us
+        with responder:
+            responder.open_file.seek(0)
+            content = responder.open_file.read()
+            assert content == self.test_body
+
+    def test_fetch_media_from_local_media_cache_fallback(self) -> None:
+        """Test that if de-duplication is turned on and off, the media is still usable"""
+        # First we create a file that is in the local primary media store based on the
+        # inverse of the path dictated by the de-duplication setting
+        self.write_media_to_local_media_cache_fallback()
+        # Now we run fetch_media(), which should return a responder with the file
+        responder = self.get_success(self.media_storage.fetch_media(self.file_info))
+        assert responder is not None
+        assert isinstance(responder, FileResponder)
+        # Use the context manager, so it will close the responder for us
+        with responder:
+            responder.open_file.seek(0)
+            content = responder.open_file.read()
+            assert content == self.test_body
+
+    def test_fetch_media_from_storage_provider(self) -> None:
+        """Test that media in the storage provider can be served back directly"""
+        # First we create a file that is in a storage provider but not in the
+        # local primary media store
+        self.write_media_to_storage_provider()
+        # Now we run fetch_media(), which should return a responder with the file
+        responder = self.get_success(self.media_storage.fetch_media(self.file_info))
+        assert responder is not None
+        assert isinstance(responder, FileResponder)
+        # Use the context manager, so it will close the responder for us
+        with responder:
+            responder.open_file.seek(0)
+            content = responder.open_file.read()
+            assert content == self.test_body
 
 
 @attr.s(auto_attribs=True, slots=True, frozen=True)
@@ -418,15 +534,6 @@ class MediaRepoTests(unittest.HomeserverTestCase):
         self.assertEqual(channel.code, 200)
 
         return channel
-
-    def _store_media_with_path(self, file_info: FileInfo, expected_path: str) -> None:
-        ctx = self.media_storage.store_into_file(file_info)
-        (f, fname) = self.get_success(ctx.__aenter__())
-        f.write(SMALL_PNG)
-        self.get_success(ctx.__aexit__(None, None, None))
-
-        assert expected_path in fname
-        assert os.path.exists(fname), f"File does not exist: {fname}"
 
     @unittest.override_config(
         {
@@ -863,41 +970,6 @@ class MediaRepoTests(unittest.HomeserverTestCase):
 
         self.pump()
         self.assertEqual(channel.code, 200)
-
-    @unittest.override_config(
-        {
-            "enable_authenticated_media": False,
-            "enable_local_media_storage_deduplication": True,
-        }
-    )
-    def test_ensure_media_storage_is_compatible_with_sha256_path(self) -> None:
-        """Test that `ensure_media_is_in_local_cache` and `fetch_media` works with sha256 path."""
-        # Create local media with sha256 path.
-        expected_path = self.media_storage.filepaths.filepath_sha_rel(
-            sha256=SMALL_PNG_SHA256,
-        )
-        file_info = FileInfo(
-            server_name="example.com",
-            file_id=SMALL_PNG_SHA256,
-            url_cache=False,
-            sha256=SMALL_PNG_SHA256,
-        )
-        self._store_media_with_path(file_info, expected_path)
-
-        # Check if `ensure_media_is_in_local_cache` can find the media.
-        local_path = self.get_success(
-            self.media_storage.ensure_media_is_in_local_cache(file_info)
-        )
-        assert expected_path in local_path
-        assert os.path.exists(local_path), f"File does not exist: {local_path}"
-
-        # Check if `fetch_media` can fetch the media.
-        responder = self.get_success(self.media_storage.fetch_media(file_info))
-        assert responder is not None
-        assert isinstance(responder, FileResponder)
-        responder.open_file.seek(0)
-        content = responder.open_file.read()
-        assert content == SMALL_PNG
 
 
 class TestSpamCheckerLegacy:

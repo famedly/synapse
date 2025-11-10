@@ -20,7 +20,6 @@
 #
 #
 import errno
-import io
 import logging
 import os
 import shutil
@@ -168,7 +167,6 @@ class AbstractMediaRepository:
         auth_user: UserID,
         media_id: Optional[str] = None,
         restricted: bool = False,
-        sha256: Optional[str] = None,
     ) -> MXCUri:
         raise NotImplementedError(
             "Sorry Mario, your MediaRepository related function is in another castle"
@@ -764,7 +762,6 @@ class MediaRepository(AbstractMediaRepository):
         auth_user: UserID,
         media_id: Optional[str] = None,
         restricted: bool = False,
-        sha256: Optional[str] = None,
     ) -> MXCUri:
         """Create or update the content of the given media ID.
 
@@ -786,17 +783,14 @@ class MediaRepository(AbstractMediaRepository):
         if media_id is None:
             media_id = random_string(24)
 
-        # if self.use_sha256_path and media_id and not sha256:
-        #     sha256 = await self.store.get_sha_by_media_id(media_id)
-
+        sha256reader = SHA256TransparentIOReader(content)
+        # Do a read() before a hexdigest(), or the hash will not be of the complete file
+        sha256reader.read()
+        sha256 = sha256reader.hexdigest()
         file_info = FileInfo(server_name=None, file_id=media_id, sha256=sha256)
 
-        sha256reader = SHA256TransparentIOReader(content)
-        data = sha256reader.read()
-        sha256 = sha256reader.hexdigest()
-
-        # This implements all of IO as it has a passthrough
-        fname = await self.media_storage.store_file(io.BytesIO(data), file_info)
+        # store_file() has an inner function that does a seek(0) on the IO
+        fname = await self.media_storage.store_file(sha256reader.wrap(), file_info)
         should_quarantine = await self.store.get_is_hash_quarantined(sha256)
 
         logger.info("Stored local media in file %r", fname)
@@ -805,17 +799,6 @@ class MediaRepository(AbstractMediaRepository):
             logger.warning(
                 "Media has been automatically quarantined as it matched existing quarantined media"
             )
-
-        # If we enabled sha256 paths, we create a new file with sha256 path, and delete
-        # the original media_id path.
-        if self.use_sha256_path:
-            if not os.path.exists(self.filepaths.filepath_sha(sha256)):
-                file_info = FileInfo(server_name=None, file_id=media_id, sha256=sha256)
-                sha256_fname = await self.media_storage.store_file(content, file_info)
-                logger.info("Stored media in file %r", sha256_fname)
-                os.remove(fname)
-            else:
-                logger.info("File already exists in sha256 path.")
 
         # Check that the user has not exceeded any of the media upload limits.
 
@@ -873,9 +856,9 @@ class MediaRepository(AbstractMediaRepository):
             await self._generate_thumbnails(
                 server_name=None,
                 media_id=media_id,
-                file_id=sha256 if self.use_sha256_path else media_id,
+                file_id=media_id,
                 media_type=media_type,
-                sha256=sha256 if self.use_sha256_path else None,
+                sha256=sha256,
             )
         except Exception as e:
             logger.info("Failed to generate thumbnails: %s", e)
@@ -928,7 +911,6 @@ class MediaRepository(AbstractMediaRepository):
             old_media_info.media_length,
             auth_user,
             restricted=True,
-            sha256=old_media_info.sha256,
         )
         # I could not find a place this was close()'d explicitly, but this felt prudent
         io_object.close()
@@ -1301,6 +1283,8 @@ class MediaRepository(AbstractMediaRepository):
         # Failed to find the file anywhere, lets download it.
 
         try:
+            # Both of these retrieval functions will stage the file, so after they
+            # complete the migration function should be called below
             if not use_federation_endpoint:
                 media_info = await self._download_remote_file(
                     server_name,
@@ -1342,32 +1326,26 @@ class MediaRepository(AbstractMediaRepository):
         if not media_info.media_type:
             media_info = attr.evolve(media_info, media_type="application/octet-stream")
 
+        # Now that the file has been retrieved, need to see if it needs to be migrated.
+        # Should probably do this before generating thumbnails
         file_info = FileInfo(
-            server_name=server_name,
-            file_id=media_info.sha256
-            if self.use_sha256_path and media_info.sha256
-            else file_id,
-            sha256=media_info.sha256,
+            server_name=server_name, file_id=file_id, sha256=media_info.sha256
         )
+        await self.media_storage.maybe_move_media_file_from_id_to_sha256_path(file_info)
+
         # We generate thumbnails even if another process downloaded the media
         # as a) it's conceivable that the other download request dies before it
         # generates thumbnails, but mainly b) we want to be sure the thumbnails
         # have finished being generated before responding to the client,
         # otherwise they'll request thumbnails and get a 404 if they're not
         # ready yet.
-        if self.use_sha256_path:
-            assert media_info.sha256 is not None
-            await self._generate_thumbnails(
-                server_name=server_name,
-                media_id=media_id,
-                file_id=media_info.sha256,  # Passing over sha256 for file_id if sha256 path is enabled.
-                media_type=media_info.media_type,
-                sha256=media_info.sha256,
-            )
-        else:
-            await self._generate_thumbnails(
-                server_name, media_id, file_id, media_info.media_type
-            )
+        await self._generate_thumbnails(
+            server_name=server_name,
+            media_id=media_id,
+            file_id=file_id,
+            media_type=media_info.media_type,
+            sha256=media_info.sha256,
+        )
 
         responder = await self.media_storage.fetch_media(file_info)
         return responder, media_info
@@ -1474,7 +1452,7 @@ class MediaRepository(AbstractMediaRepository):
                 time_now_ms=time_now_ms,
                 upload_name=upload_name,
                 media_length=length,
-                filesystem_id=sha256 if self.use_sha256_path else file_id,
+                filesystem_id=file_id,
                 sha256=sha256,
             )
 
@@ -1485,14 +1463,6 @@ class MediaRepository(AbstractMediaRepository):
         else:
             authenticated = False
 
-        # If sha256 paths are enabled, rename the file to sha256 path and delete the original media_id path.
-        if self.use_sha256_path:
-            rel_path = self.filepaths.filepath_sha(sha256)
-            abs_path = os.path.join(self.hs.config.media.media_store_path, rel_path)
-            os.makedirs(os.path.dirname(abs_path), exist_ok=True)
-            os.rename(fname, abs_path)
-            os.remove(fname)
-
         return RemoteMedia(
             media_origin=server_name,
             media_id=media_id,
@@ -1500,7 +1470,7 @@ class MediaRepository(AbstractMediaRepository):
             media_length=length,
             upload_name=upload_name,
             created_ts=time_now_ms,
-            filesystem_id=sha256 if self.use_sha256_path else file_id,
+            filesystem_id=file_id,
             last_access_ts=time_now_ms,
             quarantined_by=None,
             authenticated=authenticated,
@@ -1642,7 +1612,7 @@ class MediaRepository(AbstractMediaRepository):
                 time_now_ms=time_now_ms,
                 upload_name=upload_name,
                 media_length=length,
-                filesystem_id=sha256 if self.use_sha256_path else file_id,
+                filesystem_id=file_id,
                 sha256=sha256,
                 restricted=restricted,
             )
@@ -1668,14 +1638,6 @@ class MediaRepository(AbstractMediaRepository):
         else:
             authenticated = False
 
-        # If sha256 paths are enabled, rename the file to sha256 path and delete the original media_id path.
-        if self.use_sha256_path:
-            rel_path = self.filepaths.filepath_sha(sha256)
-            abs_path = os.path.join(self.hs.config.media.media_store_path, rel_path)
-            os.makedirs(os.path.dirname(abs_path), exist_ok=True)
-            os.rename(fname, abs_path)
-            os.remove(fname)
-
         return RemoteMedia(
             media_origin=server_name,
             media_id=media_id,
@@ -1683,7 +1645,7 @@ class MediaRepository(AbstractMediaRepository):
             media_length=length,
             upload_name=upload_name,
             created_ts=time_now_ms,
-            filesystem_id=sha256 if self.use_sha256_path else file_id,
+            filesystem_id=file_id,
             last_access_ts=time_now_ms,
             quarantined_by=None,
             authenticated=authenticated,
@@ -1931,7 +1893,7 @@ class MediaRepository(AbstractMediaRepository):
 
         file_info = FileInfo(
             server_name,
-            file_id,  # This will be the sha256 if sha256 path is enabled. Otherwise, it will be the file_id.
+            file_id,
             url_cache=url_cache,
             sha256=sha256,
         )
@@ -2014,9 +1976,7 @@ class MediaRepository(AbstractMediaRepository):
 
                 file_info = FileInfo(
                     server_name=server_name,
-                    file_id=sha256
-                    if self.use_sha256_path and sha256
-                    else file_id,  # Saving the thumbnail with sha256 path if sha256 path is enabled.
+                    file_id=file_id,
                     url_cache=url_cache,
                     thumbnail=ThumbnailInfo(
                         width=t_width,
@@ -2138,22 +2098,23 @@ class MediaRepository(AbstractMediaRepository):
             logger.info("Deleting: %r", key)
 
             # TODO: Should we delete from the backup store
+            #  Jason: Probably, we literally don't delete from it anywhere else
 
             async with self.remote_media_linearizer.queue(key):
-                full_path = self.filepaths.remote_media_filepath(origin, file_id)
-                try:
-                    os.remove(full_path)
-                except OSError as e:
-                    logger.warning("Failed to remove file: %r", full_path)
-                    if e.errno == errno.ENOENT:
-                        pass
-                    else:
-                        continue
+                paths = [self.filepaths.remote_media_filepath(origin, file_id)]
+                thumbnail_paths = [
+                    self.filepaths.remote_media_thumbnail_dir(origin, file_id)
+                ]
 
-                thumbnail_dir = self.filepaths.remote_media_thumbnail_dir(
-                    origin, file_id
-                )
-                shutil.rmtree(thumbnail_dir, ignore_errors=True)
+                sha256 = await self.store.get_sha_for_remote_media_id(origin, media_id)
+                # In the interest of removing media that was de-duplicated, only purge
+                # the actual media object if there are no more references to it in the
+                # database.
+                if await self.store.get_media_reference_count_for_sha256(sha256) <= 1:
+                    paths.append(self.filepaths.filepath_sha(sha256))
+                    thumbnail_paths.append(self.filepaths.thumbnail_sha_dir(sha256))
+
+                _remove_media_files(paths, thumbnail_paths)
 
                 await self.store.delete_remote_media(origin, media_id)
                 deleted += 1
@@ -2164,10 +2125,10 @@ class MediaRepository(AbstractMediaRepository):
         self, media_ids: List[str]
     ) -> Tuple[List[str], int]:
         """
-        Delete the given local or remote media ID from this server
+        Delete the given local media ID from this server
 
         Args:
-            media_id: The media ID to delete.
+            media_ids: The list of media IDs to delete.
         Returns:
             A tuple of (list of deleted media IDs, total deleted media IDs).
         """
@@ -2182,7 +2143,7 @@ class MediaRepository(AbstractMediaRepository):
         delete_protected_media: bool = False,
     ) -> Tuple[List[str], int]:
         """
-        Delete local or remote media from this server by size and timestamp. Removes
+        Delete local media from this server by size and timestamp. Removes
         media files, any thumbnails and cached URLs.
 
         Args:
@@ -2210,7 +2171,7 @@ class MediaRepository(AbstractMediaRepository):
         self, media_ids: List[str]
     ) -> Tuple[List[str], int]:
         """
-        Delete local or remote media from this server. Removes media files,
+        Delete local media from this server. Removes media files,
         any thumbnails and cached URLs.
 
         Args:
@@ -2221,31 +2182,53 @@ class MediaRepository(AbstractMediaRepository):
         removed_media = []
         for media_id in media_ids:
             logger.info("Deleting media with ID '%s'", media_id)
-            sha256 = await self.store.get_sha_by_media_id(media_id, None)
             paths = [
                 self.filepaths.local_media_filepath(media_id),
-                self.filepaths.filepath_sha(sha256),
             ]
-            for path in paths:
-                try:
-                    os.remove(path)
-                except OSError as e:
-                    logger.warning("Failed to remove file: %r: %s", path, e)
-                    if e.errno == errno.ENOENT:
-                        pass
-                    else:
-                        continue
+            thumbnail_paths = [self.filepaths.local_media_thumbnail_dir(media_id)]
 
-            thumbnail_dir = self.filepaths.local_media_thumbnail_dir(media_id)
-            thumbnail_dir_sha = self.filepaths.thumbnail_sha_dir(sha256)
-            shutil.rmtree(thumbnail_dir, ignore_errors=True)
-            shutil.rmtree(thumbnail_dir_sha, ignore_errors=True)
+            sha256 = await self.store.get_sha_for_local_media_id(media_id)
+            # In the interest of removing media that was de-duplicated, only purge
+            # the actual media object if there are no more references to it in the
+            # database.
+            if await self.store.get_media_reference_count_for_sha256(sha256) <= 1:
+                paths.append(self.filepaths.filepath_sha(sha256))
+                thumbnail_paths.append(self.filepaths.thumbnail_sha_dir(sha256))
 
+            _remove_media_files(paths, thumbnail_paths)
+
+            # Poorly named, this deletes media *from this server* that is somehow
+            # considered "remote". Observe the server name argument below
             await self.store.delete_remote_media(self.server_name, media_id)
 
             await self.store.delete_url_cache((media_id,))
+            # Poorly named, but this is the one that cleans out local media metadata
             await self.store.delete_url_cache_media((media_id,))
 
             removed_media.append(media_id)
 
         return removed_media, len(removed_media)
+
+
+def _remove_media_files(paths: List[str], thumbnail_paths: List[str]) -> None:
+    """
+    Remove the select files from the filesystem. IO related errors, such as non-existent
+    files, will be ignored.
+
+    Args:
+        paths: The absolute path to a specific file to be removed
+        thumbnail_paths: The absolute path to a specific directory. The entire directory
+            will be removed.
+    """
+    for path in paths:
+        try:
+            os.remove(path)
+        except OSError as e:
+            logger.warning("Failed to remove file: %r: %s", path, e)
+            if e.errno == errno.ENOENT:
+                pass
+            else:
+                continue
+
+    for thumbnail_path in thumbnail_paths:
+        shutil.rmtree(thumbnail_path, ignore_errors=True)
