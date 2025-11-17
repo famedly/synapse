@@ -22,6 +22,10 @@ paths you mount any additional Python packages at.
 No significant changes since 1.141.0rc2.
 
 
+### Famedly additions for v1.141.0_1
+
+- update `poetry.lock` file (FrenchgGithubUser)
+- disable dependabot [4560a77](https://github.com/famedly/synapse/commit/4560a77b154e039ee56ed0703c544967f2dca2f4) (FrenchgGithubUser)
 
 
 # Synapse 1.141.0rc2 (2025-10-28)
