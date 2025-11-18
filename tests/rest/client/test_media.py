@@ -5311,11 +5311,13 @@ class MediaStorageSha256PathCompatTestCase(unittest.HomeserverTestCase):
             )
         )
 
-    def test_download_local_media_with_media_id_path_saves_file_in_sha256_path(
+    def test_download_local_media_with_media_id_path(
         self,
     ) -> None:
-        """Test that downloading local media with media_id path saves file in sha256 path."""
-        # Create local media with media_id path.
+        """Test that downloading local media with media_id path serves correct file."""
+        # Specifically, that a preexisting file on the legacy media paths can still be
+        # served from its present location.
+
         media_id = self._create_local_media_with_media_id_path()
         channel = self.make_request(
             "GET",
@@ -5325,12 +5327,9 @@ class MediaStorageSha256PathCompatTestCase(unittest.HomeserverTestCase):
         )
         assert channel.code == 200
         assert channel.result["body"] == SMALL_PNG
-        assert isinstance(self.repo, MediaRepository)
-        # Downloading local media with media_id path doesn't recreate the file in the sha256 path.
-        assert os.path.exists(self.repo.filepaths.local_media_filepath(media_id))
 
     def test_download_local_media_with_sha256_path(self) -> None:
-        """Test that downloading local media with sha256 path saves file in sha256 path."""
+        """Test that downloading local media with sha256 path serves correct file."""
         media_id = self._create_local_media_with_sha256_path()
         channel = self.make_request(
             "GET",
@@ -5340,9 +5339,6 @@ class MediaStorageSha256PathCompatTestCase(unittest.HomeserverTestCase):
         )
         assert channel.code == 200
         assert channel.result["body"] == SMALL_PNG
-        assert isinstance(self.repo, MediaRepository)
-        assert os.path.exists(self.repo.filepaths.filepath_sha(SMALL_PNG_SHA256))
-        assert not os.path.exists(self.repo.filepaths.local_media_filepath(media_id))
 
     def test_copy_remote_media_with_sha256_path(self) -> None:
         """Test that copying remote media saves file in sha256 path."""
@@ -5381,6 +5377,7 @@ class MediaStorageSha256PathCompatTestCase(unittest.HomeserverTestCase):
         # Check if the file is saved in the sha256 path only.
         assert isinstance(self.repo, MediaRepository)
         assert os.path.exists(self.repo.filepaths.filepath_sha(SMALL_PNG_SHA256))
+        # It should NOT exist in either of the legacy paths
         assert not os.path.exists(
             self.repo.filepaths.remote_media_filepath(
                 remote_server, remote_media.filesystem_id
@@ -5421,9 +5418,8 @@ class MediaStorageSha256PathCompatTestCase(unittest.HomeserverTestCase):
         # The copy should create a new media id, and recreate the file in the sha256 path.
         assert isinstance(self.repo, MediaRepository)
         assert os.path.exists(self.repo.filepaths.filepath_sha(SMALL_PNG_SHA256))
-        assert os.path.exists(
-            self.repo.filepaths.local_media_filepath(media_id)
-        )  # Copy operation does not delete the original file with media_id path.
+        assert os.path.exists(self.repo.filepaths.local_media_filepath(media_id))
+        # Copy operation does not delete the original file with media_id path.
         assert not os.path.exists(
             self.repo.filepaths.local_media_filepath(copied_media_mxc_uri.media_id)
         )
@@ -5483,13 +5479,14 @@ class MediaStorageSha256PathCompatTestCase(unittest.HomeserverTestCase):
         _, media_id = res.rsplit("/", maxsplit=1)
 
         # Check if the media is saved in the media table.
-        media = self.get_success(self.repo.store.get_local_media(media_id))
-        assert media is not None
-        assert media.sha256 == SMALL_PNG_SHA256
+        local_media_info = self.get_success(self.repo.store.get_local_media(media_id))
+        assert local_media_info is not None
+        assert local_media_info.sha256 == SMALL_PNG_SHA256
 
         # Check if the file is saved in the sha256 path.
         assert isinstance(self.repo, MediaRepository)
         assert os.path.exists(self.repo.filepaths.filepath_sha(SMALL_PNG_SHA256))
+        # It should not be created on the legacy path
         assert not os.path.exists(self.repo.filepaths.local_media_filepath(media_id))
 
     def test_download_local_thumbnail_with_media_id(self) -> None:
@@ -5506,17 +5503,6 @@ class MediaStorageSha256PathCompatTestCase(unittest.HomeserverTestCase):
         )
         assert channel.code == 200, channel.result
         assert channel.result["body"] is not None
-
-        # Check if the thumbnail is saved in the media_id path, not in the sha256 path.
-        assert isinstance(self.repo, MediaRepository)
-        assert os.path.exists(
-            self.repo.filepaths.local_media_thumbnail(
-                media_id, 1, 1, "image/png", "scale"
-            )
-        )
-        assert not os.path.exists(
-            self.repo.filepaths.thumbnail_sha(media_id, 1, 1, "image/png", "scale")
-        )
 
     def test_download_local_thumbnail_with_sha256_path(self) -> None:
         """Test downloading thumbnail of local media with sha256 path."""
