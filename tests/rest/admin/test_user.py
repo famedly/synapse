@@ -21,6 +21,7 @@
 
 import hashlib
 import hmac
+import io
 import json
 import os
 import urllib.parse
@@ -45,6 +46,7 @@ from synapse.api.constants import (
 from synapse.api.errors import Codes, HttpResponseException, ResourceLimitError
 from synapse.api.room_versions import RoomVersions
 from synapse.media.filepath import MediaFilePaths
+from synapse.media.media_repository import MediaRepository
 from synapse.rest import admin
 from synapse.rest.client import (
     devices,
@@ -5260,6 +5262,7 @@ class UserRedactionTestCase(unittest.HomeserverTestCase):
     ]
 
     def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
+        self.media_repo = hs.get_media_repository()
         self.admin = self.register_user("thomas", "pass", True)
         self.admin_tok = self.login("thomas", "pass")
 
@@ -5713,6 +5716,94 @@ class UserRedactionTestCase(unittest.HomeserverTestCase):
             redaction = redaction_tuple[1]
             if redaction["sender"] != self.admin:
                 self.fail("Redaction was not issued by admin account")
+
+    @override_config({"experimental_features": {"msc3911_enabled": True}})
+    def test_user_redaction_deletes_attached_media(self) -> None:
+        """
+        Tests that when a user is redacted, all the media attached to user's events are deleted.
+        """
+        originals = []
+        media_ids = []
+        for rm in [self.rm1, self.rm2, self.rm3]:
+            join = self.helper.join(rm, self.bad_user, tok=self.bad_user_tok)
+            originals.append(join["event_id"])
+            for _ in range(3):
+                mxc_uri = self.get_success(
+                    self.media_repo.create_or_update_content(
+                        "image/png",
+                        "test_png_upload",
+                        io.BytesIO(SMALL_PNG),
+                        67,
+                        UserID.from_string(self.bad_user),
+                        restricted=True,
+                    )
+                )
+
+                assert mxc_uri is not None
+                assert isinstance(self.media_repo, MediaRepository)
+                media_path = self.media_repo.filepaths.local_media_filepath(
+                    mxc_uri.media_id
+                )
+                self.assertTrue(os.path.exists(media_path))
+                media_ids.append(mxc_uri.media_id)
+                image = {
+                    "body": "test_png_upload",
+                    "info": {"h": 1, "mimetype": "image/png", "size": 67, "w": 1},
+                    "msgtype": "m.image",
+                    "url": str(mxc_uri),
+                }
+                res = self.helper.send_event(
+                    rm,
+                    "m.room.message",
+                    image,
+                    tok=self.bad_user_tok,
+                    expect_code=200,
+                    attach_media_mxc=str(mxc_uri),
+                )
+                assert "event_id" in res
+                originals.append(res["event_id"])
+
+                media = self.get_success(self.store.get_local_media(mxc_uri.media_id))
+                assert media is not None
+                assert media.attachments is not None
+                assert media.attachments.event_id == res["event_id"]
+
+        # Redact user
+        channel = self.make_request(
+            "POST",
+            f"/_synapse/admin/v1/user/{self.bad_user}/redact",
+            content={"rooms": []},
+            access_token=self.admin_tok,
+        )
+        self.assertEqual(channel.code, 200)
+
+        matched = []
+        for rm in [self.rm1, self.rm2, self.rm3]:
+            filter = json.dumps({"types": [EventTypes.Redaction]})
+            channel = self.make_request(
+                "GET",
+                f"rooms/{rm}/messages?filter={filter}&limit=50",
+                access_token=self.admin_tok,
+            )
+            self.assertEqual(channel.code, 200)
+
+            for event in channel.json_body["chunk"]:
+                for event_id in originals:
+                    if (
+                        event["type"] == "m.room.redaction"
+                        and event["redacts"] == event_id
+                    ):
+                        matched.append(event_id)
+        self.assertEqual(len(matched), len(originals))
+
+        # Check if the media is deleted from storage.
+        for media_id in media_ids:
+            media = self.get_success(self.store.get_local_media(media_id))
+            assert media is None
+            assert isinstance(self.media_repo, MediaRepository)
+            assert not os.path.exists(
+                self.media_repo.filepaths.local_media_filepath(media_id)
+            )
 
 
 class UserRedactionBackgroundTaskTestCase(BaseMultiWorkerStreamTestCase):

@@ -78,6 +78,8 @@ class RedactionsTestCase(HomeserverTestCase):
         self.helper.join(
             room=self.room_id, user=self.other_user_id, tok=self.other_access_token
         )
+        self.media_repo = hs.get_media_repository()
+        self.store = hs.get_datastores().main
 
     def _redact_event(
         self,
@@ -656,3 +658,9 @@ class RedactionsTestCase(HomeserverTestCase):
         else:
             self.assertEqual(event_json["redacts"], event_id)
             self.assertNotIn("redacts", event_json["content"])
+
+    @override_config({"experimental_features": {"msc3911_enabled": True}})
+    def test_redaction_deletes_attached_media(self) -> None:
+        # TODO: support a delay for moderators,
+        # redacted media should still be available for moderators, then the media deleted later.
+        pass

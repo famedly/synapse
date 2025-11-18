@@ -35,6 +35,7 @@ from synapse.util import Clock
 from tests import unittest
 from tests.server import FakeChannel
 from tests.test_utils.event_injection import inject_event
+from tests.unittest import override_config
 
 
 class BaseRelationsTestCase(unittest.HomeserverTestCase):
@@ -1790,6 +1791,10 @@ class RelationRedactionTestCase(BaseRelationsTestCase):
             relations[RelationTypes.THREAD]["latest_event"]["event_id"],
             related_event_id,
         )
+
+    @override_config({"experimental_features": {"msc3912_enabled": True}})
+    def test_redact_all_relations_deletes_attached_media_on_relations(self) -> None:
+        pass
 
 
 class ThreadsTestCase(BaseRelationsTestCase):

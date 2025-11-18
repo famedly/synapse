@@ -504,6 +504,11 @@ class AdminHandler:
                         prev_event_ids=[event.event_id],
                         ratelimit=False,
                     )
+                    media_ids = await self._store.get_media_ids_attached_to_event(
+                        event.event_id
+                    )
+                    media_repository = self.hs.get_media_repository()
+                    await media_repository.delete_local_media_ids(media_ids)
                 except Exception as ex:
                     logger.info(
                         "Redaction of event %s failed due to: %s", event.event_id, ex
