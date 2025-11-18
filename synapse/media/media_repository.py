@@ -101,6 +101,7 @@ UPDATE_RECENTLY_ACCESSED_TS = 60 * 1000  # 1 minute
 # How often to run the background job to check for local and remote media
 # that should be purged according to the configured media retention settings.
 MEDIA_RETENTION_CHECK_PERIOD_MS = 60 * 60 * 1000  # 1 hour
+PENDING_MEDIA_CLEANUP_INTERVAL_MS = 60 * 60 * 1000  # 1 hour
 
 
 class AbstractMediaRepository:
@@ -643,6 +644,11 @@ class MediaRepository(AbstractMediaRepository):
             key=lambda limit: limit.time_period_ms, reverse=True
         )
 
+        if self.hs.config.experimental.msc3911_enabled_media_retention:
+            self.clock.looping_call(
+                self._pending_media_cleanup, PENDING_MEDIA_CLEANUP_INTERVAL_MS
+            )
+
     def _start_update_recently_accessed(self) -> Deferred:
         return run_as_background_process(
             "update_recently_accessed_media", self._update_recently_accessed
@@ -663,6 +669,11 @@ class MediaRepository(AbstractMediaRepository):
         await self.store.update_cached_last_access_time(
             local_media, remote_media, self.clock.time_msec()
         )
+
+    async def _pending_media_cleanup(self) -> None:
+        pending_media_ids = await self.store.get_pending_media_ids()
+        if pending_media_ids:
+            await self.delete_local_media_ids(pending_media_ids)
 
     def mark_recently_accessed(self, server_name: Optional[str], media_id: str) -> None:
         """Mark the given media as recently accessed.
