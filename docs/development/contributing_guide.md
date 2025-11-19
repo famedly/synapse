@@ -316,7 +316,7 @@ The following command will let you run the integration test with the most common
 configuration:
 
 ```sh
-$ docker run --rm -it -v /path/where/you/have/cloned/the/repository\:/src:ro -v /path/to/where/you/want/logs\:/logs matrixdotorg/sytest-synapse:bullseye
+$ docker run --rm -it -v /path/where/you/have/cloned/the/repository\:/src:ro -v /path/to/where/you/want/logs\:/logs matrixdotorg/sytest-synapse:bookworm
 ```
 (Note that the paths must be full paths! You could also write `$(realpath relative/path)` if needed.)
 
@@ -328,9 +328,9 @@ This configuration should generally cover your needs.
 For more details about other configurations, see the [Docker-specific documentation in the SyTest repo](https://github.com/matrix-org/sytest/blob/develop/docker/README.md).
 
 
-## Run the integration tests ([Complement](https://github.com/matrix-org/complement)).
+## Run the integration tests ([Complement](https://github.com/famedly/complement)).
 
-[Complement](https://github.com/matrix-org/complement) is a suite of black box tests that can be run on any homeserver implementation. It can also be thought of as end-to-end (e2e) tests.
+[Complement](https://github.com/famedly/complement) is a suite of black box tests that can be run on any homeserver implementation. It can also be thought of as end-to-end (e2e) tests. This is our own fork of complement, the upstream repository owned by matrix-org is [here](https://github.com/matrix-org/complement)
 
 It's often nice to develop on Synapse and write Complement tests at the same time.
 Here is how to run your local Synapse checkout against your local Complement checkout.
@@ -409,72 +409,17 @@ To prepare a Pull Request, please:
 4. on GitHub, [create the Pull Request](https://docs.github.com/en/github/collaborating-with-issues-and-pull-requests/creating-a-pull-request);
 5. that's it for now, a non-draft pull request will automatically request review from the team;
 
+
 ## Changelog
 
-All changes, even minor ones, need a corresponding changelog / newsfragment
-entry. These are managed by [Towncrier](https://github.com/twisted/towncrier).
+Changelog updates are handled during the release process. You don't need to edit `CHANGES.md` yourself.
 
-To create a changelog entry, make a new file in the `changelog.d` directory named
-in the format of `PRnumber.type`. The type can be one of the following:
-
-* `feature`
-* `bugfix`
-* `docker` (for updates to the Docker image)
-* `doc` (for updates to the documentation)
-* `removal` (also used for deprecations)
-* `misc` (for internal-only changes)
-
-This file will become part of our [changelog](
-https://github.com/famedly/synapse/blob/master/CHANGES.md) at the next
-release, so the content of the file should be a short description of your
-change in the same style as the rest of the changelog. The file can contain Markdown
-formatting, and must end with a full stop (.) or an exclamation mark (!) for
-consistency.
-
-Adding credits to the changelog is encouraged, we value your
-contributions and would like to have you shouted out in the release notes!
-
-For example, a fix in PR #1234 would have its changelog entry in
-`changelog.d/1234.bugfix`, and contain content like:
-
-> The security levels of Florbs are now validated when received
-> via the `/federation/florb` endpoint. Contributed by Jane Matrix.
-
-If there are multiple pull requests involved in a single bugfix/feature/etc, then the
-content for each `changelog.d` file and file extension should be the same. Towncrier
-will merge the matching files together into a single changelog entry when we come to
-release.
-
-### How do I know what to call the changelog file before I create the PR?
-
-Obviously, you don't know if you should call your newsfile
-`1234.bugfix` or `5678.bugfix` until you create the PR, which leads to a
-chicken-and-egg problem.
-
-There are two options for solving this:
-
-1. Open the PR without a changelog file, see what number you got, and *then*
-   add the changelog file to your branch, or:
-
-1. Look at the [list of all
-   issues/PRs](https://github.com/famedly/synapse/issues?q=), add one to the
-   highest number you see, and quickly open the PR before somebody else claims
-   your number.
-
-   [This
-   script](https://github.com/richvdh/scripts/blob/master/next_github_number.sh)
-   might be helpful if you find yourself doing this a lot.
-
-Sorry, we know it's a bit fiddly, but it's *really* helpful for us when we come
-to put together a release!
 
 ### Debian changelog
 
-Changes which affect the debian packaging files (in `debian`) are an
-exception to the rule that all changes require a `changelog.d` file.
-
-In this case, you will need to add an entry to the debian changelog for the
-next release. For this, run the following command:
+If your changes affect the debian packaging files (in `debian`), 
+you will need to add an entry to the debian changelog for the next release. 
+For this, run the following command:
 
 ```
 dch
@@ -484,11 +429,6 @@ This will make up a new version number (if there isn't already an unreleased
 version in flight), and open an editor where you can add a new changelog entry.
 (Our release process will ensure that the version number and maintainer name is
 corrected for the release.)
-
-If your change affects both the debian packaging *and* files outside the debian
-directory, you will need both a regular newsfragment *and* an entry in the
-debian changelog. (Though typically such changes should be submitted as two
-separate pull requests.)
 
 ## Sign off
 
