@@ -5,6 +5,8 @@
 - Fixed a bug introduced in v1.142.0 preventing subpaths in MAS endpoints from working. ([\#19186](https://github.com/element-hq/synapse/issues/19186))
 
 
+### Famedly additions for v1.142.1_1
+- docs: update contributing guidelines ([\#209](https://github.com/famedly/synapse/pull/209)) (FrenchGithubUser)
 
 
 # Synapse 1.142.0 (2025-11-11)
