@@ -237,7 +237,7 @@ class FederationRestrictedMediaDownloadsTest(unittest.FederatingHomeserverTestCa
 
     def test_restricted_media_download_with_restrictions_field(self) -> None:
         """
-        Test that a federation download media is request can succeed and is shaped as
+        Test that a federation download media request can succeed and is shaped as
         expected.
         """
         content = io.BytesIO(SMALL_PNG)
