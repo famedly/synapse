@@ -506,14 +506,10 @@ class CopyRestrictedResourceReplicationTestCase(BaseMultiWorkerStreamTestCase):
     """
 
     servlets = [
-        # media.register_servlets,
         login.register_servlets,
         admin.register_servlets,
         room.register_servlets,
     ]
-
-    # def make_homeserver(self, reactor: MemoryReactor, clock: Clock) -> HomeServer:
-    #     return self.setup_test_homeserver(config=config)
 
     def default_config(self) -> Dict[str, Any]:
         config = super().default_config()
@@ -531,7 +527,6 @@ class CopyRestrictedResourceReplicationTestCase(BaseMultiWorkerStreamTestCase):
         return config
 
     def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
-        # self.media_repo = hs.get_media_repository()
         self.profile_handler = self.hs.get_profile_handler()
         self.user = self.register_user("user", "testpass")
         self.user_tok = self.login("user", "testpass")

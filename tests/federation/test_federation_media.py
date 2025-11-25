@@ -22,6 +22,8 @@ import json
 import os
 import shutil
 import tempfile
+from typing import Dict, Optional
+from unittest.mock import AsyncMock, Mock
 
 from twisted.test.proto_helpers import MemoryReactor
 
@@ -31,11 +33,14 @@ from synapse.media.storage_provider import (
     FileStorageProviderBackend,
     StorageProviderWrapper,
 )
-from synapse.rest.client import login
+from synapse.rest import admin
+from synapse.rest.client import login, media
 from synapse.server import HomeServer
 from synapse.storage.database import LoggingTransaction
+from synapse.storage.databases.main.media_repository import MediaRestrictions
 from synapse.types import JsonDict, UserID
 from synapse.util import Clock, json_encoder
+from synapse.util.stringutils import random_string
 
 from tests import unittest
 from tests.media.test_media_storage import small_png
@@ -191,9 +196,14 @@ class FederationMediaDownloadsTest(unittest.FederatingHomeserverTestCase):
 
 
 class FederationRestrictedMediaDownloadsTest(unittest.FederatingHomeserverTestCase):
-    servlets = [
-        login.register_servlets,
-    ]
+    """
+    Test that answering a federation download media request behaves appropriately
+
+    More specifically, test that:
+    * downloads are achieved if restrictions are set
+    * downloads are blocked if restrictions are not set
+    * downloads are blocked if restrictions are malformed
+    """
 
     def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
         super().prepare(reactor, clock, hs)
@@ -226,6 +236,10 @@ class FederationRestrictedMediaDownloadsTest(unittest.FederatingHomeserverTestCa
         return config
 
     def test_restricted_media_download_with_restrictions_field(self) -> None:
+        """
+        Test that a federation download media request can succeed and is shaped as
+        expected.
+        """
         content = io.BytesIO(SMALL_PNG)
         content_uri = self.get_success(
             self.media_repo.create_or_update_content(
@@ -281,6 +295,13 @@ class FederationRestrictedMediaDownloadsTest(unittest.FederatingHomeserverTestCa
         self.assertTrue(found_file)
 
     def test_restricted_media_download_without_restrictions_field_fails(self) -> None:
+        """
+        Test that restricted media with no restrictions defined is denied over federation
+        """
+        # More specifically, restricted is marked True in the database, but the
+        # associated table of attachments has no entries. Do not confuse this with the
+        # potential of restricted being True, but the restrictions being defined but
+        # empty(as `{}`)
         content = io.BytesIO(SMALL_PNG)
         content_uri = self.get_success(
             self.media_repo.create_or_update_content(
@@ -542,3 +563,116 @@ class FederationRestrictedThumbnailTest(unittest.FederatingHomeserverTestCase):
         # Check that the png file exists and matches the expected scaled bytes
         found_file = any(small_png.expected_scaled in field for field in stripped_bytes)
         self.assertTrue(found_file)
+
+
+class FederationClientDownloadTestCase(unittest.HomeserverTestCase):
+    """
+    Test that an outgoing remote request for federation media is correctly parsed and
+    inserted into the local database
+    """
+
+    test_image = small_png
+    headers = {
+        b"Content-Length": [b"%d" % (len(test_image.data))],
+        b"Content-Type": [test_image.content_type],
+        b"Content-Disposition": [b"inline"],
+    }
+
+    servlets = [
+        media.register_servlets,
+        login.register_servlets,
+        admin.register_servlets,
+    ]
+
+    def make_homeserver(self, reactor: MemoryReactor, clock: Clock) -> HomeServer:
+        # Mock out the homeserver's MatrixFederationHttpClient
+        client = Mock()
+        federation_get_file = AsyncMock()
+        client.federation_get_file = federation_get_file
+        self.fed_client_mock = federation_get_file
+
+        hs = self.setup_test_homeserver(federation_http_client=client)
+
+        return hs
+
+    def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
+        self.store = hs.get_datastores().main
+        self.media_repo = hs.get_media_repository()
+
+        self.remote_server = "example.com"
+        # mapping of media_id -> byte string of the json with the restrictions
+        self.media_id_data: Dict[str, bytes] = {}
+
+        self.user = self.register_user("user", "pass")
+        self.tok = self.login("user", "pass")
+
+    def generate_remote_media_id_and_restrictions(
+        self, json_dict_response: Optional[JsonDict] = None
+    ) -> str:
+        """
+        Create a mocked remote media to retrieve
+
+        Args:
+            json_dict_response: The attachments object that is included in the multipart
+                response received from federation
+        """
+        media_id = random_string(24)
+        byte_string = b"{}"
+        if json_dict_response:
+            byte_string = json_encoder.encode(json_dict_response).encode()
+
+        self.media_id_data[media_id] = byte_string
+        return media_id
+
+    def make_request_for_media(
+        self, json_dict_response: Optional[JsonDict] = None, expected_code: int = 200
+    ) -> str:
+        """
+        Place a request to a (mocked) remote server. The request being placed is
+        actually to the local server, but redirects to the remote to retrieve the media.
+        This should insert the json part of the response automatically into the database
+        for us
+        """
+        # Generate media id and restrictions based on SMALL_PNG
+        media_id = self.generate_remote_media_id_and_restrictions(json_dict_response)
+        self.fed_client_mock.return_value = (
+            67,
+            self.headers,
+            self.media_id_data[media_id],
+        )
+
+        channel = self.make_request(
+            "GET",
+            f"/_matrix/client/v1/media/download/{self.remote_server}/{media_id}",
+            shorthand=False,
+            access_token=self.tok,
+        )
+
+        self.assertEqual(channel.code, expected_code)
+
+        return media_id
+
+    def test_downloading_remote_media_with_restrictions_is_in_database(self) -> None:
+        """
+        Test that remote media with restrictions correctly is inserted to the database
+        """
+        # Note the unstable prefix is filtered out properly before persistence
+        media_id = self.make_request_for_media(
+            {"org.matrix.msc3911.restrictions": {"profile_user_id": "@bob:example.com"}}
+        )
+        restrictions = self.get_success(
+            self.store.get_media_restrictions(self.remote_server, media_id)
+        )
+        assert isinstance(restrictions, MediaRestrictions)
+        assert restrictions.profile_user_id is not None
+        assert restrictions.profile_user_id.to_string() == "@bob:example.com"
+
+    def test_downloading_remote_media_with_no_restrictions_does_not_save_to_db(
+        self,
+    ) -> None:
+        """Test that remote media with no restrictions correctly skips a database entry"""
+        media_id = self.make_request_for_media()
+        restrictions = self.get_success(
+            self.store.get_media_restrictions(self.remote_server, media_id)
+        )
+        assert restrictions is None

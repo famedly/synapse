@@ -22,7 +22,6 @@ from typing import Optional
 from matrix_common.types.mxc_uri import MXCUri
 
 from twisted.internet.testing import MemoryReactor
-from twisted.web.resource import Resource
 
 from synapse.api.constants import (
     EventContentFields,
@@ -81,11 +80,6 @@ class RestrictedResourceThumbnailTestCase(unittest.HomeserverTestCase):
         )
         self.other_profile_test_user_tok = self.login("profile_test_user", "testpass")
 
-    def create_resource_dict(self) -> dict[str, Resource]:
-        resources = super().create_resource_dict()
-        resources["/_matrix/media"] = self.hs.get_media_repository_resource()
-        return resources
-
     def _create_restricted_media(self, user: str) -> MXCUri:
         """
         Insert our media directly into the database/repo. This creates the necessary
@@ -123,7 +117,7 @@ class RestrictedResourceThumbnailTestCase(unittest.HomeserverTestCase):
         assert channel.code == expect_code, channel.code
         return channel
 
-    def test_user_download_local_media_thumbnail_unrestricted(self) -> None:
+    def test_local_media_thumbnail_unrestricted(self) -> None:
         """Test that unrestricted media is not affected"""
         # Note that 'restricted' is marked as 'False' here
         content_mxc_uri = self.get_success(
@@ -140,7 +134,7 @@ class RestrictedResourceThumbnailTestCase(unittest.HomeserverTestCase):
         self.fetch_thumbnail(content_mxc_uri)
         self.fetch_thumbnail(content_mxc_uri, access_token=self.other_user_tok)
 
-    def test_download_local_media_restricted_but_pending_state(self) -> None:
+    def test_local_media_thumbnail_restricted_but_pending_state(self) -> None:
         """Test originating user can access media even though it is not attached"""
         mxc_uri = self._create_restricted_media(self.creator)
 
@@ -149,7 +143,7 @@ class RestrictedResourceThumbnailTestCase(unittest.HomeserverTestCase):
         # But another user can not
         self.fetch_thumbnail(mxc_uri, access_token=self.other_user_tok, expect_code=403)
 
-    def test_user_download_local_media_attached_to_user_profile_success(self) -> None:
+    def test_local_media_thumbnail_attached_to_user_profile_success(self) -> None:
         """Test retrieving media attached to user's profile"""
         prime_mxc_uri = self._create_restricted_media(self.creator)
         other_mxc_uri = self._create_restricted_media(self.other_profile_test_user)
@@ -186,7 +180,7 @@ class RestrictedResourceThumbnailTestCase(unittest.HomeserverTestCase):
             "limit_profile_requests_to_users_who_share_rooms": True,
         }
     )
-    def test_user_download_local_media_attached_to_user_profile_failure(self) -> None:
+    def test_local_media_thumbnail_attached_to_user_profile_failure(self) -> None:
         """
         Test that limiting profile requests works as expected. Specifically, that users
         that are not sharing a room can not see profile avatars
@@ -226,7 +220,7 @@ class RestrictedResourceThumbnailTestCase(unittest.HomeserverTestCase):
             expect_code=403,
         )
 
-    def test_users_download_local_media_attached_to_message_event_success(self) -> None:
+    def test_local_media_thumbnail_attached_to_message_event_success(self) -> None:
         """Test that can local media attached to image event can be viewed"""
         mxc_uri = self._create_restricted_media(self.creator)
         room_id = self.helper.create_room_as(self.creator, tok=self.creator_tok)
@@ -262,7 +256,7 @@ class RestrictedResourceThumbnailTestCase(unittest.HomeserverTestCase):
         self.fetch_thumbnail(mxc_uri)
         self.fetch_thumbnail(mxc_uri, access_token=self.other_user_tok)
 
-    def test_users_download_local_media_attached_to_message_event_failure(self) -> None:
+    def test_local_media_thumbnail_attached_to_message_event_failure(self) -> None:
         """Test that can local media attached to image event can be restricted"""
         mxc_uri = self._create_restricted_media(self.creator)
         room_id = self.helper.create_room_as(self.creator, tok=self.creator_tok)
@@ -299,7 +293,7 @@ class RestrictedResourceThumbnailTestCase(unittest.HomeserverTestCase):
         # should fail.
         self.fetch_thumbnail(mxc_uri, access_token=self.other_user_tok, expect_code=403)
 
-    def test_user_download_local_media_attached_to_state_event_success(self) -> None:
+    def test_local_media_thumbnail_attached_to_state_event_success(self) -> None:
         """Test that a simple membership avatar is viewable when appropriate"""
         mxc_uri = self._create_restricted_media(self.creator)
         room_id = self.helper.create_room_as(self.creator, tok=self.creator_tok)
@@ -333,7 +327,7 @@ class RestrictedResourceThumbnailTestCase(unittest.HomeserverTestCase):
         self.fetch_thumbnail(mxc_uri)
         self.fetch_thumbnail(mxc_uri, access_token=self.other_user_tok)
 
-    def test_user_download_local_media_attached_to_state_event_failure(self) -> None:
+    def test_local_media_thumbnail_attached_to_state_event_failure(self) -> None:
         """Test that a simple membership avatar is restricted when appropriate"""
         mxc_uri = self._create_restricted_media(self.creator)
         room_id = self.helper.create_room_as(self.creator, tok=self.creator_tok)
