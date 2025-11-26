@@ -34,11 +34,7 @@ from typing import (
     Any,
     Awaitable,
     Callable,
-    Dict,
-    List,
     Optional,
-    Tuple,
-    Type,
     TypeVar,
     cast,
 )
@@ -147,6 +143,7 @@ from synapse.http.client import (
     SimpleHttpClient,
 )
 from synapse.http.matrixfederationclient import MatrixFederationHttpClient
+from synapse.logging.context import PreserveLoggingContext
 from synapse.media.media_repository import MediaRepository
 from synapse.metrics import (
     all_later_gauges_to_clean_up_on_shutdown,
@@ -278,7 +275,7 @@ class ShutdownInfo:
 
     func: Callable[..., Any]
     trigger_id: _SystemEventID
-    kwargs: Dict[str, object]
+    kwargs: dict[str, object]
 
 
 class HomeServer(metaclass=abc.ABCMeta):
@@ -313,7 +310,7 @@ class HomeServer(metaclass=abc.ABCMeta):
 
     @property
     @abc.abstractmethod
-    def DATASTORE_CLASS(self) -> Type["SQLBaseStore"]:
+    def DATASTORE_CLASS(self) -> type["SQLBaseStore"]:
         # This is overridden in derived application classes
         # (such as synapse.app.homeserver.SynapseHomeServer) and gives the class to be
         # instantiated during setup() for future return by get_datastores()
@@ -341,8 +338,8 @@ class HomeServer(metaclass=abc.ABCMeta):
         # the key we use to sign events and requests
         self.signing_key = config.key.signing_key[0]
         self.config = config
-        self._listening_services: List[Port] = []
-        self._metrics_listeners: List[Tuple[WSGIServer, Thread]] = []
+        self._listening_services: list[Port] = []
+        self._metrics_listeners: list[tuple[WSGIServer, Thread]] = []
         self.start_time: Optional[int] = None
 
         self._instance_id = random_string(5)
@@ -352,15 +349,15 @@ class HomeServer(metaclass=abc.ABCMeta):
 
         self.datastores: Optional[Databases] = None
 
-        self._module_web_resources: Dict[str, Resource] = {}
+        self._module_web_resources: dict[str, Resource] = {}
         self._module_web_resources_consumed = False
 
         # This attribute is set by the free function `refresh_certificate`.
         self.tls_server_context_factory: Optional[IOpenSSLContextFactory] = None
 
         self._is_shutdown = False
-        self._async_shutdown_handlers: List[ShutdownInfo] = []
-        self._sync_shutdown_handlers: List[ShutdownInfo] = []
+        self._async_shutdown_handlers: list[ShutdownInfo] = []
+        self._sync_shutdown_handlers: list[ShutdownInfo] = []
         self._background_processes: set[defer.Deferred[Optional[Any]]] = set()
 
     def run_as_background_process(
@@ -511,7 +508,8 @@ class HomeServer(metaclass=abc.ABCMeta):
 
         for background_process in list(self._background_processes):
             try:
-                background_process.cancel()
+                with PreserveLoggingContext():
+                    background_process.cancel()
             except Exception:
                 pass
         self._background_processes.clear()
@@ -1108,7 +1106,7 @@ class HomeServer(metaclass=abc.ABCMeta):
         return ReplicationDataHandler(self)
 
     @cache_in_self
-    def get_replication_streams(self) -> Dict[str, Stream]:
+    def get_replication_streams(self) -> dict[str, Stream]:
         return {stream.NAME: stream(self) for stream in STREAMS_MAP.values()}
 
     @cache_in_self

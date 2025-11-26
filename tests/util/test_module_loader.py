@@ -19,7 +19,6 @@
 #
 #
 
-from typing import Dict
 from unittest.mock import patch
 
 from synapse.util.module_loader import get_loaded_module_information
@@ -50,7 +49,7 @@ class SimpleModuleClass:
 
 class ModuleLoaderTestCase(TestCase):
     def test_get_loaded_module_information_with_package_version(self) -> None:
-        mock_packages_distributions: Dict[str, list] = {
+        mock_packages_distributions: dict[str, list] = {
             "dummy_package": ["dummy_package"]
         }
 
@@ -74,7 +73,7 @@ class ModuleLoaderTestCase(TestCase):
     ) -> None:
         from importlib.metadata import PackageNotFoundError
 
-        mock_packages_distributions: Dict[str, list] = {
+        mock_packages_distributions: dict[str, list] = {
             "dummy_package": ["dummy_package"]
         }
 
@@ -99,7 +98,7 @@ class ModuleLoaderTestCase(TestCase):
     def test_get_loaded_module_information_with_unknown_version(self) -> None:
         from importlib.metadata import PackageNotFoundError
 
-        mock_packages_distributions: Dict[str, list] = {
+        mock_packages_distributions: dict[str, list] = {
             "another_package": ["another_package"]
         }
 
@@ -122,7 +121,7 @@ class ModuleLoaderTestCase(TestCase):
                 self.assertEqual(module_version, "unknown")
 
     def test_get_loaded_module_information_nested_package(self) -> None:
-        mock_packages_distributions: Dict[str, list] = {
+        mock_packages_distributions: dict[str, list] = {
             "deeply": ["deeply-nested-package"]
         }
 
@@ -142,7 +141,7 @@ class ModuleLoaderTestCase(TestCase):
                 self.assertEqual(module_version, "3.1.4")
 
     def test_get_loaded_module_information_simple_package(self) -> None:
-        mock_packages_distributions: Dict[str, list] = {
+        mock_packages_distributions: dict[str, list] = {
             "simplepackage": ["simplepackage"]
         }
 
@@ -160,7 +159,7 @@ class ModuleLoaderTestCase(TestCase):
                 self.assertEqual(module_version, "0.9.0")
 
     def test_get_loaded_module_information_multiple_distributions(self) -> None:
-        mock_packages_distributions: Dict[str, list] = {
+        mock_packages_distributions: dict[str, list] = {
             "dummy_package": ["dummy-pkg-dist", "dummy-pkg-alt"]
         }
 

@@ -33,10 +33,7 @@ from typing import (
     Any,
     Awaitable,
     Callable,
-    Dict,
-    List,
     Optional,
-    Tuple,
     cast,
 )
 
@@ -112,11 +109,11 @@ FIVE_MINUTES_IN_MS = 5 * 60 * 1000
 
 @attr.s(slots=True, frozen=True, auto_attribs=True)
 class EventContext:
-    events_before: List[EventBase]
+    events_before: list[EventBase]
     event: EventBase
-    events_after: List[EventBase]
-    state: List[EventBase]
-    aggregations: Dict[str, BundledAggregations]
+    events_after: list[EventBase]
+    state: list[EventBase]
+    aggregations: dict[str, BundledAggregations]
     start: str
     end: str
 
@@ -143,7 +140,7 @@ class RoomCreationHandler:
         )
 
         # Room state based off defined presets
-        self._presets_dict: Dict[str, Dict[str, Any]] = {
+        self._presets_dict: dict[str, dict[str, Any]] = {
             RoomCreationPreset.PRIVATE_CHAT: {
                 "join_rules": JoinRules.INVITE,
                 "history_visibility": HistoryVisibility.SHARED,
@@ -184,7 +181,7 @@ class RoomCreationHandler:
         # If a user tries to update the same room multiple times in quick
         # succession, only process the first attempt and return its result to
         # subsequent requests
-        self._upgrade_response_cache: ResponseCache[Tuple[str, str]] = ResponseCache(
+        self._upgrade_response_cache: ResponseCache[tuple[str, str]] = ResponseCache(
             clock=hs.get_clock(),
             name="room_upgrade",
             server_name=self.server_name,
@@ -201,7 +198,7 @@ class RoomCreationHandler:
         requester: Requester,
         old_room_id: str,
         new_version: RoomVersion,
-        additional_creators: Optional[List[str]],
+        additional_creators: Optional[list[str]],
         auto_member: bool = False,
         ratelimit: bool = True,
     ) -> str:
@@ -352,14 +349,14 @@ class RoomCreationHandler:
         self,
         requester: Requester,
         old_room_id: str,
-        old_room: Tuple[bool, str, bool],
+        old_room: tuple[bool, str, bool],
         new_room_id: str,
         new_version: RoomVersion,
         tombstone_event: EventBase,
         tombstone_context: synapse.events.snapshot.EventContext,
-        additional_creators: Optional[List[str]],
+        additional_creators: Optional[list[str]],
         creation_event_with_context: Optional[
-            Tuple[EventBase, synapse.events.snapshot.EventContext]
+            tuple[EventBase, synapse.events.snapshot.EventContext]
         ] = None,
         auto_member: bool = False,
     ) -> str:
@@ -450,7 +447,7 @@ class RoomCreationHandler:
         old_room_id: str,
         new_room_id: str,
         old_room_state: StateMap[str],
-        additional_creators: Optional[List[str]],
+        additional_creators: Optional[list[str]],
     ) -> None:
         """Send updated power levels in both rooms after an upgrade
 
@@ -542,7 +539,7 @@ class RoomCreationHandler:
         old_room_create_event: EventBase,
         tombstone_event_id: Optional[str],
         new_room_version: RoomVersion,
-        additional_creators: Optional[List[str]],
+        additional_creators: Optional[list[str]],
     ) -> JsonDict:
         creation_content: JsonDict = {
             "room_version": new_room_version.identifier,
@@ -574,9 +571,9 @@ class RoomCreationHandler:
         new_room_id: str,
         new_room_version: RoomVersion,
         tombstone_event_id: str,
-        additional_creators: Optional[List[str]],
+        additional_creators: Optional[list[str]],
         creation_event_with_context: Optional[
-            Tuple[EventBase, synapse.events.snapshot.EventContext]
+            tuple[EventBase, synapse.events.snapshot.EventContext]
         ] = None,
         auto_member: bool = False,
     ) -> None:
@@ -613,7 +610,7 @@ class RoomCreationHandler:
         initial_state: MutableStateMap = {}
 
         # Replicate relevant room events
-        types_to_copy: List[Tuple[str, Optional[str]]] = [
+        types_to_copy: list[tuple[str, Optional[str]]] = [
             (EventTypes.JoinRules, ""),
             (EventTypes.Name, ""),
             (EventTypes.Topic, ""),
@@ -1057,7 +1054,7 @@ class RoomCreationHandler:
         ratelimit: bool = True,
         creator_join_profile: Optional[JsonDict] = None,
         ignore_forced_encryption: bool = False,
-    ) -> Tuple[str, Optional[RoomAlias], int]:
+    ) -> tuple[str, Optional[RoomAlias], int]:
         """Creates a new room.
 
         Args:
@@ -1407,7 +1404,7 @@ class RoomCreationHandler:
         creation_content: JsonDict,
         is_public: bool,
         room_version: RoomVersion,
-    ) -> Tuple[EventBase, synapse.events.snapshot.EventContext]:
+    ) -> tuple[EventBase, synapse.events.snapshot.EventContext]:
         (
             creation_event,
             new_unpersisted_context,
@@ -1439,7 +1436,7 @@ class RoomCreationHandler:
         room_id: str,
         room_version: RoomVersion,
         room_config: JsonDict,
-        invite_list: List[str],
+        invite_list: list[str],
         initial_state: MutableStateMap,
         creation_content: JsonDict,
         room_alias: Optional[RoomAlias] = None,
@@ -1447,9 +1444,9 @@ class RoomCreationHandler:
         creator_join_profile: Optional[JsonDict] = None,
         ignore_forced_encryption: bool = False,
         creation_event_with_context: Optional[
-            Tuple[EventBase, synapse.events.snapshot.EventContext]
+            tuple[EventBase, synapse.events.snapshot.EventContext]
         ] = None,
-    ) -> Tuple[int, str, int]:
+    ) -> tuple[int, str, int]:
         """Sends the initial events into a new room. Sends the room creation, membership,
         and power level events into the room sequentially, then creates and batches up the
         rest of the events to persist as a batch to the DB.
@@ -1498,7 +1495,7 @@ class RoomCreationHandler:
         depth = 1
 
         # the most recently created event
-        prev_event: List[str] = []
+        prev_event: list[str] = []
         # a map of event types, state keys -> event_ids. We collect these mappings this as events are
         # created (but not persisted to the db) to determine state for future created events
         # (as this info can't be pulled from the db)
@@ -1509,7 +1506,7 @@ class RoomCreationHandler:
             content: JsonDict,
             for_batch: bool,
             **kwargs: Any,
-        ) -> Tuple[EventBase, synapse.events.snapshot.UnpersistedEventContextBase]:
+        ) -> tuple[EventBase, synapse.events.snapshot.UnpersistedEventContextBase]:
             """
             Creates an event and associated event context.
             Args:
@@ -1805,7 +1802,7 @@ class RoomCreationHandler:
                             f"You cannot create an encrypted room. user_level ({room_admin_level}) < send_level ({encryption_level})",
                         )
 
-    def _room_preset_config(self, room_config: JsonDict) -> Tuple[str, dict]:
+    def _room_preset_config(self, room_config: JsonDict) -> tuple[str, dict]:
         # The spec says rooms should default to private visibility if
         # `visibility` is not specified.
         visibility = room_config.get("visibility", "private")
@@ -1827,9 +1824,9 @@ class RoomCreationHandler:
 
     def _remove_creators_from_pl_users_map(
         self,
-        users_map: Dict[str, int],
+        users_map: dict[str, int],
         creator: str,
-        additional_creators: Optional[List[str]],
+        additional_creators: Optional[list[str]],
     ) -> None:
         creators = [creator]
         if additional_creators:
@@ -1929,7 +1926,7 @@ class RoomContextHandler:
         # The user is peeking if they aren't in the room already
         is_peeking = not is_user_in_room
 
-        async def filter_evts(events: List[EventBase]) -> List[EventBase]:
+        async def filter_evts(events: list[EventBase]) -> list[EventBase]:
             if use_admin_priviledge:
                 return events
             return await filter_events_for_client(
@@ -2034,7 +2031,7 @@ class TimestampLookupHandler:
         room_id: str,
         timestamp: int,
         direction: Direction,
-    ) -> Tuple[str, int]:
+    ) -> tuple[str, int]:
         """Find the closest event to the given timestamp in the given direction.
         If we can't find an event locally or the event we have locally is next to a gap,
         it will ask other federated homeservers for an event.
@@ -2185,7 +2182,7 @@ class RoomEventSource(EventSource[RoomStreamToken, EventBase]):
         room_ids: StrCollection,
         is_guest: bool,
         explicit_room_id: Optional[str] = None,
-    ) -> Tuple[List[EventBase], RoomStreamToken]:
+    ) -> tuple[list[EventBase], RoomStreamToken]:
         # We just ignore the key for now.
 
         to_key = self.get_current_key()

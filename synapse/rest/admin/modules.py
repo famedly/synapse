@@ -1,6 +1,6 @@
 import logging
 from http import HTTPStatus
-from typing import TYPE_CHECKING, Tuple
+from typing import TYPE_CHECKING
 
 from synapse.http.servlet import RestServlet
 from synapse.http.site import SynapseRequest
@@ -37,7 +37,7 @@ class ModulesRestServlet(RestServlet):
         self.auth = hs.get_auth()
         self.hs = hs
 
-    async def on_GET(self, request: SynapseRequest) -> Tuple[int, JsonDict]:
+    async def on_GET(self, request: SynapseRequest) -> tuple[int, JsonDict]:
         await assert_requester_is_admin(self.auth, request)
 
         modules_info = []

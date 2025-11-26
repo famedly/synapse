@@ -20,7 +20,7 @@
 #
 import threading
 from http import HTTPStatus
-from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple, Union
+from typing import TYPE_CHECKING, Any, Optional, Union
 from unittest.mock import AsyncMock, Mock
 
 from twisted.internet.testing import MemoryReactor
@@ -50,7 +50,7 @@ thread_local = threading.local()
 
 
 class LegacyThirdPartyRulesTestModule:
-    def __init__(self, config: Dict, module_api: "ModuleApi") -> None:
+    def __init__(self, config: dict, module_api: "ModuleApi") -> None:
         # keep a record of the "current" rules module, so that the test can patch
         # it if desired.
         thread_local.rules_module = self
@@ -67,12 +67,12 @@ class LegacyThirdPartyRulesTestModule:
         return True
 
     @staticmethod
-    def parse_config(config: Dict[str, Any]) -> Dict[str, Any]:
+    def parse_config(config: dict[str, Any]) -> dict[str, Any]:
         return config
 
 
 class LegacyDenyNewRooms(LegacyThirdPartyRulesTestModule):
-    def __init__(self, config: Dict, module_api: "ModuleApi") -> None:
+    def __init__(self, config: dict, module_api: "ModuleApi") -> None:
         super().__init__(config, module_api)
 
     async def on_create_room(
@@ -82,7 +82,7 @@ class LegacyDenyNewRooms(LegacyThirdPartyRulesTestModule):
 
 
 class LegacyChangeEvents(LegacyThirdPartyRulesTestModule):
-    def __init__(self, config: Dict, module_api: "ModuleApi") -> None:
+    def __init__(self, config: dict, module_api: "ModuleApi") -> None:
         super().__init__(config, module_api)
 
     async def check_event_allowed(
@@ -96,8 +96,8 @@ class LegacyChangeEvents(LegacyThirdPartyRulesTestModule):
 
 
 class OnUpgradeRoomModule:
-    def __init__(self, config: Dict, module_api: "ModuleApi") -> None:
-        self.allowed_room_versions: List[str] = []
+    def __init__(self, config: dict, module_api: "ModuleApi") -> None:
+        self.allowed_room_versions: list[str] = []
         if allowed_room_ver_from_config := config.get("allowed_room_versions"):
             self.allowed_room_versions = allowed_room_ver_from_config
 
@@ -177,7 +177,7 @@ class ThirdPartyRulesTestCase(unittest.FederatingHomeserverTestCase):
         # types
         async def check(
             ev: EventBase, state: StateMap[EventBase]
-        ) -> Tuple[bool, Optional[JsonDict]]:
+        ) -> tuple[bool, Optional[JsonDict]]:
             return ev.type != "foo.bar.forbidden", None
 
         callback = Mock(spec=[], side_effect=check)
@@ -234,7 +234,7 @@ class ThirdPartyRulesTestCase(unittest.FederatingHomeserverTestCase):
         # add a callback that will raise our hacky exception
         async def check(
             ev: EventBase, state: StateMap[EventBase]
-        ) -> Tuple[bool, Optional[JsonDict]]:
+        ) -> tuple[bool, Optional[JsonDict]]:
             raise NastyHackException(429, "message")
 
         self.hs.get_module_api_callbacks().third_party_event_rules._check_event_allowed_callbacks = [
@@ -262,7 +262,7 @@ class ThirdPartyRulesTestCase(unittest.FederatingHomeserverTestCase):
         # first patch the event checker so that it will try to modify the event
         async def check(
             ev: EventBase, state: StateMap[EventBase]
-        ) -> Tuple[bool, Optional[JsonDict]]:
+        ) -> tuple[bool, Optional[JsonDict]]:
             ev.content = {"x": "y"}
             return True, None
 
@@ -287,7 +287,7 @@ class ThirdPartyRulesTestCase(unittest.FederatingHomeserverTestCase):
         # first patch the event checker so that it will modify the event
         async def check(
             ev: EventBase, state: StateMap[EventBase]
-        ) -> Tuple[bool, Optional[JsonDict]]:
+        ) -> tuple[bool, Optional[JsonDict]]:
             d = ev.get_dict()
             d["content"] = {"x": "y"}
             return True, d
@@ -322,7 +322,7 @@ class ThirdPartyRulesTestCase(unittest.FederatingHomeserverTestCase):
         # first patch the event checker so that it will modify the event
         async def check(
             ev: EventBase, state: StateMap[EventBase]
-        ) -> Tuple[bool, Optional[JsonDict]]:
+        ) -> tuple[bool, Optional[JsonDict]]:
             d = ev.get_dict()
             d["content"] = {
                 "msgtype": "m.text",
@@ -539,7 +539,7 @@ class ThirdPartyRulesTestCase(unittest.FederatingHomeserverTestCase):
         # Define a callback that sends a custom event on power levels update.
         async def test_fn(
             event: EventBase, state_events: StateMap[EventBase]
-        ) -> Tuple[bool, Optional[JsonDict]]:
+        ) -> tuple[bool, Optional[JsonDict]]:
             if event.is_state() and event.type == EventTypes.PowerLevels:
                 await api.create_and_send_event_into_room(
                     {
