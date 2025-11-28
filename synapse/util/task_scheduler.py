@@ -20,7 +20,20 @@
 #
 
 import logging
-from typing import TYPE_CHECKING, Awaitable, Callable, Dict, List, Optional, Set, Tuple
+from typing import (
+    TYPE_CHECKING,
+    Awaitable,
+    Callable,
+    Dict,
+    Iterable,
+    List,
+    Optional,
+    Set,
+    Tuple,
+)
+from weakref import WeakSet
+
+from opentelemetry.metrics import CallbackOptions, Observation
 
 from twisted.python.failure import Failure
 
@@ -30,7 +43,7 @@ from synapse.logging.context import (
     PreserveLoggingContext,
     nested_logging_context,
 )
-from synapse.metrics import SERVER_NAME_LABEL, LaterGauge
+from synapse.metrics import SERVER_NAME_LABEL, meter
 from synapse.metrics.background_process_metrics import (
     wrap_as_background_process,
 )
@@ -42,11 +55,24 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+# Track all TaskScheduler instances
+_task_scheduler_instances: WeakSet["TaskScheduler"] = WeakSet()
 
-running_tasks_gauge = LaterGauge(
+
+def _observe_running_tasks(options: CallbackOptions) -> Iterable[Observation]:
+    """Callback for observable gauge to report running tasks from all instances."""
+    for scheduler in _task_scheduler_instances:
+        yield Observation(
+            len(scheduler._running_tasks),
+            {SERVER_NAME_LABEL: scheduler.server_name},
+        )
+
+
+# Create the observable gauge at module level
+meter.create_observable_gauge(
     name="synapse_scheduler_running_tasks",
-    desc="The number of concurrent running tasks handled by the TaskScheduler",
-    labelnames=[SERVER_NAME_LABEL],
+    description="The number of concurrent running tasks handled by the TaskScheduler",
+    callbacks=[_observe_running_tasks],
 )
 
 
@@ -134,10 +160,8 @@ class TaskScheduler:
                 TaskScheduler.SCHEDULE_INTERVAL_MS,
             )
 
-        running_tasks_gauge.register_hook(
-            homeserver_instance_id=hs.get_instance_id(),
-            hook=lambda: {(self.server_name,): len(self._running_tasks)},
-        )
+        # Register this instance for metrics reporting
+        _task_scheduler_instances.add(self)
 
     def register_action(
         self,

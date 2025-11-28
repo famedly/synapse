@@ -27,7 +27,7 @@ from typing import Dict, Mapping, Set, Tuple
 from prometheus_client.core import Counter, Histogram
 
 from synapse.logging.context import current_context
-from synapse.metrics import SERVER_NAME_LABEL, LaterGauge
+from synapse.metrics import SERVER_NAME_LABEL, LaterGauge, meter
 
 logger = logging.getLogger(__name__)
 
@@ -100,10 +100,9 @@ response_size = Counter(
 # In flight metrics are incremented while the requests are in flight, rather
 # than when the response was written.
 
-in_flight_requests_ru_utime = Counter(
+in_flight_requests_ru_utime = meter.create_counter(
     "synapse_http_server_in_flight_requests_ru_utime_seconds",
-    "",
-    labelnames=["method", "servlet", SERVER_NAME_LABEL],
+    description="",
 )
 
 in_flight_requests_ru_stime = Counter(
@@ -289,8 +288,9 @@ class RequestMetrics:
         # max() is used since rapid use of ru_stime/ru_utime can end up with the
         # count going backwards due to NTP, time smearing, fine-grained
         # correction, or floating points. Who knows, really?
-        in_flight_requests_ru_utime.labels(**in_flight_labels).inc(
-            max(diff.ru_utime, 0)
+        in_flight_requests_ru_utime.add(
+            max(diff.ru_utime, 0),
+            attributes=in_flight_labels,
         )
         in_flight_requests_ru_stime.labels(**in_flight_labels).inc(
             max(diff.ru_stime, 0)
