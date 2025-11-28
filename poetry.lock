@@ -960,7 +960,7 @@ files = [
     {file = "importlib_metadata-6.7.0-py3-none-any.whl", hash = "sha256:cb52082e659e97afc5dac71e79de97d8681de3aa07ff18578330904a9d18e5b5"},
     {file = "importlib_metadata-6.7.0.tar.gz", hash = "sha256:1aaf550d4f73e5d6783e7acb77aec43d49da8017410afae93822cc9cca98c4d4"},
 ]
-markers = {main = "extra == \"opentracing-otlp\" or extra == \"opentelemetry-log-handler\" or extra == \"all\"", dev = "platform_machine != \"ppc64le\" and platform_machine != \"s390x\" and python_version < \"3.12\""}
+markers = {dev = "platform_machine != \"ppc64le\" and platform_machine != \"s390x\" and python_version < \"3.12\""}
 
 [package.dependencies]
 zipp = ">=0.5"
@@ -1673,10 +1673,9 @@ nicer-shell = ["ipython"]
 name = "opentelemetry-api"
 version = "1.34.1"
 description = "OpenTelemetry Python API"
-optional = true
+optional = false
 python-versions = ">=3.9"
 groups = ["main"]
-markers = "extra == \"opentracing-otlp\" or extra == \"opentelemetry-log-handler\" or extra == \"all\""
 files = [
     {file = "opentelemetry_api-1.34.1-py3-none-any.whl", hash = "sha256:b7df4cb0830d5a6c29ad0c0691dbae874d8daefa934b8b1d642de48323d32a8c"},
     {file = "opentelemetry_api-1.34.1.tar.gz", hash = "sha256:64f0bd06d42824843731d05beea88d4d4b6ae59f9fe347ff7dfa2cc14233bbb3"},
@@ -1767,6 +1766,23 @@ requests = ">=2.7,<3.0"
 typing-extensions = ">=4.5.0"
 
 [[package]]
+name = "opentelemetry-exporter-prometheus"
+version = "0.55b1"
+description = "Prometheus Metric Exporter for OpenTelemetry"
+optional = false
+python-versions = ">=3.9"
+groups = ["main"]
+files = [
+    {file = "opentelemetry_exporter_prometheus-0.55b1-py3-none-any.whl", hash = "sha256:f364fbbff9e5de37a112ff104d1185fb1d7e2046c5ab5911e5afebc7ab3ddf0e"},
+    {file = "opentelemetry_exporter_prometheus-0.55b1.tar.gz", hash = "sha256:d13ec0b22bf394113ff1ada5da98133a4b051779b803dae183188e26c4bd9ee0"},
+]
+
+[package.dependencies]
+opentelemetry-api = ">=1.12,<2.0"
+opentelemetry-sdk = ">=1.34.1,<1.35.0"
+prometheus-client = ">=0.5.0,<1.0.0"
+
+[[package]]
 name = "opentelemetry-opentracing-shim"
 version = "0.55b1"
 description = "OpenTracing Shim for OpenTelemetry"
@@ -1804,10 +1820,9 @@ protobuf = ">=5.0,<6.0"
 name = "opentelemetry-sdk"
 version = "1.34.1"
 description = "OpenTelemetry Python SDK"
-optional = true
+optional = false
 python-versions = ">=3.9"
 groups = ["main"]
-markers = "extra == \"opentracing-otlp\" or extra == \"opentelemetry-log-handler\" or extra == \"all\""
 files = [
     {file = "opentelemetry_sdk-1.34.1-py3-none-any.whl", hash = "sha256:308effad4059562f1d92163c61c8141df649da24ce361827812c40abb2a1e96e"},
     {file = "opentelemetry_sdk-1.34.1.tar.gz", hash = "sha256:8091db0d763fcd6098d4781bbc80ff0971f94e260739aa6afe6fd379cdf3aa4d"},
@@ -1822,10 +1837,9 @@ typing-extensions = ">=4.5.0"
 name = "opentelemetry-semantic-conventions"
 version = "0.55b1"
 description = "OpenTelemetry Semantic Conventions"
-optional = true
+optional = false
 python-versions = ">=3.9"
 groups = ["main"]
-markers = "extra == \"opentracing-otlp\" or extra == \"opentelemetry-log-handler\" or extra == \"all\""
 files = [
     {file = "opentelemetry_semantic_conventions-0.55b1-py3-none-any.whl", hash = "sha256:5da81dfdf7d52e3d37f8fe88d5e771e191de924cfff5f550ab0b8f7b2409baed"},
     {file = "opentelemetry_semantic_conventions-0.55b1.tar.gz", hash = "sha256:ef95b1f009159c28d7a7849f5cbc71c4c34c845bb514d66adfdf1b3fff3598b3"},
@@ -3517,7 +3531,7 @@ files = [
     {file = "zipp-3.19.1-py3-none-any.whl", hash = "sha256:2828e64edb5386ea6a52e7ba7cdb17bb30a73a858f5eb6eb93d8d36f5ea26091"},
     {file = "zipp-3.19.1.tar.gz", hash = "sha256:35427f6d5594f4acf82d25541438348c26736fa9b3afa2754bcd63cdb99d8e8f"},
 ]
-markers = {main = "extra == \"opentracing-otlp\" or extra == \"opentelemetry-log-handler\" or extra == \"all\"", dev = "platform_machine != \"ppc64le\" and platform_machine != \"s390x\" and python_version < \"3.12\""}
+markers = {dev = "platform_machine != \"ppc64le\" and platform_machine != \"s390x\" and python_version < \"3.12\""}
 
 [package.extras]
 doc = ["furo", "jaraco.packaging (>=9.3)", "jaraco.tidelift (>=1.4)", "rst.linker (>=1.9)", "sphinx (>=3.5)", "sphinx-lint"]
@@ -3638,4 +3652,4 @@ url-preview = ["lxml"]
 [metadata]
 lock-version = "2.1"
 python-versions = "^3.10.0"
-content-hash = "7f5d25ff7f67ce8283b4d3bf831e20b1a11367c0996160a333abb7df5569c9c7"
+content-hash = "194de82d864503514051cf1361cefca7f1d3a3ae613305b45b0dea2e740ec90a"

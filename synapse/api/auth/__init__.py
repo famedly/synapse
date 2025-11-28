@@ -20,13 +20,11 @@
 #
 from typing import TYPE_CHECKING, Optional, Protocol, Tuple
 
-from prometheus_client import Histogram
-
 from twisted.web.server import Request
 
 from synapse.appservice import ApplicationService
 from synapse.http.site import SynapseRequest
-from synapse.metrics import SERVER_NAME_LABEL
+from synapse.metrics import SERVER_NAME_LABEL, meter
 from synapse.types import Requester
 
 if TYPE_CHECKING:
@@ -36,10 +34,10 @@ if TYPE_CHECKING:
 GUEST_DEVICE_ID = "guest_device"
 
 
-introspection_response_timer = Histogram(
-    "synapse_api_auth_delegated_introspection_response",
-    "Time taken to get a response for an introspection request",
-    labelnames=["code", SERVER_NAME_LABEL],
+introspection_response_timer = meter.create_histogram(
+    name="synapse_api_auth_delegated_introspection_response",
+    description="Time taken to get a response for an introspection request",
+    unit="s",
 )
 
 

@@ -225,6 +225,7 @@ packaging = ">=20.0"
 # We support pydantic v1 and pydantic v2 via the pydantic.v1 compat module.
 # See https://github.com/matrix-org/synapse/issues/15858
 pydantic = ">=1.7.4, <3"
+opentelemetry-exporter-prometheus = "0.55b1"
 
 # This is for building the rust components during "poetry install", which
 # currently ignores the `build-system.requires` directive (c.f.
