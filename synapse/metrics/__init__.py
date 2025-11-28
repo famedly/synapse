@@ -166,11 +166,6 @@ reader = PrometheusMetricReader()
 provider = MeterProvider(resource=resource, metric_readers=[reader])
 metrics.set_meter_provider(provider)
 meter = provider.get_meter("synapse-otel-meter")
-test_counter = meter.create_counter(
-    "test_requests_total", description="A simple test counter"
-)
-test_counter.add(1)
-test_counter.add(1, {"method": "GET"})
 ############################
 
 

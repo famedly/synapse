@@ -68,7 +68,6 @@ def _observe_running_tasks(options: CallbackOptions) -> Iterable[Observation]:
         )
 
 
-# Create the observable gauge at module level
 meter.create_observable_gauge(
     name="synapse_scheduler_running_tasks",
     description="The number of concurrent running tasks handled by the TaskScheduler",
