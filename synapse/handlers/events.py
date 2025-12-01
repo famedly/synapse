@@ -156,14 +156,17 @@ class EventHandler:
         event_id: str,
         show_redacted: bool = False,
     ) -> Optional[EventBase]:
-        """Retrieve a single specified event.
+        """Retrieve a single specified event from the database, depending on the
+        show_redacted flag, it either hides or exposes redacted content.
 
         Args:
             user: The local user requesting the event
             room_id: The expected room id. We'll return None if the
                 event's room does not match.
             event_id: The event ID to obtain.
-            show_redacted: Should the full content of redacted events be returned?
+            show_redacted: If False (default), the returned event will have its redacted
+                content removed as users normally see it. When True, the event will be
+                returned exactly as stored, even if it’s been redacted.
         Returns:
             An event, or None if there is no event matching this ID.
         Raises:

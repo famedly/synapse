@@ -33,6 +33,7 @@ from matrix_common.types.mxc_uri import MXCUri
 import twisted.web.http
 from twisted.internet.defer import Deferred
 
+from synapse.api.auth.base import BaseAuth
 from synapse.api.constants import EventTypes, HistoryVisibility, Membership
 from synapse.api.errors import (
     Codes,
@@ -213,7 +214,7 @@ class AbstractMediaRepository:
             "Sorry Mario, your MediaRepository related function is in another castle"
         )
 
-    async def delete_local_media_ids(
+    async def delete_media_from_disk_by_media_ids(
         self, media_ids: List[str]
     ) -> Tuple[List[str], int]:
         raise NotImplementedError(
@@ -312,13 +313,13 @@ class AbstractMediaRepository:
         return attachments
 
     async def is_media_visible(
-        self, requesting_user: UserID, media_info_object: Union[LocalMedia, RemoteMedia]
+        self, requester: Requester, media_info_object: Union[LocalMedia, RemoteMedia]
     ) -> None:
         """
         Verify that media requested for download should be visible to the user making
         the request
         """
-
+        requesting_user_id = requester.user.to_string()
         if not self.enable_media_restriction:
             return
 
@@ -329,7 +330,7 @@ class AbstractMediaRepository:
             # When the media has not been attached yet, only the originating user can
             # see it. But once attachments have been formed, standard other rules apply
             if isinstance(media_info_object, LocalMedia) and (
-                requesting_user.to_string() == str(media_info_object.user_id)
+                requesting_user_id == str(media_info_object.user_id)
             ):
                 return
 
@@ -338,7 +339,7 @@ class AbstractMediaRepository:
                 "Media ID ('%s') as requested by '%s' was restricted but had no "
                 "attachments",
                 media_info_object.media_id,
-                requesting_user.to_string(),
+                requesting_user_id,
             )
             raise UnauthorizedRequestAPICallError(
                 f"Media requested ('{media_info_object.media_id}') is restricted"
@@ -348,7 +349,29 @@ class AbstractMediaRepository:
         attached_profile_user_id = media_info_object.attachments.profile_user_id
 
         if attached_event_id:
+            # Check if event is redacted or not. If it is redacted, normal user no
+            # longer have access to the media, but only moderators can see the media
+            # until it gets deleted permanently after certain period of time.
             event_base = await self.store.get_event(attached_event_id)
+            if event_base.internal_metadata.is_redacted():
+                # In the case of redacted media, check the requester's power level of the room
+                room_id = event_base.room_id
+                assert isinstance(self.auth, BaseAuth)
+                is_moderator = await self.auth.is_moderator(room_id, requester)
+                if is_moderator:
+                    # Moderator still has access to the media that is attached to redacted event
+                    return
+                else:
+                    logger.debug(
+                        "Media ID (%s) as requested by '%s' was redacted from event '%s'",
+                        media_info_object.media_id,
+                        requesting_user_id,
+                        attached_event_id,
+                    )
+                    raise UnauthorizedRequestAPICallError(
+                        f"Media requested ('{media_info_object.media_id}') is restricted"
+                    )
+
             if event_base.is_state():
                 # The standard event visibility utility, filter_events_for_client(),
                 # does not seem to meet the needs of a good UX when restricting and
@@ -368,13 +391,13 @@ class AbstractMediaRepository:
                     membership_now,
                     _,
                 ) = await self.store.get_local_current_membership_for_user_in_room(
-                    requesting_user.to_string(), event_base.room_id
+                    requesting_user_id, event_base.room_id
                 )
 
                 if not membership_now:
                     membership_now = Membership.LEAVE
 
-                membership_state_key = (EventTypes.Member, requesting_user.to_string())
+                membership_state_key = (EventTypes.Member, requesting_user_id)
                 types = (_HISTORY_VIS_KEY, membership_state_key)
 
                 # and history visibility and membership of THEN
@@ -467,13 +490,14 @@ class AbstractMediaRepository:
                 storage_controllers = self.hs.get_storage_controllers()
                 filtered_events = await filter_events_for_client(
                     storage_controllers,
-                    requesting_user.to_string(),
+                    requesting_user_id,
                     [event_base],
                 )
                 if len(filtered_events) > 0:
                     return
 
         elif attached_profile_user_id:
+            profile_user_id = attached_profile_user_id.to_string()
             # Can this user see that profile?
 
             # The error returns here may not be suitable, use the work around below
@@ -487,22 +511,22 @@ class AbstractMediaRepository:
             if self.hs.config.server.limit_profile_requests_to_users_who_share_rooms:
                 # First take care of the case where the requesting user IS the creating
                 # user. The other function below does not handle this.
-                if requesting_user.to_string() == attached_profile_user_id.to_string():
+                if requesting_user_id == profile_user_id:
                     return
 
                 # This call returns a set() that contains which of the "other_user_ids"
                 # share a room. Since we give it only one, if bool(set()) is True, then they
                 # share some room or had at least one invite between them.
                 if not await self.store.do_users_share_a_room_joined_or_invited(
-                    requesting_user.to_string(),
-                    [attached_profile_user_id.to_string()],
+                    requesting_user_id,
+                    [profile_user_id],
                 ):
                     logger.debug(
                         "Media ID (%s) as requested by '%s' was restricted by "
                         "profile, but was not allowed(is "
                         "'limit_profile_requests_to_users_who_share_rooms' enabled?)",
                         media_info_object.media_id,
-                        requesting_user.to_string(),
+                        requesting_user_id,
                     )
 
                     raise UnauthorizedRequestAPICallError(
@@ -521,7 +545,7 @@ class AbstractMediaRepository:
             "Media ID (%s) as requested by '%s' was restricted, but was not "
             "allowed(media_attachments=%s)",
             media_info_object.media_id,
-            requesting_user.to_string(),
+            requesting_user_id,
             media_info_object.attachments,
         )
         raise UnauthorizedRequestAPICallError(
@@ -607,6 +631,13 @@ class MediaRepository(AbstractMediaRepository):
 
         self.clock.looping_call(
             self._start_update_recently_accessed, UPDATE_RECENTLY_ACCESSED_TS
+        )
+
+        self.clock.looping_call(
+            self._redacted_media_cleanup,
+            float(
+                self.hs.config.experimental.msc3911_redacted_event_media_cleanup_interval
+            ),
         )
 
         # Media retention configuration options
@@ -949,7 +980,7 @@ class MediaRepository(AbstractMediaRepository):
             # The file has been uploaded, so stop looping
             if media_info.media_length is not None:
                 if isinstance(request.requester, Requester):
-                    await self.is_media_visible(request.requester.user, media_info)
+                    await self.is_media_visible(request.requester, media_info)
                 return media_info
 
             # Check if the media ID has expired and still hasn't been uploaded to.
@@ -1012,7 +1043,7 @@ class MediaRepository(AbstractMediaRepository):
             if requester is not None:
                 # Only check media visibility if this is for a local request. This will
                 # raise directly back to the client if not visible
-                await self.is_media_visible(requester.user, media_info)
+                await self.is_media_visible(requester, media_info)
             restrictions = await self.validate_media_restriction(
                 request, media_info, None, federation
             )
@@ -1242,7 +1273,7 @@ class MediaRepository(AbstractMediaRepository):
             # retrieved from the remote.
             if self.enable_media_restriction and requester is not None:
                 # This will raise directly back to the client if not visible
-                await self.is_media_visible(requester.user, media_info)
+                await self.is_media_visible(requester, media_info)
 
             # file_id is the ID we use to track the file locally. If we've already
             # seen the file then reuse the existing ID, otherwise generate a new
@@ -1300,7 +1331,7 @@ class MediaRepository(AbstractMediaRepository):
             and requester is not None
         ):
             # This will raise directly back to the client if not visible
-            await self.is_media_visible(requester.user, media_info)
+            await self.is_media_visible(requester, media_info)
 
         file_id = media_info.filesystem_id
         if not media_info.media_type:
@@ -2067,7 +2098,7 @@ class MediaRepository(AbstractMediaRepository):
 
         return {"deleted": deleted}
 
-    async def delete_local_media_ids(
+    async def delete_media_from_disk_by_media_ids(
         self, media_ids: List[str]
     ) -> Tuple[List[str], int]:
         """
@@ -2078,7 +2109,7 @@ class MediaRepository(AbstractMediaRepository):
         Returns:
             A tuple of (list of deleted media IDs, total deleted media IDs).
         """
-        return await self._remove_local_media_from_disk(media_ids)
+        return await self._remove_media_from_disk(media_ids)
 
     async def delete_old_local_media(
         self,
@@ -2111,9 +2142,9 @@ class MediaRepository(AbstractMediaRepository):
             include_quarantined_media=delete_quarantined_media,
             include_protected_media=delete_protected_media,
         )
-        return await self._remove_local_media_from_disk(old_media)
+        return await self._remove_media_from_disk(old_media)
 
-    async def _remove_local_media_from_disk(
+    async def _remove_media_from_disk(
         self, media_ids: List[str]
     ) -> Tuple[List[str], int]:
         """
@@ -2149,3 +2180,17 @@ class MediaRepository(AbstractMediaRepository):
             removed_media.append(media_id)
 
         return removed_media, len(removed_media)
+
+    async def _redacted_media_cleanup(self) -> None:
+        """Periodically deletes media attached to redacted events from disk."""
+        redacted_event_ids = await self.store.get_redacted_event_ids_before_interval(
+            self.hs.config.experimental.msc3911_redacted_event_media_cleanup_interval
+        )
+        media_ids_to_redact = []
+        for event_id in redacted_event_ids:
+            attached_media_ids = await self.store.get_media_ids_attached_to_event(
+                event_id
+            )
+            media_ids_to_redact.extend(attached_media_ids)
+        if media_ids_to_redact:
+            await self.delete_media_from_disk_by_media_ids(media_ids_to_redact)

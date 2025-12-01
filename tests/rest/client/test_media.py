@@ -69,7 +69,7 @@ from synapse.server import HomeServer
 from synapse.storage.databases.main.media_repository import (
     LocalMedia,
 )
-from synapse.types import JsonDict, UserID, create_requester
+from synapse.types import JsonDict, Requester, UserID, create_requester
 from synapse.util import Clock, json_encoder
 from synapse.util.stringutils import parse_and_validate_mxc_uri, random_string
 
@@ -3748,8 +3748,18 @@ class RestrictedMediaVisibilityTestCase(unittest.HomeserverTestCase):
         else:
             maybe_assert_exception = self.assertRaises(UnauthorizedRequestAPICallError)
         with maybe_assert_exception:
+            requester = Requester(
+                user=target_user,
+                access_token_id=None,
+                is_guest=False,
+                scope={"scope"},
+                shadow_banned=False,
+                device_id=None,
+                app_service=None,
+                authenticated_entity="auth",
+            )
             self.get_success_or_raise(
-                self.media_repo.is_media_visible(target_user, media_object)
+                self.media_repo.is_media_visible(requester, media_object)
             )
 
     @parameterized.expand(

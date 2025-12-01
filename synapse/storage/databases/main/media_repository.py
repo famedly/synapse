@@ -45,6 +45,7 @@ from synapse.storage.database import (
     LoggingDatabaseConnection,
     LoggingTransaction,
 )
+from synapse.storage.engines import PostgresEngine
 from synapse.types import JsonDict, UserID
 from synapse.util import json_encoder
 
@@ -370,7 +371,7 @@ class MediaRepositoryStore(MediaRepositoryBackgroundUpdateStore):
                     sha256,
                     restricted,
                     ma.restrictions_json->'restrictions'->>'event_id' AS event_id,
-                    ma.restrictions_json->'restrictions'->>'event_id' AS profile_user_id
+                    ma.restrictions_json->'restrictions'->>'profile_user_id' AS profile_user_id
                 FROM local_media_repository AS lmr
                 -- a LEFT JOIN allows values from the right table to be NULL if non-existent
                 LEFT JOIN media_attachments AS ma ON lmr.media_id = ma.media_id
@@ -1307,4 +1308,32 @@ class MediaRepositoryStore(MediaRepositoryBackgroundUpdateStore):
             server_name=server_name,
             media_id=media_id,
             json_dict=json_object,
+        )
+
+    async def get_media_ids_attached_to_event(self, event_id: str) -> list[str]:
+        """
+        Get a list of media_ids that are attached to a specific event_id.
+        """
+
+        def get_media_ids_attached_to_event_txn(txn: LoggingTransaction) -> list[str]:
+            if isinstance(self.db_pool.engine, PostgresEngine):
+                # Use GIN index for Postgres
+                sql = """
+                SELECT media_id
+                FROM media_attachments
+                WHERE restrictions_json @> '{"restrictions": {"event_id": ?}}'
+                """
+            else:
+                # Use cross-database compatible query for the rest
+                sql = """
+                SELECT media_id
+                FROM media_attachments
+                WHERE restrictions_json->'restrictions'->>'event_id' = ?
+                """
+            txn.execute(sql, (event_id,))
+            return [row[0] for row in txn.fetchall()]
+
+        return await self.db_pool.runInteraction(
+            "get_media_ids_attached_to_event",
+            get_media_ids_attached_to_event_txn,
         )
