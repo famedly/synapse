@@ -162,7 +162,7 @@ from synapse.federation.units import Edu
 from synapse.logging.context import make_deferred_yieldable, run_in_background
 from synapse.metrics import (
     SERVER_NAME_LABEL,
-    LaterGauge,
+    LaterGaugeOtel,
     event_processing_loop_counter,
     event_processing_loop_room_count,
     events_processed_counter,
@@ -199,19 +199,19 @@ sent_pdus_destination_dist_total = Counter(
     labelnames=[SERVER_NAME_LABEL],
 )
 
-transaction_queue_pending_destinations_gauge = LaterGauge(
+transaction_queue_pending_destinations_gauge = LaterGaugeOtel(
     name="synapse_federation_transaction_queue_pending_destinations",
     desc="",
     labelnames=[SERVER_NAME_LABEL],
 )
 
-transaction_queue_pending_pdus_gauge = LaterGauge(
+transaction_queue_pending_pdus_gauge = LaterGaugeOtel(
     name="synapse_federation_transaction_queue_pending_pdus",
     desc="",
     labelnames=[SERVER_NAME_LABEL],
 )
 
-transaction_queue_pending_edus_gauge = LaterGauge(
+transaction_queue_pending_edus_gauge = LaterGaugeOtel(
     name="synapse_federation_transaction_queue_pending_edus",
     desc="",
     labelnames=[SERVER_NAME_LABEL],

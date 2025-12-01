@@ -22,7 +22,7 @@
 import logging
 from typing import TYPE_CHECKING, Generic, List, Optional, Type, TypeVar
 
-from synapse.metrics import SERVER_NAME_LABEL, LaterGauge
+from synapse.metrics import SERVER_NAME_LABEL, LaterGaugeOtel
 from synapse.storage._base import SQLBaseStore
 from synapse.storage.database import DatabasePool, make_conn
 from synapse.storage.databases.main.events import PersistEventsStore
@@ -41,7 +41,7 @@ logger = logging.getLogger(__name__)
 DataStoreT = TypeVar("DataStoreT", bound=SQLBaseStore, covariant=True)
 
 
-background_update_status = LaterGauge(
+background_update_status = LaterGaugeOtel(
     name="synapse_background_update_status",
     desc="Background update status",
     labelnames=["database_name", SERVER_NAME_LABEL],

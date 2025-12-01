@@ -51,7 +51,7 @@ from synapse.handlers.presence import format_user_presence_state
 from synapse.logging import issue9533_logger
 from synapse.logging.context import PreserveLoggingContext
 from synapse.logging.opentracing import log_kv, start_active_span
-from synapse.metrics import SERVER_NAME_LABEL, LaterGauge
+from synapse.metrics import SERVER_NAME_LABEL, LaterGaugeOtel
 from synapse.streams.config import PaginationConfig
 from synapse.types import (
     ISynapseReactor,
@@ -87,18 +87,18 @@ users_woken_by_stream_counter = Counter(
 )
 
 
-notifier_listeners_gauge = LaterGauge(
+notifier_listeners_gauge = LaterGaugeOtel(
     name="synapse_notifier_listeners",
     desc="",
     labelnames=[SERVER_NAME_LABEL],
 )
 
-notifier_rooms_gauge = LaterGauge(
+notifier_rooms_gauge = LaterGaugeOtel(
     name="synapse_notifier_rooms",
     desc="",
     labelnames=[SERVER_NAME_LABEL],
 )
-notifier_users_gauge = LaterGauge(
+notifier_users_gauge = LaterGaugeOtel(
     name="synapse_notifier_users",
     desc="",
     labelnames=[SERVER_NAME_LABEL],

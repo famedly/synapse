@@ -55,7 +55,7 @@ from sortedcontainers import SortedDict
 
 from synapse.api.presence import UserPresenceState
 from synapse.federation.sender import AbstractFederationSender, FederationSender
-from synapse.metrics import SERVER_NAME_LABEL, LaterGauge
+from synapse.metrics import SERVER_NAME_LABEL, LaterGaugeOtel
 from synapse.replication.tcp.streams.federation import FederationStream
 from synapse.types import JsonDict, ReadReceipt, RoomStreamToken, StrCollection
 from synapse.util.metrics import Measure
@@ -77,10 +77,10 @@ class QueueNames(str, Enum):
     PRESENCE_DESTINATIONS = "presence_destinations"
 
 
-queue_name_to_gauge_map: Dict[QueueNames, LaterGauge] = {}
+queue_name_to_gauge_map: Dict[QueueNames, LaterGaugeOtel] = {}
 
 for queue_name in QueueNames:
-    queue_name_to_gauge_map[queue_name] = LaterGauge(
+    queue_name_to_gauge_map[queue_name] = LaterGaugeOtel(
         name=f"synapse_federation_send_queue_{queue_name.value}_size",
         desc="",
         labelnames=[SERVER_NAME_LABEL],

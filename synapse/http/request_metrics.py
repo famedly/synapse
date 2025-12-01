@@ -27,7 +27,7 @@ from typing import Dict, Mapping, Set, Tuple
 from prometheus_client.core import Counter, Histogram
 
 from synapse.logging.context import current_context
-from synapse.metrics import SERVER_NAME_LABEL, LaterGauge, meter
+from synapse.metrics import SERVER_NAME_LABEL, LaterGaugeOtel, meter
 
 logger = logging.getLogger(__name__)
 
@@ -163,7 +163,7 @@ def _get_in_flight_counts() -> Mapping[Tuple[str, ...], int]:
     return counts
 
 
-in_flight_requests = LaterGauge(
+in_flight_requests = LaterGaugeOtel(
     name="synapse_http_server_in_flight_requests_count",
     desc="",
     labelnames=["method", "servlet", SERVER_NAME_LABEL],

@@ -39,7 +39,7 @@ from twisted.protocols.basic import LineOnlyReceiver
 from twisted.python.failure import Failure
 
 from synapse.logging.context import PreserveLoggingContext
-from synapse.metrics import SERVER_NAME_LABEL, LaterGauge
+from synapse.metrics import SERVER_NAME_LABEL, LaterGaugeOtel
 from synapse.metrics.background_process_metrics import (
     BackgroundProcessLoggingContext,
 )
@@ -530,7 +530,7 @@ class ClientReplicationStreamProtocol(BaseReplicationStreamProtocol):
 
 # The following simply registers metrics for the replication connections
 
-pending_commands = LaterGauge(
+pending_commands = LaterGaugeOtel(
     name="synapse_replication_tcp_protocol_pending_commands",
     desc="",
     labelnames=["name", SERVER_NAME_LABEL],
@@ -550,7 +550,7 @@ def transport_buffer_size(protocol: BaseReplicationStreamProtocol) -> int:
     return 0
 
 
-transport_send_buffer = LaterGauge(
+transport_send_buffer = LaterGaugeOtel(
     name="synapse_replication_tcp_protocol_transport_send_buffer",
     desc="",
     labelnames=["name", SERVER_NAME_LABEL],
@@ -580,7 +580,7 @@ def transport_kernel_read_buffer_size(
     return 0
 
 
-tcp_transport_kernel_send_buffer = LaterGauge(
+tcp_transport_kernel_send_buffer = LaterGaugeOtel(
     name="synapse_replication_tcp_protocol_transport_kernel_send_buffer",
     desc="",
     labelnames=["name", SERVER_NAME_LABEL],
@@ -594,7 +594,7 @@ tcp_transport_kernel_send_buffer.register_hook(
 )
 
 
-tcp_transport_kernel_read_buffer = LaterGauge(
+tcp_transport_kernel_read_buffer = LaterGaugeOtel(
     name="synapse_replication_tcp_protocol_transport_kernel_read_buffer",
     desc="",
     labelnames=["name", SERVER_NAME_LABEL],

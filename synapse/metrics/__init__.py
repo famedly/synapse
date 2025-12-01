@@ -398,7 +398,9 @@ class LaterGaugeOtel:
         # should be created globally so you shouldn't be running into this and this will
         # catch any stupid mistakes.
         existing_gauge = all_later_gauges_otel_to_clean_up_on_shutdown.get(self.name)
-        assert existing_gauge is None, f"LaterGaugeOtel(name={self.name}) already exists. "
+        assert existing_gauge is None, (
+            f"LaterGaugeOtel(name={self.name}) already exists. "
+        )
 
         # Keep track of the gauge so we can clean it up later.
         all_later_gauges_otel_to_clean_up_on_shutdown[self.name] = self

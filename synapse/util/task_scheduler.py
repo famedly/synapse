@@ -25,15 +25,12 @@ from typing import (
     Awaitable,
     Callable,
     Dict,
-    Iterable,
     List,
     Optional,
     Set,
     Tuple,
 )
 from weakref import WeakSet
-
-from opentelemetry.metrics import CallbackOptions, Observation
 
 from twisted.python.failure import Failure
 
@@ -43,7 +40,7 @@ from synapse.logging.context import (
     PreserveLoggingContext,
     nested_logging_context,
 )
-from synapse.metrics import SERVER_NAME_LABEL, LaterGaugeOtel, meter
+from synapse.metrics import SERVER_NAME_LABEL, LaterGaugeOtel
 from synapse.metrics.background_process_metrics import (
     wrap_as_background_process,
 )

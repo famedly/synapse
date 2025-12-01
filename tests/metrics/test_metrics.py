@@ -26,7 +26,7 @@ from synapse.metrics import (
     REGISTRY,
     SERVER_NAME_LABEL,
     InFlightGauge,
-    LaterGauge,
+    LaterGaugeOtel,
     all_later_gauges_to_clean_up_on_shutdown,
     generate_latest,
     module_instances_info,
@@ -299,7 +299,7 @@ class CacheMetricsTests(unittest.HomeserverTestCase):
 class LaterGaugeTests(unittest.HomeserverTestCase):
     def setUp(self) -> None:
         super().setUp()
-        self.later_gauge = LaterGauge(
+        self.later_gauge = LaterGaugeOtel(
             name="foo",
             desc="",
             labelnames=[SERVER_NAME_LABEL],

@@ -43,7 +43,7 @@ from synapse.api.constants import EventTypes, Membership
 from synapse.api.errors import Codes, SynapseError
 from synapse.api.room_versions import KNOWN_ROOM_VERSIONS
 from synapse.logging.opentracing import trace
-from synapse.metrics import SERVER_NAME_LABEL, LaterGauge
+from synapse.metrics import SERVER_NAME_LABEL, LaterGaugeOtel
 from synapse.metrics.background_process_metrics import wrap_as_background_process
 from synapse.storage._base import SQLBaseStore, db_to_json, make_in_list_sql_clause
 from synapse.storage.database import (
@@ -84,7 +84,7 @@ _CURRENT_STATE_MEMBERSHIP_UPDATE_NAME = "current_state_events_membership"
 _POPULATE_PARTICIPANT_BG_UPDATE_BATCH_SIZE = 1000
 
 
-federation_known_servers_gauge = LaterGauge(
+federation_known_servers_gauge = LaterGaugeOtel(
     name="synapse_federation_known_servers",
     desc="",
     labelnames=[SERVER_NAME_LABEL],

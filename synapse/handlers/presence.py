@@ -105,7 +105,7 @@ from synapse.api.presence import UserDevicePresenceState, UserPresenceState
 from synapse.appservice import ApplicationService
 from synapse.events.presence_router import PresenceRouter
 from synapse.logging.context import run_in_background
-from synapse.metrics import SERVER_NAME_LABEL, LaterGauge
+from synapse.metrics import SERVER_NAME_LABEL, LaterGaugeOtel
 from synapse.metrics.background_process_metrics import (
     wrap_as_background_process,
 )
@@ -172,13 +172,13 @@ state_transition_counter = Counter(
     labelnames=["locality", "from", "to", SERVER_NAME_LABEL],
 )
 
-presence_user_to_current_state_size_gauge = LaterGauge(
+presence_user_to_current_state_size_gauge = LaterGaugeOtel(
     name="synapse_handlers_presence_user_to_current_state_size",
     desc="",
     labelnames=[SERVER_NAME_LABEL],
 )
 
-presence_wheel_timer_size_gauge = LaterGauge(
+presence_wheel_timer_size_gauge = LaterGaugeOtel(
     name="synapse_handlers_presence_wheel_timer_size",
     desc="",
     labelnames=[SERVER_NAME_LABEL],

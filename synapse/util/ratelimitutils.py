@@ -52,7 +52,7 @@ from synapse.logging.context import (
     run_in_background,
 )
 from synapse.logging.opentracing import start_active_span
-from synapse.metrics import SERVER_NAME_LABEL, Histogram, LaterGauge
+from synapse.metrics import SERVER_NAME_LABEL, Histogram, LaterGaugeOtel
 from synapse.util.clock import Clock
 
 if typing.TYPE_CHECKING:
@@ -131,7 +131,7 @@ def _get_counts_from_rate_limiter_instance(
 # We track the number of affected hosts per time-period so we can
 # differentiate one really noisy homeserver from a general
 # ratelimit tuning problem across the federation.
-sleep_affected_hosts_gauge = LaterGauge(
+sleep_affected_hosts_gauge = LaterGaugeOtel(
     name="synapse_rate_limit_sleep_affected_hosts",
     desc="Number of hosts that had requests put to sleep",
     labelnames=["rate_limiter_name", SERVER_NAME_LABEL],
@@ -145,7 +145,7 @@ sleep_affected_hosts_gauge.register_hook(
         )
     ),
 )
-reject_affected_hosts_gauge = LaterGauge(
+reject_affected_hosts_gauge = LaterGaugeOtel(
     name="synapse_rate_limit_reject_affected_hosts",
     desc="Number of hosts that had requests rejected",
     labelnames=["rate_limiter_name", SERVER_NAME_LABEL],

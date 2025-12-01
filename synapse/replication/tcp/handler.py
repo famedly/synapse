@@ -40,7 +40,7 @@ from prometheus_client import Counter
 
 from twisted.internet.protocol import ReconnectingClientFactory
 
-from synapse.metrics import SERVER_NAME_LABEL, LaterGauge
+from synapse.metrics import SERVER_NAME_LABEL, LaterGaugeOtel
 from synapse.replication.tcp.commands import (
     ClearUserSyncsCommand,
     Command,
@@ -105,13 +105,13 @@ user_ip_cache_counter = Counter(
     "synapse_replication_tcp_resource_user_ip_cache", "", labelnames=[SERVER_NAME_LABEL]
 )
 
-tcp_resource_total_connections_gauge = LaterGauge(
+tcp_resource_total_connections_gauge = LaterGaugeOtel(
     name="synapse_replication_tcp_resource_total_connections",
     desc="",
     labelnames=[SERVER_NAME_LABEL],
 )
 
-tcp_command_queue_gauge = LaterGauge(
+tcp_command_queue_gauge = LaterGaugeOtel(
     name="synapse_replication_tcp_command_queue",
     desc="Number of inbound RDATA/POSITION commands queued for processing",
     labelnames=["stream_name", SERVER_NAME_LABEL],
