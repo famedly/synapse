@@ -27,7 +27,7 @@ from synapse.metrics import (
     SERVER_NAME_LABEL,
     InFlightGauge,
     LaterGaugeOtel,
-    all_later_gauges_to_clean_up_on_shutdown,
+    all_later_gauges_otel_to_clean_up_on_shutdown,
     generate_latest,
     module_instances_info,
 )
@@ -308,8 +308,7 @@ class LaterGaugeTests(unittest.HomeserverTestCase):
     def tearDown(self) -> None:
         super().tearDown()
 
-        REGISTRY.unregister(self.later_gauge)
-        all_later_gauges_to_clean_up_on_shutdown.pop(self.later_gauge.name, None)
+        all_later_gauges_otel_to_clean_up_on_shutdown.pop(self.later_gauge.name, None)
 
     def test_later_gauge_multiple_servers(self) -> None:
         """

@@ -916,4 +916,6 @@ __all__ = [
     "MIN_TIME_BETWEEN_GCS",
     "install_gc_manager",
     "meter",
+    "all_later_gauges_to_clean_up_on_shutdown",
+    "all_later_gauges_otel_to_clean_up_on_shutdown",
 ]
