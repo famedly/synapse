@@ -22,10 +22,8 @@
 import logging
 from typing import TYPE_CHECKING, Dict, Iterable, Optional
 
-from prometheus_client import Gauge
-
 from synapse.api.errors import Codes, SynapseError
-from synapse.metrics import SERVER_NAME_LABEL
+from synapse.metrics import SERVER_NAME_LABEL, meter
 from synapse.metrics.background_process_metrics import (
     wrap_as_background_process,
 )
@@ -46,10 +44,10 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-synapse_pushers = Gauge(
+synapse_pushers = meter.create_gauge(
     "synapse_pushers",
-    "Number of active synapse pushers",
-    labelnames=["kind", "app_id", SERVER_NAME_LABEL],
+    description="Number of active synapse pushers",
+    unit="1",
 )
 
 

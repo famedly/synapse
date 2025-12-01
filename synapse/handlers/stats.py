@@ -166,8 +166,9 @@ class StatsHandler:
             ) = await self.store.get_room_stats()
 
             # Update room count metrics
-            known_rooms_gauge.labels(**{SERVER_NAME_LABEL: self.server_name}).set(
-                known_room_count
+            known_rooms_gauge.record(
+                known_room_count,
+                {SERVER_NAME_LABEL: self.server_name},
             )
             locally_joined_rooms_gauge.labels(
                 **{SERVER_NAME_LABEL: self.server_name}

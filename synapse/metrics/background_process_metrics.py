@@ -41,7 +41,7 @@ from typing import (
 )
 
 from prometheus_client import Metric
-from prometheus_client.core import REGISTRY, Counter, Gauge
+from prometheus_client.core import REGISTRY, Counter
 from typing_extensions import Concatenate, ParamSpec
 
 from twisted.internet import defer
@@ -57,7 +57,7 @@ from synapse.logging.opentracing import (
     start_active_span,
     start_active_span_follows_from,
 )
-from synapse.metrics import SERVER_NAME_LABEL
+from synapse.metrics import SERVER_NAME_LABEL, meter
 from synapse.metrics._types import Collector
 
 if TYPE_CHECKING:
@@ -83,10 +83,10 @@ _background_process_start_count = Counter(
     labelnames=["name", SERVER_NAME_LABEL],
 )
 
-_background_process_in_flight_count = Gauge(
+_background_process_in_flight_count = meter.create_gauge(
     "synapse_background_process_in_flight_count",
-    "Number of background processes in flight",
-    labelnames=["name", SERVER_NAME_LABEL],
+    description="Number of background processes in flight",
+    unit="1",
 )
 
 # we set registry=None in all of these to stop them getting registered with

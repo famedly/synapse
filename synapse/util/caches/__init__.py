@@ -28,10 +28,9 @@ from typing import Any, Callable, Dict, List, Optional, Sized, TypeVar
 
 import attr
 from prometheus_client import REGISTRY
-from prometheus_client.core import Gauge
 
 from synapse.config.cache import add_resizable_cache
-from synapse.metrics import SERVER_NAME_LABEL
+from synapse.metrics import SERVER_NAME_LABEL, meter
 from synapse.util.metrics import DynamicCollectorRegistry
 
 logger = logging.getLogger(__name__)
@@ -47,66 +46,56 @@ TRACK_MEMORY_USAGE = False
 # so we don't need to worry about it on the collector itself.
 CACHE_METRIC_REGISTRY = DynamicCollectorRegistry()  # type: ignore[missing-server-name-label]
 
-cache_size = Gauge(
+cache_size = meter.create_gauge(
     "synapse_util_caches_cache_size",
-    "",
-    labelnames=["name", SERVER_NAME_LABEL],
-    registry=CACHE_METRIC_REGISTRY,
+    description="",
+    unit="1",
 )
-cache_hits = Gauge(
+cache_hits = meter.create_gauge(
     "synapse_util_caches_cache_hits",
-    "",
-    labelnames=["name", SERVER_NAME_LABEL],
-    registry=CACHE_METRIC_REGISTRY,
+    description="",
+    unit="1",
 )
-cache_evicted = Gauge(
+cache_evicted = meter.create_gauge(
     "synapse_util_caches_cache_evicted_size",
-    "",
-    labelnames=["name", "reason", SERVER_NAME_LABEL],
-    registry=CACHE_METRIC_REGISTRY,
+    description="",
+    unit="1",
 )
-cache_total = Gauge(
+cache_total = meter.create_gauge(
     "synapse_util_caches_cache",
-    "",
-    labelnames=["name", SERVER_NAME_LABEL],
-    registry=CACHE_METRIC_REGISTRY,
+    description="",
+    unit="1",
 )
-cache_max_size = Gauge(
+cache_max_size = meter.create_gauge(
     "synapse_util_caches_cache_max_size",
-    "",
-    labelnames=["name", SERVER_NAME_LABEL],
-    registry=CACHE_METRIC_REGISTRY,
+    description="",
+    unit="1",
 )
-cache_memory_usage = Gauge(
+cache_memory_usage = meter.create_gauge(
     "synapse_util_caches_cache_size_bytes",
-    "Estimated memory usage of the caches",
-    labelnames=["name", SERVER_NAME_LABEL],
-    registry=CACHE_METRIC_REGISTRY,
+    description="Estimated memory usage of the caches",
+    unit="bytes",
 )
 
-response_cache_size = Gauge(
+response_cache_size = meter.create_gauge(
     "synapse_util_caches_response_cache_size",
-    "",
-    labelnames=["name", SERVER_NAME_LABEL],
-    registry=CACHE_METRIC_REGISTRY,
+    description="",
+    unit="1",
 )
-response_cache_hits = Gauge(
+response_cache_hits = meter.create_gauge(
     "synapse_util_caches_response_cache_hits",
-    "",
-    labelnames=["name", SERVER_NAME_LABEL],
-    registry=CACHE_METRIC_REGISTRY,
+    description="",
+    unit="1",
 )
-response_cache_evicted = Gauge(
+response_cache_evicted = meter.create_gauge(
     "synapse_util_caches_response_cache_evicted_size",
-    "",
-    labelnames=["name", "reason", SERVER_NAME_LABEL],
-    registry=CACHE_METRIC_REGISTRY,
+    description="",
+    unit="1",
 )
-response_cache_total = Gauge(
+response_cache_total = meter.create_gauge(
     "synapse_util_caches_response_cache",
-    "",
-    labelnames=["name", SERVER_NAME_LABEL],
-    registry=CACHE_METRIC_REGISTRY,
+    description="",
+    unit="1",
 )
 
 
@@ -172,29 +161,31 @@ class CacheMetric:
                 SERVER_NAME_LABEL: self._server_name,
             }
             if self._cache_type == "response_cache":
-                response_cache_size.labels(**labels_base).set(len(self._cache))
-                response_cache_hits.labels(**labels_base).set(self.hits)
+                response_cache_size.set(len(self._cache), labels_base)
+                response_cache_hits.set(self.hits, labels_base)
                 for reason in EvictionReason:
-                    response_cache_evicted.labels(
-                        **{**labels_base, "reason": reason.name}
-                    ).set(self.eviction_size_by_reason[reason])
-                response_cache_total.labels(**labels_base).set(self.hits + self.misses)
-            else:
-                cache_size.labels(**labels_base).set(len(self._cache))
-                cache_hits.labels(**labels_base).set(self.hits)
-                for reason in EvictionReason:
-                    cache_evicted.labels(**{**labels_base, "reason": reason.name}).set(
-                        self.eviction_size_by_reason[reason]
+                    response_cache_evicted.set(
+                        self.eviction_size_by_reason[reason],
+                        {**labels_base, "reason": reason.name},
                     )
-                cache_total.labels(**labels_base).set(self.hits + self.misses)
+                response_cache_total.set(self.hits + self.misses, labels_base)
+            else:
+                cache_size.set(len(self._cache), labels_base)
+                cache_hits.set(self.hits, labels_base)
+                for reason in EvictionReason:
+                    cache_evicted.set(
+                        self.eviction_size_by_reason[reason],
+                        {**labels_base, "reason": reason.name},
+                    )
+                cache_total.set(self.hits + self.misses, labels_base)
                 max_size = getattr(self._cache, "max_size", None)
                 if max_size:
-                    cache_max_size.labels(**labels_base).set(max_size)
+                    cache_max_size.set(max_size, labels_base)
 
                 if TRACK_MEMORY_USAGE:
                     # self.memory_usage can be None if nothing has been inserted
                     # into the cache yet.
-                    cache_memory_usage.labels(**labels_base).set(self.memory_usage or 0)
+                    cache_memory_usage.set(self.memory_usage or 0, labels_base)
             if self._collect_callback:
                 self._collect_callback()
         except Exception as e:

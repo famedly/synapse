@@ -29,7 +29,6 @@ from typing import Iterable
 from prometheus_client.core import (
     REGISTRY,
     CounterMetricFamily,
-    Gauge,
     GaugeMetricFamily,
     Histogram,
     Metric,
@@ -37,6 +36,7 @@ from prometheus_client.core import (
 
 from twisted.internet import task
 
+from synapse.metrics import meter
 from synapse.metrics._types import Collector
 
 """Prometheus metrics for garbage collection"""
@@ -55,7 +55,9 @@ running_on_pypy = platform.python_implementation() == "PyPy"
 #
 
 # These are process-level metrics, so they do not have the `SERVER_NAME_LABEL`.
-gc_unreachable = Gauge("python_gc_unreachable_total", "Unreachable GC objects", ["gen"])  # type: ignore[missing-server-name-label]
+gc_unreachable = meter.create_gauge(
+    "python_gc_unreachable_total", description="Unreachable GC objects", unit="1"
+)  # type: ignore[missing-server-name-label]
 gc_time = Histogram(  # type: ignore[missing-server-name-label]
     "python_gc_time",
     "Time taken to GC (sec)",
@@ -136,7 +138,7 @@ def install_gc_manager() -> None:
                 _last_gc[i] = end
 
                 gc_time.labels(i).observe(end - start)
-                gc_unreachable.labels(i).set(unreachable)
+                gc_unreachable.set(unreachable, {"gen": str(i)})
 
     # We can ignore the lint here since this looping call does not hold a `HomeServer`
     # reference so can be cleaned up by other means on shutdown.

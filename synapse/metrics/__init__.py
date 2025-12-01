@@ -52,7 +52,6 @@ from packaging.version import parse as parse_version
 from prometheus_client import (
     CollectorRegistry,
     Counter,
-    Gauge,
     Histogram,
     Metric,
     generate_latest,
@@ -766,26 +765,26 @@ event_processing_loop_room_count = Counter(
 
 # Used to track where various components have processed in the event stream,
 # e.g. federation sending, appservice sending, etc.
-event_processing_positions = Gauge(
-    "synapse_event_processing_positions", "", labelnames=["name", SERVER_NAME_LABEL]
+event_processing_positions = meter.create_gauge(
+    "synapse_event_processing_positions", description="", unit="1"
 )
 
 # Used to track the current max events stream position
-event_persisted_position = Gauge(
-    "synapse_event_persisted_position", "", labelnames=[SERVER_NAME_LABEL]
+event_persisted_position = meter.create_gauge(
+    "synapse_event_persisted_position", description="", unit="1"
 )
 
 # Used to track the received_ts of the last event processed by various
 # components
-event_processing_last_ts = Gauge(
-    "synapse_event_processing_last_ts", "", labelnames=["name", SERVER_NAME_LABEL]
+event_processing_last_ts = meter.create_gauge(
+    "synapse_event_processing_last_ts", description="", unit="1"
 )
 
 # Used to track the lag processing events. This is the time difference
 # between the last processed event's received_ts and the time it was
 # finished being processed.
-event_processing_lag = Gauge(
-    "synapse_event_processing_lag", "", labelnames=["name", SERVER_NAME_LABEL]
+event_processing_lag = meter.create_gauge(
+    "synapse_event_processing_lag", description="", unit="1"
 )
 
 event_processing_lag_by_event = Histogram(
@@ -799,20 +798,25 @@ event_processing_lag_by_event = Histogram(
 # This is a process-level metric, so it does not have the `SERVER_NAME_LABEL`. We
 # consider this process-level because all Synapse homeservers running in the process
 # will use the same Synapse version.
-build_info = Gauge(  # type: ignore[missing-server-name-label]
-    "synapse_build_info", "Build information", ["pythonversion", "version", "osversion"]
+build_info = meter.create_gauge(
+    "synapse_build_info", description="Build information", unit="1"
 )
-build_info.labels(
-    " ".join([platform.python_implementation(), platform.python_version()]),
-    SYNAPSE_VERSION,
-    " ".join([platform.system(), platform.release()]),
-).set(1)
+build_info.set(
+    1,
+    {
+        "pythonversion": " ".join(
+            [platform.python_implementation(), platform.python_version()]
+        ),
+        "version": SYNAPSE_VERSION,
+        "osversion": " ".join([platform.system(), platform.release()]),
+    },
+)
 
 # Loaded modules info
-module_instances_info = Gauge(
+module_instances_info = meter.create_gauge(
     "synapse_module_info",
-    "Information about loaded modules",
-    labelnames=["package_name", "module_name", "module_version", SERVER_NAME_LABEL],
+    description="Information about loaded modules",
+    unit="1",
 )
 
 # 3PID send info
@@ -825,41 +829,41 @@ threepid_send_requests = Histogram(
     labelnames=("type", "reason", SERVER_NAME_LABEL),
 )
 
-threadpool_total_threads = Gauge(
+threadpool_total_threads = meter.create_gauge(
     "synapse_threadpool_total_threads",
-    "Total number of threads currently in the threadpool",
-    labelnames=["name", SERVER_NAME_LABEL],
+    description="Total number of threads currently in the threadpool",
+    unit="1",
 )
 
-threadpool_total_working_threads = Gauge(
+threadpool_total_working_threads = meter.create_gauge(
     "synapse_threadpool_working_threads",
-    "Number of threads currently working in the threadpool",
-    labelnames=["name", SERVER_NAME_LABEL],
+    description="Number of threads currently working in the threadpool",
+    unit="1",
 )
 
-threadpool_total_min_threads = Gauge(
+threadpool_total_min_threads = meter.create_gauge(
     "synapse_threadpool_min_threads",
-    "Minimum number of threads configured in the threadpool",
-    labelnames=["name", SERVER_NAME_LABEL],
+    description="Minimum number of threads configured in the threadpool",
+    unit="1",
 )
 
-threadpool_total_max_threads = Gauge(
+threadpool_total_max_threads = meter.create_gauge(
     "synapse_threadpool_max_threads",
-    "Maximum number of threads configured in the threadpool",
-    labelnames=["name", SERVER_NAME_LABEL],
+    description="Maximum number of threads configured in the threadpool",
+    unit="1",
 )
 
 # Gauges for room counts
-known_rooms_gauge = Gauge(
+known_rooms_gauge = meter.create_gauge(
     "synapse_known_rooms_total",
-    "Total number of rooms",
-    labelnames=[SERVER_NAME_LABEL],
+    description="Total number of rooms",
+    unit="1",
 )
 
-locally_joined_rooms_gauge = Gauge(
+locally_joined_rooms_gauge = meter.create_gauge(
     "synapse_locally_joined_rooms_total",
-    "Total number of locally joined rooms",
-    labelnames=[SERVER_NAME_LABEL],
+    description="Total number of locally joined rooms",
+    unit="1",
 )
 
 
@@ -873,19 +877,23 @@ def register_threadpool(*, name: str, server_name: str, threadpool: ThreadPool) 
         threadpool: The threadpool to register metrics for.
     """
 
-    threadpool_total_min_threads.labels(
-        name=name, **{SERVER_NAME_LABEL: server_name}
-    ).set(threadpool.min)
-    threadpool_total_max_threads.labels(
-        name=name, **{SERVER_NAME_LABEL: server_name}
-    ).set(threadpool.max)
+    threadpool_total_min_threads.set(
+        threadpool.min,
+        {"name": name, SERVER_NAME_LABEL: server_name},
+    )
+    threadpool_total_max_threads.set(
+        threadpool.max,
+        {"name": name, SERVER_NAME_LABEL: server_name},
+    )
 
-    threadpool_total_threads.labels(
-        name=name, **{SERVER_NAME_LABEL: server_name}
-    ).set_function(lambda: len(threadpool.threads))
-    threadpool_total_working_threads.labels(
-        name=name, **{SERVER_NAME_LABEL: server_name}
-    ).set_function(lambda: len(threadpool.working))
+    threadpool_total_threads.set(
+        len(threadpool.threads),
+        {"name": name, SERVER_NAME_LABEL: server_name},
+    )
+    threadpool_total_working_threads.set(
+        len(threadpool.working),
+        {"name": name, SERVER_NAME_LABEL: server_name},
+    )
 
 
 class MetricsResource(Resource):
