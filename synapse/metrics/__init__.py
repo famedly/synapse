@@ -43,6 +43,10 @@ from typing import (
 )
 
 import attr
+from opentelemetry import metrics
+from opentelemetry.exporter.prometheus import PrometheusMetricReader
+from opentelemetry.sdk.metrics import MeterProvider
+from opentelemetry.sdk.resources import SERVICE_NAME, Resource as OtelResource
 from packaging.version import parse as parse_version
 from prometheus_client import (
     CollectorRegistry,
@@ -152,6 +156,21 @@ class _RegistryProxy:
 # for it to be usable in the contexts in which we use it.
 # TODO Do something nicer about this.
 RegistryProxy = cast(CollectorRegistry, _RegistryProxy)
+
+
+# otel metrics setup
+############################
+resource = OtelResource(attributes={SERVICE_NAME: SERVER_NAME_LABEL})
+reader = PrometheusMetricReader()
+provider = MeterProvider(resource=resource, metric_readers=[reader])
+metrics.set_meter_provider(provider)
+meter = provider.get_meter("synapse-otel-meter")
+test_counter = meter.create_counter(
+    "test_requests_total", description="A simple test counter"
+)
+test_counter.add(1)
+test_counter.add(1, {"method": "GET"})
+############################
 
 
 @attr.s(slots=True, hash=True, auto_attribs=True, kw_only=True)
