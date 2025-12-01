@@ -28,9 +28,11 @@ import threading
 from importlib import metadata
 from typing import (
     Callable,
+    ContextManager,
     Dict,
     Generic,
     Iterable,
+    List,
     Mapping,
     Optional,
     Sequence,
@@ -45,13 +47,13 @@ from typing import (
 import attr
 from opentelemetry import metrics
 from opentelemetry.exporter.prometheus import PrometheusMetricReader
+from opentelemetry.metrics import Observation
 from opentelemetry.sdk.metrics import MeterProvider
 from opentelemetry.sdk.resources import SERVICE_NAME, Resource as OtelResource
 from packaging.version import parse as parse_version
 from prometheus_client import (
     CollectorRegistry,
     Counter,
-    Gauge,
     Histogram,
     Metric,
     generate_latest,
@@ -101,6 +103,173 @@ Content type of the latest text format for Prometheus metrics.
 
 Pulled directly from the prometheus_client library.
 """
+
+
+class Gauge:
+    """OTel-backed replacement for :class:`prometheus_client.Gauge`.
+
+    This implements the small subset of the ``prometheus_client.Gauge`` API that
+    Synapse currently relies on:
+
+    * ``labels(...)`` (positional or keyword label values)
+    * ``remove(...)``
+    * ``set(value)``, ``inc(amount=1)``, ``dec(amount=1)``
+    * ``set_function(fn)``
+    * ``track_inprogress()`` context manager
+
+    Metrics are exposed via the global OTEL ``meter`` using an
+    ``ObservableGauge``. Each Gauge instance owns a single OTEL instrument and
+    maintains per-label-value children whose current values are read whenever
+    the OTEL exporter collects metrics.
+    """
+
+    def __init__(
+        self,
+        name: str,
+        documentation: str,
+        labelnames: Optional[StrSequence] = None,
+        unit: str = "",
+        **_: object,
+    ):
+        self._name = name
+        self._documentation = documentation
+        self._labelnames: Tuple[str, ...] = tuple(labelnames or ())
+        self._unit = unit
+
+        # Map from label value tuples to child instances.
+        self._children: Dict[Tuple[str, ...], "_GaugeChild"] = {}
+
+        def _callback(_: object) -> Iterable[Observation]:
+            # Called by OTEL when exporting metrics. We snapshot all children and
+            # return an Observation for each one that currently has a value.
+            observations: List[Observation] = []
+            # Copy the values to avoid issues if labels are added/removed while
+            # we are iterating.
+            children = list(self._children.values())
+            for child in children:
+                value = child.get_value()
+                if value is None:
+                    continue
+                observations.append(Observation(value, attributes=child.attributes))
+            return observations
+
+        # Create the underlying OTEL instrument. The Prometheus exporter wired up
+        # earlier in this module will pick these up and expose them on its
+        # /metrics endpoint.
+        self._instrument = meter.create_observable_gauge(
+            name=self._name,
+            callbacks=[_callback],
+            description=self._documentation,
+            unit=self._unit,
+        )
+
+    def labels(self, *values: str, **labelkwargs: str) -> "_GaugeChild":
+        """Return (and create, if necessary) the Gauge child for the given labels."""
+        if labelkwargs:
+            if values:
+                raise TypeError("Cannot mix positional and keyword label arguments")
+            label_values = tuple(str(labelkwargs[name]) for name in self._labelnames)
+        else:
+            label_values = tuple(str(v) for v in values)
+
+        if len(label_values) != len(self._labelnames):
+            raise ValueError(
+                f"Expected {len(self._labelnames)} label values, got {len(label_values)}"
+            )
+
+        child = self._children.get(label_values)
+        if child is None:
+            attributes: Dict[str, str] = dict(zip(self._labelnames, label_values))
+            child = _GaugeChild(attributes)
+            self._children[label_values] = child
+        return child
+
+    def remove(self, *values: str) -> None:
+        """Remove the child for the given label values, if it exists."""
+        key = tuple(str(v) for v in values)
+        self._children.pop(key, None)
+
+    def collect(self) -> Iterable[Metric]:
+        """Collect metrics in Prometheus format for testing compatibility.
+        This method allows tests to access metric values using the Prometheus
+        client library's API. Returns a GaugeMetricFamily with all current
+        child values.
+        """
+        gauge = GaugeMetricFamily(  # type: ignore[missing-server-name-label]
+            self._name, self._documentation, labels=self._labelnames
+        )
+        for label_values, child in self._children.items():
+            value = child.get_value()
+            if value is not None:
+                gauge.add_metric(labels=label_values, value=value)
+        yield gauge
+
+
+class _GaugeChild:
+    """Represents a single labelled time series for a :class:`Gauge`."""
+
+    __slots__ = ("_attributes", "_value", "_func")
+
+    def __init__(self, attributes: Mapping[str, str]):
+        self._attributes = dict(attributes)
+        self._value: float = 0.0
+        self._func: Optional[Callable[[], Union[int, float]]] = None
+
+    @property
+    def attributes(self) -> Mapping[str, str]:
+        return self._attributes
+
+    def set(self, value: Union[int, float]) -> None:
+        self._func = None
+        self._value = float(value)
+
+    def inc(self, amount: Union[int, float] = 1) -> None:
+        self._func = None
+        self._value += float(amount)
+
+    def dec(self, amount: Union[int, float] = 1) -> None:
+        self._func = None
+        self._value -= float(amount)
+
+    def set_function(self, func: Callable[[], Union[int, float]]) -> None:
+        """Configure this child to read its value from ``func`` when collected."""
+        self._func = func
+
+    def get_value(self) -> Optional[float]:
+        if self._func is not None:
+            try:
+                return float(self._func())
+            except Exception:
+                # Match prometheus_client's behaviour and keep metrics collection
+                logger.exception("Error while evaluating Gauge callback")
+                return None
+        return self._value
+
+    def track_inprogress(self) -> ContextManager["_GaugeChild"]:
+        """Context manager that increments the gauge while the block is running."""
+
+        child = self
+
+        class _InProgressContext:
+            def __enter__(self) -> "_GaugeChild":
+                child.inc()
+                return child
+
+            def __exit__(
+                self,
+                exc_type: Optional[Type[BaseException]],
+                exc: Optional[BaseException],
+                tb: Optional[object],
+            ) -> None:
+                child.dec()
+                # Propagate any exception.
+                return None
+
+        return _InProgressContext()
+
+
+# Public type alias for the return type of Gauge.labels()
+GaugeChild = _GaugeChild
 
 
 def _set_prometheus_client_use_created_metrics(new_value: bool) -> None:
@@ -679,7 +848,7 @@ event_processing_lag_by_event = Histogram(
 # This is a process-level metric, so it does not have the `SERVER_NAME_LABEL`. We
 # consider this process-level because all Synapse homeservers running in the process
 # will use the same Synapse version.
-build_info = Gauge(  # type: ignore[missing-server-name-label]
+build_info = Gauge(
     "synapse_build_info", "Build information", ["pythonversion", "version", "osversion"]
 )
 build_info.labels(
@@ -787,6 +956,8 @@ class MetricsResource(Resource):
 
 __all__ = [
     "Collector",
+    "Gauge",
+    "GaugeChild",
     "MetricsResource",
     "generate_latest",
     "LaterGauge",

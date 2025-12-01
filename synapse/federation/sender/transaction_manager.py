@@ -20,8 +20,6 @@
 import logging
 from typing import TYPE_CHECKING, List
 
-from prometheus_client import Gauge
-
 from synapse.api.constants import EduTypes
 from synapse.api.errors import HttpResponseException
 from synapse.events import EventBase
@@ -34,7 +32,7 @@ from synapse.logging.opentracing import (
     tags,
     whitelisted_homeserver,
 )
-from synapse.metrics import SERVER_NAME_LABEL
+from synapse.metrics import SERVER_NAME_LABEL, Gauge
 from synapse.types import JsonDict
 from synapse.util.json import json_decoder
 from synapse.util.metrics import measure_func

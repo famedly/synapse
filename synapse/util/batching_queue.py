@@ -33,12 +33,10 @@ from typing import (
     TypeVar,
 )
 
-from prometheus_client import Gauge
-
 from twisted.internet import defer
 
 from synapse.logging.context import PreserveLoggingContext, make_deferred_yieldable
-from synapse.metrics import SERVER_NAME_LABEL
+from synapse.metrics import SERVER_NAME_LABEL, Gauge, GaugeChild
 from synapse.util.clock import Clock
 
 if TYPE_CHECKING:
@@ -127,7 +125,7 @@ class BatchingQueue(Generic[V, R]):
             name=self._name, **{SERVER_NAME_LABEL: self.server_name}
         ).set_function(lambda: len(self._next_values))
 
-        self._number_in_flight_metric: Gauge = number_in_flight.labels(
+        self._number_in_flight_metric: GaugeChild = number_in_flight.labels(
             name=self._name, **{SERVER_NAME_LABEL: self.server_name}
         )
 

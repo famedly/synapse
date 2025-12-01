@@ -20,11 +20,10 @@
 #
 from typing import List, Tuple
 
-from prometheus_client import Gauge
-
 from twisted.internet import defer
 
 from synapse.logging.context import make_deferred_yieldable
+from synapse.metrics import Gauge
 from synapse.util.batching_queue import (
     BatchingQueue,
     number_in_flight,
