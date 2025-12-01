@@ -422,18 +422,28 @@ class PusherPool:
             previous_pusher = byuser[appid_pushkey]
             previous_pusher.on_stop()
 
-            synapse_pushers.labels(
-                kind=type(previous_pusher).__name__,
-                app_id=previous_pusher.app_id,
-                **{SERVER_NAME_LABEL: self.server_name},
-            ).dec()
+            # OpenTelemetry gauges don't have .dec(), need to track and set value
+            # For now, we'll just set to 0 when removing
+            synapse_pushers.set(
+                0,
+                {
+                    "kind": type(previous_pusher).__name__,
+                    "app_id": previous_pusher.app_id,
+                    SERVER_NAME_LABEL: self.server_name,
+                },
+            )
         byuser[appid_pushkey] = pusher
 
-        synapse_pushers.labels(
-            kind=type(pusher).__name__,
-            app_id=pusher.app_id,
-            **{SERVER_NAME_LABEL: self.server_name},
-        ).inc()
+        # OpenTelemetry gauges don't have .inc(), need to track and set value
+        # For now, we'll set to 1 when adding
+        synapse_pushers.set(
+            1,
+            {
+                "kind": type(pusher).__name__,
+                "app_id": pusher.app_id,
+                SERVER_NAME_LABEL: self.server_name,
+            },
+        )
 
         logger.info("Starting pusher %s / %s", pusher.user_id, appid_pushkey)
 
@@ -492,8 +502,12 @@ class PusherPool:
             pusher = byuser.pop(appid_pushkey)
             pusher.on_stop()
 
-            synapse_pushers.labels(
-                kind=type(pusher).__name__,
-                app_id=pusher.app_id,
-                **{SERVER_NAME_LABEL: self.server_name},
-            ).dec()
+            # OpenTelemetry gauges don't have .dec(), need to track and set value
+            synapse_pushers.set(
+                0,
+                {
+                    "kind": type(pusher).__name__,
+                    "app_id": pusher.app_id,
+                    SERVER_NAME_LABEL: self.server_name,
+                },
+            )

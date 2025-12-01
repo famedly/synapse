@@ -2309,12 +2309,14 @@ class EventFederationWorkerStore(
             "_get_stats_for_federation_staging", _get_stats_for_federation_staging_txn
         )
 
-        number_pdus_in_federation_queue.labels(
-            **{SERVER_NAME_LABEL: self.server_name}
-        ).set(count)
-        oldest_pdu_in_federation_staging.labels(
-            **{SERVER_NAME_LABEL: self.server_name}
-        ).set(age)
+        number_pdus_in_federation_queue.set(
+            count,
+            {SERVER_NAME_LABEL: self.server_name},
+        )
+        oldest_pdu_in_federation_staging.set(
+            age,
+            {SERVER_NAME_LABEL: self.server_name},
+        )
 
     async def clean_room_for_join(self, room_id: str) -> None:
         await self.db_pool.runInteraction(

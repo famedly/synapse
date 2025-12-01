@@ -154,9 +154,10 @@ class StatsHandler:
 
             logger.debug("Handled room stats to %s -> %s", self.pos, max_pos)
 
-            event_processing_positions.labels(
-                name="stats", **{SERVER_NAME_LABEL: self.server_name}
-            ).set(max_pos)
+            event_processing_positions.set(
+                max_pos,
+                {"name": "stats", SERVER_NAME_LABEL: self.server_name},
+            )
 
             self.pos = max_pos
 
@@ -170,9 +171,10 @@ class StatsHandler:
                 known_room_count,
                 {SERVER_NAME_LABEL: self.server_name},
             )
-            locally_joined_rooms_gauge.labels(
-                **{SERVER_NAME_LABEL: self.server_name}
-            ).set(locally_joined_room_count)
+            locally_joined_rooms_gauge.set(
+                locally_joined_room_count,
+                {SERVER_NAME_LABEL: self.server_name},
+            )
 
     async def _handle_deltas(
         self, deltas: Iterable[StateDelta]

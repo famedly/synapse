@@ -205,10 +205,13 @@ class ApplicationServicesHandler:
 
                     await self.store.set_appservice_last_pos(upper_bound)
 
-                    synapse.metrics.event_processing_positions.labels(
-                        name="appservice_sender",
-                        **{SERVER_NAME_LABEL: self.server_name},
-                    ).set(upper_bound)
+                    synapse.metrics.event_processing_positions.set(
+                        upper_bound,
+                        {
+                            "name": "appservice_sender",
+                            SERVER_NAME_LABEL: self.server_name,
+                        },
+                    )
 
                     events_processed_counter.labels(
                         **{SERVER_NAME_LABEL: self.server_name}
@@ -229,14 +232,20 @@ class ApplicationServicesHandler:
                         ts = event_to_received_ts[events[-1].event_id]
                         assert ts is not None
 
-                        synapse.metrics.event_processing_lag.labels(
-                            name="appservice_sender",
-                            **{SERVER_NAME_LABEL: self.server_name},
-                        ).set(now - ts)
-                        synapse.metrics.event_processing_last_ts.labels(
-                            name="appservice_sender",
-                            **{SERVER_NAME_LABEL: self.server_name},
-                        ).set(ts)
+                        synapse.metrics.event_processing_lag.set(
+                            now - ts,
+                            {
+                                "name": "appservice_sender",
+                                SERVER_NAME_LABEL: self.server_name,
+                            },
+                        )
+                        synapse.metrics.event_processing_last_ts.set(
+                            ts,
+                            {
+                                "name": "appservice_sender",
+                                SERVER_NAME_LABEL: self.server_name,
+                            },
+                        )
             finally:
                 self.is_processing = False
 

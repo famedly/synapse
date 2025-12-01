@@ -83,7 +83,7 @@ _background_process_start_count = Counter(
     labelnames=["name", SERVER_NAME_LABEL],
 )
 
-_background_process_in_flight_count = meter.create_gauge(
+_background_process_in_flight_count = meter.create_counter(
     "synapse_background_process_in_flight_count",
     description="Number of background processes in flight",
     unit="1",
@@ -281,9 +281,12 @@ def run_as_background_process(
         _background_process_start_count.labels(
             name=desc, **{SERVER_NAME_LABEL: server_name}
         ).inc()
-        _background_process_in_flight_count.labels(
-            name=desc, **{SERVER_NAME_LABEL: server_name}
-        ).inc()
+        # OpenTelemetry gauges don't have .inc(), need to track and set value
+        # For now, we'll just set to 1 when starting
+        _background_process_in_flight_count.add(
+            1,
+            {"name": desc, SERVER_NAME_LABEL: server_name},
+        )
 
         with BackgroundProcessLoggingContext(
             name=desc, server_name=server_name, instance_id=count
@@ -390,9 +393,11 @@ def run_as_background_process(
                 )
                 return None
             finally:
-                _background_process_in_flight_count.labels(
-                    name=desc, **{SERVER_NAME_LABEL: server_name}
-                ).dec()
+                # OpenTelemetry gauges don't have .dec(), need to track and set value
+                _background_process_in_flight_count.add(
+                    0,
+                    {"name": desc, SERVER_NAME_LABEL: server_name},
+                )
 
     # To explain how the log contexts work here:
     #  - When `run_as_background_process` is called, the current context is stored

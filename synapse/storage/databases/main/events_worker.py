@@ -1145,9 +1145,10 @@ class EventsWorkerStore(SQLBaseStore):
                 and self._event_fetch_ongoing < EVENT_QUEUE_THREADS
             ):
                 self._event_fetch_ongoing += 1
-                event_fetch_ongoing_gauge.labels(
-                    **{SERVER_NAME_LABEL: self.server_name}
-                ).set(self._event_fetch_ongoing)
+                event_fetch_ongoing_gauge.set(
+                    self._event_fetch_ongoing,
+                    {SERVER_NAME_LABEL: self.server_name},
+                )
                 # `_event_fetch_ongoing` is decremented in `_fetch_thread`.
                 should_start = True
             else:
@@ -1169,9 +1170,10 @@ class EventsWorkerStore(SQLBaseStore):
             event_fetches_to_fail = []
             with self._event_fetch_lock:
                 self._event_fetch_ongoing -= 1
-                event_fetch_ongoing_gauge.labels(
-                    **{SERVER_NAME_LABEL: self.server_name}
-                ).set(self._event_fetch_ongoing)
+                event_fetch_ongoing_gauge.set(
+                    self._event_fetch_ongoing,
+                    {SERVER_NAME_LABEL: self.server_name},
+                )
 
                 # There may still be work remaining in `_event_fetch_list` if we
                 # failed, or it was added in between us deciding to exit and

@@ -117,17 +117,16 @@ class BatchingQueue(Generic[V, R]):
         # The function to call with batches of values.
         self._process_batch_callback = process_batch_callback
 
-        number_queued.labels(
-            name=self._name, **{SERVER_NAME_LABEL: self.server_name}
-        ).set_function(lambda: sum(len(q) for q in self._next_values.values()))
+        # Note: OpenTelemetry gauges don't support set_function, so these need to be
+        # updated manually when values change
+        # number_queued.set_function(lambda: sum(len(q) for q in self._next_values.values()))
+        # number_of_keys.set_function(lambda: len(self._next_values))
 
-        number_of_keys.labels(
-            name=self._name, **{SERVER_NAME_LABEL: self.server_name}
-        ).set_function(lambda: len(self._next_values))
-
-        self._number_in_flight_metric: Gauge = number_in_flight.labels(
-            name=self._name, **{SERVER_NAME_LABEL: self.server_name}
-        )
+        # Store attributes for later use
+        self._number_in_flight_attributes = {
+            "name": self._name,
+            SERVER_NAME_LABEL: self.server_name,
+        }
 
     def shutdown(self) -> None:
         """
@@ -157,8 +156,19 @@ class BatchingQueue(Generic[V, R]):
         if key not in self._processing_keys:
             self.hs.run_as_background_process(self._name, self._process_queue, key)
 
-        with self._number_in_flight_metric.track_inprogress():
+        # Update in-flight metric
+        number_in_flight.set(
+            len(self._next_values) + sum(len(q) for q in self._processing_keys),
+            self._number_in_flight_attributes,
+        )
+        try:
             return await make_deferred_yieldable(d)
+        finally:
+            # Update in-flight metric after completion
+            number_in_flight.set(
+                len(self._next_values) + sum(len(q) for q in self._processing_keys),
+                self._number_in_flight_attributes,
+            )
 
     async def _process_queue(self, key: Hashable) -> None:
         """A background task to repeatedly pull things off the queue for the

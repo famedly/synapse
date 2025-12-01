@@ -202,7 +202,10 @@ class TransactionManager:
 
             if pdus and destination in self._federation_metrics_domains:
                 last_pdu = pdus[-1]
-                last_pdu_ts_metric.labels(
-                    destination_server_name=destination,
-                    **{SERVER_NAME_LABEL: self.server_name},
-                ).set(last_pdu.origin_server_ts / 1000)
+                last_pdu_ts_metric.set(
+                    last_pdu.origin_server_ts / 1000,
+                    {
+                        "destination_server_name": destination,
+                        SERVER_NAME_LABEL: self.server_name,
+                    },
+                )
