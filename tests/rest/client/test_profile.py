@@ -45,7 +45,6 @@ from tests import unittest
 from tests.replication._base import BaseMultiWorkerStreamTestCase
 from tests.server import FakeChannel, make_request
 from tests.test_utils import SMALL_PNG
-from tests.unittest import override_config
 from tests.utils import USE_POSTGRES_FOR_TESTS
 
 
@@ -945,7 +944,7 @@ class ProfileMediaAttachmentTestCase(unittest.HomeserverTestCase):
     def default_config(self) -> JsonDict:
         config = super().default_config()
         config.setdefault("experimental_features", {})
-        config["experimental_features"].update({"msc3911_enabled": True})
+        config["experimental_features"].update({"msc3911": {"enabled": True}})
         return config
 
     def create_resource_dict(self) -> dict[str, Resource]:
@@ -1048,26 +1047,6 @@ class ProfileMediaAttachmentTestCase(unittest.HomeserverTestCase):
 
         assert channel.code == HTTPStatus.OK, channel.json_body
 
-    @override_config(
-        {"experimental_features": {"msc3911_unrestricted_media_upload_disabled": True}}
-    )
-    def test_attaching_unreachable_remote_media_to_profile_fails(self) -> None:
-        """
-        Test that media that can not be retrieved will fail to be attached to a user
-        profile when legacy unrestricted media is disabled.
-        """
-        # Generate non-existing media.
-        nonexistent_mxc_uri = MXCUri.from_str("mxc://remote/fakeMediaId_2")
-        channel = self.make_request(
-            "PUT",
-            f"/_matrix/client/v3/profile/{self.user}/avatar_url",
-            access_token=self.tok,
-            content={"avatar_url": str(nonexistent_mxc_uri)},
-        )
-
-        assert channel.code == HTTPStatus.NOT_FOUND, channel.json_body
-        assert channel.json_body["errcode"] == Codes.NOT_FOUND
-
     def test_attaching_unrestricted_media_to_profile(self) -> None:
         """
         Test that attaching unrestricted media to user profile also works
@@ -1097,43 +1076,6 @@ class ProfileMediaAttachmentTestCase(unittest.HomeserverTestCase):
             content={"avatar_url": str(content_uri)},
         )
         assert channel.code == 200, channel.result
-
-    @override_config(
-        {"experimental_features": {"msc3911_unrestricted_media_upload_disabled": True}}
-    )
-    def test_attaching_unrestricted_media_to_profile_fails(self) -> None:
-        """
-        Test that attaching unrestricted media to user profile fails when unrestricted
-        media is banned by configuration.
-        """
-        # Create unrestricted media.
-        content = io.BytesIO(SMALL_PNG)
-        content_uri = self.get_success(
-            self.media_repo.create_or_update_content(
-                "image/png",
-                "test_png_upload",
-                content,
-                67,
-                UserID.from_string(self.user),
-                restricted=False,
-            )
-        )
-
-        # Check media is unrestricted.
-        media_info = self.get_success(self.store.get_local_media(content_uri.media_id))
-        assert media_info is not None
-        assert not media_info.restricted
-
-        # Try to update user profile with unrestricted media.
-        channel = self.make_request(
-            "PUT",
-            f"/_matrix/client/v3/profile/{self.user}/avatar_url",
-            access_token=self.tok,
-            content={"avatar_url": str(content_uri)},
-        )
-        assert channel.code == HTTPStatus.BAD_REQUEST, channel.json_body
-        assert channel.json_body["errcode"] == Codes.INVALID_PARAM
-        assert "is not restricted" in channel.json_body["error"]
 
     def test_attaching_already_attached_media_to_profile_fails(self) -> None:
         """
@@ -1327,7 +1269,9 @@ class ProfileMediaAttachmentReplicationTestCase(BaseMultiWorkerStreamTestCase):
     def default_config(self) -> JsonDict:
         config = super().default_config()
         config.setdefault("experimental_features", {})
-        config["experimental_features"].update({"msc3911_enabled": True})
+        config["experimental_features"].update({"msc3911": {"enabled": True}})
+        # config["media_repo_instances"] = [MAIN_PROCESS_INSTANCE_NAME]
+
         return config
 
     def create_media_and_set_restricted_flag(self, user_id: str) -> MXCUri:

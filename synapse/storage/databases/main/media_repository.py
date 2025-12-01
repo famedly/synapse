@@ -638,11 +638,12 @@ class MediaRepositoryStore(MediaRepositoryBackgroundUpdateStore):
             "get_pending_media", get_pending_media_txn
         )
 
-    async def get_pending_media_ids(self) -> list[str]:
+    async def get_pending_media_ids(self, interval: int) -> list[str]:
         """
-        Get a list of ids of pending media that is older than 24 hours and unattached.
+        Get a list of ids of pending media that is older than the given interval and
+        unattached.
         """
-        threshold_ts = self._clock.time_msec() - 24 * 60 * 60 * 1000
+        threshold_ts = self._clock.time_msec() - interval
 
         def _get_pending_media_ids_txn(txn: LoggingTransaction) -> list[str]:
             sql = """

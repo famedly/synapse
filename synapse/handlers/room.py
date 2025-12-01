@@ -1232,7 +1232,7 @@ class RoomCreationHandler:
         room_avatar = initial_state.get((EventTypes.RoomAvatar, ""))
         # It is unfortunate that this conditional block has to be run twice: once here
         # to validate the data and again to actually attach the media reference.
-        if room_avatar is not None and self.config.experimental.msc3911_enabled:
+        if room_avatar is not None and self.config.experimental.msc3911.enabled:
             # this should be an mxc, but the spec does not specifically say it has to be
             extracted_media_id: Optional[str] = room_avatar.get("url")
             # It may be that "url" is set to either an empty string or None. Accept
@@ -1550,7 +1550,7 @@ class RoomCreationHandler:
 
             mxc_restrictions = None
             if (
-                self.config.experimental.msc3911_enabled
+                self.config.experimental.msc3911.enabled
                 and etype == EventTypes.RoomAvatar
             ):
                 # this should be an mxc, but the spec does not specifically say it has to be

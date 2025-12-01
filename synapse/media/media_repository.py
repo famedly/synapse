@@ -101,7 +101,6 @@ UPDATE_RECENTLY_ACCESSED_TS = 60 * 1000  # 1 minute
 # How often to run the background job to check for local and remote media
 # that should be purged according to the configured media retention settings.
 MEDIA_RETENTION_CHECK_PERIOD_MS = 60 * 60 * 1000  # 1 hour
-PENDING_MEDIA_CLEANUP_INTERVAL_MS = 60 * 60 * 1000  # 1 hour
 
 
 class AbstractMediaRepository:
@@ -113,7 +112,7 @@ class AbstractMediaRepository:
         self.server_name = hs.hostname
         self.store = hs.get_datastores().main
         self._is_mine_server_name = hs.is_mine_server_name
-        self.enable_media_restriction = self.hs.config.experimental.msc3911_enabled
+        self.enable_media_restriction = self.hs.config.experimental.msc3911.enabled
 
     @trace
     async def create_media_id_without_expiration(
@@ -644,9 +643,14 @@ class MediaRepository(AbstractMediaRepository):
             key=lambda limit: limit.time_period_ms, reverse=True
         )
 
-        if self.hs.config.experimental.msc3911_enabled_media_retention:
+        if (
+            self.hs.config.experimental.msc3911.purge_pending_unattached_media
+            and hs.config.media.media_instance_running_background_jobs
+            == hs.config.worker.worker_name
+        ):
             self.clock.looping_call(
-                self._pending_media_cleanup, PENDING_MEDIA_CLEANUP_INTERVAL_MS
+                self._pending_media_cleanup,
+                self.hs.config.experimental.msc3911.pending_media_cleanup_interval_ms,
             )
 
     def _start_update_recently_accessed(self) -> Deferred:
@@ -671,7 +675,9 @@ class MediaRepository(AbstractMediaRepository):
         )
 
     async def _pending_media_cleanup(self) -> None:
-        pending_media_ids = await self.store.get_pending_media_ids()
+        pending_media_ids = await self.store.get_pending_media_ids(
+            self.hs.config.experimental.msc3911.pending_media_cleanup_interval_ms
+        )
         if pending_media_ids:
             await self.delete_local_media_ids(pending_media_ids)
 

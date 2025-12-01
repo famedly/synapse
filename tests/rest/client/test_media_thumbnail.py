@@ -59,7 +59,7 @@ class RestrictedResourceThumbnailTestCase(unittest.HomeserverTestCase):
     def default_config(self) -> JsonDict:
         config = super().default_config()
         config.setdefault("experimental_features", {})
-        config["experimental_features"].update({"msc3911_enabled": True})
+        config["experimental_features"].update({"msc3911": {"enabled": True}})
         # This is what the defaults are for both 'crop' and 'scale' as reference
         # We don't need to set these, but it's good to know
         # "thumbnail_sizes": [

@@ -9,7 +9,7 @@ from synapse.media.media_repository import MediaRepository
 from synapse.rest import admin
 from synapse.rest.client import login, media, profile, room
 from synapse.server import HomeServer
-from synapse.types import UserID
+from synapse.types import JsonDict, UserID
 from synapse.util import Clock
 from synapse.util.stringutils import (
     random_string,
@@ -27,17 +27,17 @@ class PendingMediaDeletionTestCase(unittest.HomeserverTestCase):
         profile.register_servlets,
     ]
 
-    def make_homeserver(self, reactor: MemoryReactor, clock: Clock) -> HomeServer:
-        config = self.default_config()
-        config.update(
+    def default_config(self) -> JsonDict:
+        config = super().default_config()
+        config.setdefault("experimental_features", {}).update(
             {
-                "experimental_features": {
-                    "msc3911_enabled": True,
-                    "msc3911_enabled_media_retention": True,
+                "msc3911": {
+                    "enabled": True,
+                    "purge_pending_unattached_media": True,
                 },
-            }
+            },
         )
-        return self.setup_test_homeserver(config=config)
+        return config
 
     def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
         self.media_repository = hs.get_media_repository()
@@ -55,7 +55,8 @@ class PendingMediaDeletionTestCase(unittest.HomeserverTestCase):
 
     def test_pending_media_deletion_success(self) -> None:
         """
-        Test that media that is older than 24 hours yet not attached to any event or profile is deleted.
+        Test that media that is older than given time interval and not attached to any
+        event or profile is deleted.
         """
         assert isinstance(self.media_repository, MediaRepository)
 

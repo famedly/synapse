@@ -109,9 +109,9 @@ class RoomMemberHandler(metaclass=abc.ABCMeta):
         self.account_data_handler = hs.get_account_data_handler()
         self.event_auth_handler = hs.get_event_auth_handler()
         self._worker_lock_handler = hs.get_worker_locks_handler()
-        self.enable_restricted_media = hs.config.experimental.msc3911_enabled
+        self.enable_restricted_media = hs.config.experimental.msc3911.enabled
         self.allow_legacy_media = (
-            not hs.config.experimental.msc3911_unrestricted_media_upload_disabled
+            not hs.config.experimental.msc3911.block_unrestricted_media_upload
         )
 
         self._membership_types_to_include_profile_data_in = {
