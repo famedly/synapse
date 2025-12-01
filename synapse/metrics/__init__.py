@@ -20,12 +20,14 @@
 #
 #
 
+import http.server
 import itertools
 import logging
 import os
 import platform
 import threading
 from importlib import metadata
+from modulefinder import test
 from typing import (
     Callable,
     ContextManager,
@@ -46,7 +48,9 @@ from typing import (
 
 import attr
 from opentelemetry import metrics
-from opentelemetry.exporter.prometheus import PrometheusMetricReader
+from opentelemetry.exporter.prometheus import (
+    PrometheusMetricReader,
+)
 from opentelemetry.metrics import Observation
 from opentelemetry.sdk.metrics import MeterProvider
 from opentelemetry.sdk.resources import SERVICE_NAME, Resource as OtelResource
@@ -57,6 +61,7 @@ from prometheus_client import (
     Histogram,
     Metric,
     generate_latest,
+    start_http_server,
 )
 from prometheus_client.core import (
     REGISTRY,
@@ -334,11 +339,13 @@ reader = PrometheusMetricReader()
 provider = MeterProvider(resource=resource, metric_readers=[reader])
 metrics.set_meter_provider(provider)
 meter = provider.get_meter("synapse-otel-meter")
-test_counter = meter.create_counter(
-    "test_requests_total", description="A simple test counter"
+test_gauge = Gauge(
+    "test_gauge",
+    "test gauge",
+    labelnames=("name", SERVER_NAME_LABEL),
 )
-test_counter.add(1)
-test_counter.add(1, {"method": "GET"})
+test_gauge.labels(name="test", **{SERVER_NAME_LABEL: "servername"}).set(42)
+start_http_server(port=9464, addr="localhost")
 ############################
 
 
