@@ -45,6 +45,7 @@ from typing import (
 import attr
 from opentelemetry import metrics
 from opentelemetry.exporter.prometheus import PrometheusMetricReader
+from opentelemetry.metrics import CallbackOptions, Observation
 from opentelemetry.sdk.metrics import MeterProvider
 from opentelemetry.sdk.resources import SERVICE_NAME, Resource as OtelResource
 from packaging.version import parse as parse_version
@@ -280,6 +281,127 @@ all_later_gauges_to_clean_up_on_shutdown: Dict[str, LaterGauge] = {}
 Track all `LaterGauge` instances so we can remove any associated hooks during homeserver
 shutdown.
 """
+
+
+all_later_gauges_otel_to_clean_up_on_shutdown: Dict[str, "LaterGaugeOtel"] = {}
+"""
+Track all `LaterGaugeOtel` instances so we can remove any associated hooks during homeserver
+shutdown.
+"""
+
+
+@attr.s(slots=True, hash=True, auto_attribs=True, kw_only=True)
+class LaterGaugeOtel:
+    """A Gauge which periodically calls a user-provided callback to produce metrics using OpenTelemetry."""
+
+    name: str
+    desc: str
+    labelnames: Optional[StrSequence] = attr.ib(hash=False)
+    _instance_id_to_hook_map: Dict[
+        Optional[str],  # instance_id
+        Callable[
+            [], Union[Mapping[Tuple[str, ...], Union[int, float]], Union[int, float]]
+        ],
+    ] = attr.ib(factory=dict, hash=False)
+    """
+    Map from homeserver instance_id to a callback. Each callback should either return a
+    value (if there are no labels for this metric), or dict mapping from a label tuple
+    to a value.
+
+    We use `instance_id` instead of `server_name` because it's possible to have multiple
+    workers running in the same process with the same `server_name`.
+    """
+
+    def _observe_callback(self, options: CallbackOptions) -> Iterable[Observation]:
+        """Callback for ObservableGauge that collects metrics from all registered hooks."""
+        for homeserver_instance_id, hook in self._instance_id_to_hook_map.items():
+            try:
+                hook_result = hook()
+            except Exception:
+                logger.exception(
+                    "Exception running callback for LaterGaugeOtel(%s) for homeserver_instance_id=%s",
+                    self.name,
+                    homeserver_instance_id,
+                )
+                # Continue to return the rest of the metrics that aren't broken
+                continue
+
+            if isinstance(hook_result, (int, float)):
+                # Single value, no labels (or labels handled elsewhere)
+                # If we have labelnames, we need to construct attributes from them
+                # But if hook returns a single value, it typically means no labels
+                attributes: Dict[str, str] = {}
+                yield Observation(hook_result, attributes)
+            else:
+                # Dict mapping label tuples to values
+                for label_tuple, value in hook_result.items():
+                    # Convert label tuple to attributes dict
+                    if self.labelnames:
+                        attributes = dict(zip(self.labelnames, label_tuple))
+                    else:
+                        attributes = {}
+                    yield Observation(value, attributes)
+
+    def register_hook(
+        self,
+        *,
+        homeserver_instance_id: Optional[str],
+        hook: Callable[
+            [], Union[Mapping[Tuple[str, ...], Union[int, float]], Union[int, float]]
+        ],
+    ) -> None:
+        """
+        Register a callback/hook that will be called to generate a metric samples for
+        the gauge.
+
+        Args:
+            homeserver_instance_id: The unique ID for this Synapse process instance
+                (`hs.get_instance_id()`) that this hook is associated with. This can be used
+                later to lookup all hooks associated with a given server name in order to
+                unregister them. This should only be omitted for global hooks that work
+                across all homeservers.
+            hook: A callback that should either return a value (if there are no
+                labels for this metric), or dict mapping from a label tuple to a value
+        """
+        # We shouldn't have multiple hooks registered for the same homeserver `instance_id`.
+        existing_hook = self._instance_id_to_hook_map.get(homeserver_instance_id)
+        assert existing_hook is None, (
+            f"LaterGaugeOtel(name={self.name}) hook already registered for homeserver_instance_id={homeserver_instance_id}. "
+            "This is likely a Synapse bug and you forgot to unregister the previous hooks for "
+            "the server (especially in tests)."
+        )
+
+        self._instance_id_to_hook_map[homeserver_instance_id] = hook
+
+    def unregister_hooks_for_homeserver_instance_id(
+        self, homeserver_instance_id: str
+    ) -> None:
+        """
+        Unregister all hooks associated with the given homeserver `instance_id`. This should be
+        called when a homeserver is shutdown to avoid extra hooks sitting around.
+
+        Args:
+            homeserver_instance_id: The unique ID for this Synapse process instance to
+                unregister hooks for (`hs.get_instance_id()`).
+        """
+        self._instance_id_to_hook_map.pop(homeserver_instance_id, None)
+
+    def __attrs_post_init__(self) -> None:
+        # Create the ObservableGauge with our callback
+        meter.create_observable_gauge(
+            name=self.name,
+            description=self.desc,
+            callbacks=[self._observe_callback],
+        )
+
+        # We shouldn't have multiple metrics with the same name. Typically, metrics
+        # should be created globally so you shouldn't be running into this and this will
+        # catch any stupid mistakes.
+        existing_gauge = all_later_gauges_otel_to_clean_up_on_shutdown.get(self.name)
+        assert existing_gauge is None, f"LaterGaugeOtel(name={self.name}) already exists. "
+
+        # Keep track of the gauge so we can clean it up later.
+        all_later_gauges_otel_to_clean_up_on_shutdown[self.name] = self
 
 
 # `MetricsEntry` only makes sense when it is a `Protocol`,
@@ -786,6 +908,7 @@ __all__ = [
     "MetricsResource",
     "generate_latest",
     "LaterGauge",
+    "LaterGaugeOtel",
     "InFlightGauge",
     "GaugeBucketCollector",
     "MIN_TIME_BETWEEN_GCS",

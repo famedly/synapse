@@ -43,7 +43,7 @@ from synapse.logging.context import (
     PreserveLoggingContext,
     nested_logging_context,
 )
-from synapse.metrics import SERVER_NAME_LABEL, meter
+from synapse.metrics import SERVER_NAME_LABEL, LaterGaugeOtel, meter
 from synapse.metrics.background_process_metrics import (
     wrap_as_background_process,
 )
@@ -59,19 +59,10 @@ logger = logging.getLogger(__name__)
 _task_scheduler_instances: WeakSet["TaskScheduler"] = WeakSet()
 
 
-def _observe_running_tasks(options: CallbackOptions) -> Iterable[Observation]:
-    """Callback for observable gauge to report running tasks from all instances."""
-    for scheduler in _task_scheduler_instances:
-        yield Observation(
-            len(scheduler._running_tasks),
-            {SERVER_NAME_LABEL: scheduler.server_name},
-        )
-
-
-meter.create_observable_gauge(
+running_tasks_gauge = LaterGaugeOtel(
     name="synapse_scheduler_running_tasks",
-    description="The number of concurrent running tasks handled by the TaskScheduler",
-    callbacks=[_observe_running_tasks],
+    desc="The number of concurrent running tasks handled by the TaskScheduler",
+    labelnames=[SERVER_NAME_LABEL],
 )
 
 
