@@ -19,6 +19,7 @@
 # [This file includes modifications made by New Vector Limited]
 #
 #
+import json
 import logging
 from enum import Enum
 from http import HTTPStatus
@@ -1321,8 +1322,10 @@ class MediaRepositoryStore(MediaRepositoryBackgroundUpdateStore):
                 sql = """
                 SELECT media_id
                 FROM media_attachments
-                WHERE restrictions_json @> '{"restrictions": {"event_id": ?}}'
+                WHERE restrictions_json @> %s
                 """
+                json_param = json.dumps({"restrictions": {"event_id": event_id}})
+                txn.execute(sql, (json_param,))
             else:
                 # Use cross-database compatible query for the rest
                 sql = """
@@ -1330,7 +1333,8 @@ class MediaRepositoryStore(MediaRepositoryBackgroundUpdateStore):
                 FROM media_attachments
                 WHERE restrictions_json->'restrictions'->>'event_id' = ?
                 """
-            txn.execute(sql, (event_id,))
+                txn.execute(sql, (event_id,))
+
             return [row[0] for row in txn.fetchall()]
 
         return await self.db_pool.runInteraction(
