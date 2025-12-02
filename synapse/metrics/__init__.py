@@ -43,6 +43,7 @@ from typing import (
 )
 
 import attr
+from opentelemetry.metrics import get_meter_provider
 from packaging.version import parse as parse_version
 from prometheus_client import (
     CollectorRegistry,
@@ -137,6 +138,10 @@ def _set_prometheus_client_use_created_metrics(new_value: bool) -> None:
 
 # Set this globally so it applies wherever we generate/collect metrics
 _set_prometheus_client_use_created_metrics(False)
+
+
+# Global meter for registering otel metrics
+meter = get_meter_provider().get_meter("synapse")
 
 
 class _RegistryProxy:
@@ -775,4 +780,5 @@ __all__ = [
     "GaugeBucketCollector",
     "MIN_TIME_BETWEEN_GCS",
     "install_gc_manager",
+    "meter",
 ]
