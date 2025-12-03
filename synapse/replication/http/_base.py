@@ -25,8 +25,6 @@ import urllib.parse
 from inspect import signature
 from typing import TYPE_CHECKING, Any, Awaitable, Callable, ClassVar, Dict, List, Tuple
 
-from prometheus_client import Gauge
-
 from twisted.internet.error import ConnectError, DNSLookupError
 from twisted.web.server import Request
 
@@ -49,10 +47,9 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-_pending_outgoing_requests = Gauge(
+_pending_outgoing_requests = meter.create_gauge(
     "synapse_pending_outgoing_replication_requests",
-    "Number of active outgoing replication requests, by replication method name",
-    labelnames=["name", SERVER_NAME_LABEL],
+    description="Number of active outgoing replication requests, by replication method name",
 )
 
 _outgoing_request_counter = meter.create_counter(

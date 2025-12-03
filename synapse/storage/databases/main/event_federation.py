@@ -38,7 +38,6 @@ from typing import (
 )
 
 import attr
-from prometheus_client import Gauge
 
 from synapse.api.constants import MAX_DEPTH
 from synapse.api.errors import StoreError
@@ -68,16 +67,14 @@ from synapse.util.json import json_encoder
 if TYPE_CHECKING:
     from synapse.server import HomeServer
 
-oldest_pdu_in_federation_staging = Gauge(
+oldest_pdu_in_federation_staging = meter.create_gauge(
     "synapse_federation_server_oldest_inbound_pdu_in_staging",
-    "The age in seconds since we received the oldest pdu in the federation staging area",
-    labelnames=[SERVER_NAME_LABEL],
+    description="The age in seconds since we received the oldest pdu in the federation staging area",
 )
 
-number_pdus_in_federation_queue = Gauge(
+number_pdus_in_federation_queue = meter.create_gauge(
     "synapse_federation_server_number_inbound_pdu_in_staging",
-    "The total number of events in the inbound federation staging",
-    labelnames=[SERVER_NAME_LABEL],
+    description="The total number of events in the inbound federation staging",
 )
 
 pdus_pruned_from_federation_queue = meter.create_counter(

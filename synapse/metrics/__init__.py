@@ -47,7 +47,6 @@ from opentelemetry.metrics import get_meter_provider
 from packaging.version import parse as parse_version
 from prometheus_client import (
     CollectorRegistry,
-    Gauge,
     Histogram,
     Metric,
     generate_latest,
@@ -629,27 +628,21 @@ event_processing_loop_room_count = meter.create_counter(
 
 # Used to track where various components have processed in the event stream,
 # e.g. federation sending, appservice sending, etc.
-event_processing_positions = Gauge(
-    "synapse_event_processing_positions", "", labelnames=["name", SERVER_NAME_LABEL]
+event_processing_positions = meter.create_gauge(
+    "synapse_event_processing_positions",
 )
 
 # Used to track the current max events stream position
-event_persisted_position = Gauge(
-    "synapse_event_persisted_position", "", labelnames=[SERVER_NAME_LABEL]
-)
+event_persisted_position = meter.create_gauge("synapse_event_persisted_position")
 
 # Used to track the received_ts of the last event processed by various
 # components
-event_processing_last_ts = Gauge(
-    "synapse_event_processing_last_ts", "", labelnames=["name", SERVER_NAME_LABEL]
-)
+event_processing_last_ts = meter.create_gauge("synapse_event_processing_last_ts")
 
 # Used to track the lag processing events. This is the time difference
 # between the last processed event's received_ts and the time it was
 # finished being processed.
-event_processing_lag = Gauge(
-    "synapse_event_processing_lag", "", labelnames=["name", SERVER_NAME_LABEL]
-)
+event_processing_lag = meter.create_gauge("synapse_event_processing_lag")
 
 event_processing_lag_by_event = Histogram(
     "synapse_event_processing_lag_by_event",
@@ -662,8 +655,8 @@ event_processing_lag_by_event = Histogram(
 # This is a process-level metric, so it does not have the `SERVER_NAME_LABEL`. We
 # consider this process-level because all Synapse homeservers running in the process
 # will use the same Synapse version.
-build_info = Gauge(  # type: ignore[missing-server-name-label]
-    "synapse_build_info", "Build information", ["pythonversion", "version", "osversion"]
+build_info = meter.create_gauge(  # type: ignore[missing-server-name-label]
+    "synapse_build_info", description="Build information"
 )
 build_info.labels(
     " ".join([platform.python_implementation(), platform.python_version()]),
@@ -672,10 +665,9 @@ build_info.labels(
 ).set(1)
 
 # Loaded modules info
-module_instances_info = Gauge(
+module_instances_info = meter.create_gauge(
     "synapse_module_info",
-    "Information about loaded modules",
-    labelnames=["package_name", "module_name", "module_version", SERVER_NAME_LABEL],
+    description="Information about loaded modules",
 )
 
 # 3PID send info
@@ -688,41 +680,35 @@ threepid_send_requests = Histogram(
     labelnames=("type", "reason", SERVER_NAME_LABEL),
 )
 
-threadpool_total_threads = Gauge(
+threadpool_total_threads = meter.create_gauge(
     "synapse_threadpool_total_threads",
-    "Total number of threads currently in the threadpool",
-    labelnames=["name", SERVER_NAME_LABEL],
+    description="Total number of threads currently in the threadpool",
 )
 
-threadpool_total_working_threads = Gauge(
+threadpool_total_working_threads = meter.create_gauge(
     "synapse_threadpool_working_threads",
-    "Number of threads currently working in the threadpool",
-    labelnames=["name", SERVER_NAME_LABEL],
+    description="Number of threads currently working in the threadpool",
 )
 
-threadpool_total_min_threads = Gauge(
+threadpool_total_min_threads = meter.create_gauge(
     "synapse_threadpool_min_threads",
-    "Minimum number of threads configured in the threadpool",
-    labelnames=["name", SERVER_NAME_LABEL],
+    description="Minimum number of threads configured in the threadpool",
 )
 
-threadpool_total_max_threads = Gauge(
+threadpool_total_max_threads = meter.create_gauge(
     "synapse_threadpool_max_threads",
-    "Maximum number of threads configured in the threadpool",
-    labelnames=["name", SERVER_NAME_LABEL],
+    description="Maximum number of threads configured in the threadpool",
 )
 
 # Gauges for room counts
-known_rooms_gauge = Gauge(
+known_rooms_gauge = meter.create_gauge(
     "synapse_known_rooms_total",
-    "Total number of rooms",
-    labelnames=[SERVER_NAME_LABEL],
+    description="Total number of rooms",
 )
 
-locally_joined_rooms_gauge = Gauge(
+locally_joined_rooms_gauge = meter.create_gauge(
     "synapse_locally_joined_rooms_total",
-    "Total number of locally joined rooms",
-    labelnames=[SERVER_NAME_LABEL],
+    description="Total number of locally joined rooms",
 )
 
 

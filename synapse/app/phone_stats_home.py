@@ -24,11 +24,9 @@ import resource
 import sys
 from typing import TYPE_CHECKING, List, Mapping, Sized, Tuple
 
-from prometheus_client import Gauge
-
 from twisted.internet import defer
 
-from synapse.metrics import SERVER_NAME_LABEL
+from synapse.metrics import SERVER_NAME_LABEL, meter
 from synapse.types import JsonDict
 from synapse.util.constants import (
     MILLISECONDS_PER_SECOND,
@@ -57,25 +55,21 @@ Phone home stats are sent every 3 hours
 _stats_process: List[Tuple[int, "resource.struct_rusage"]] = []
 
 # Gauges to expose monthly active user control metrics
-current_mau_gauge = Gauge(
+current_mau_gauge = meter.create_gauge(
     "synapse_admin_mau_current",
-    "Current MAU",
-    labelnames=[SERVER_NAME_LABEL],
+    description="Current MAU",
 )
-current_mau_by_service_gauge = Gauge(
+current_mau_by_service_gauge = meter.create_gauge(
     "synapse_admin_mau_current_mau_by_service",
-    "Current MAU by service",
-    labelnames=["app_service", SERVER_NAME_LABEL],
+    description="Current MAU by service",
 )
-max_mau_gauge = Gauge(
+max_mau_gauge = meter.create_gauge(
     "synapse_admin_mau_max",
-    "MAU Limit",
-    labelnames=[SERVER_NAME_LABEL],
+    description="MAU Limit",
 )
-registered_reserved_users_mau_gauge = Gauge(
+registered_reserved_users_mau_gauge = meter.create_gauge(
     "synapse_admin_mau_registered_reserved_users",
-    "Registered users with reserved threepids",
-    labelnames=[SERVER_NAME_LABEL],
+    description="Registered users with reserved threepids",
 )
 
 
@@ -244,20 +238,21 @@ def start_phone_stats_home(hs: "HomeServer") -> None:
                     await store.get_monthly_active_count_by_service()
                 )
                 reserved_users = await store.get_registered_reserved_users()
-            current_mau_gauge.labels(**{SERVER_NAME_LABEL: server_name}).set(
-                float(current_mau_count)
+            current_mau_gauge.set(
+                float(current_mau_count), {SERVER_NAME_LABEL: server_name}
             )
 
             for app_service, count in current_mau_count_by_service.items():
-                current_mau_by_service_gauge.labels(
-                    app_service=app_service, **{SERVER_NAME_LABEL: server_name}
-                ).set(float(count))
+                current_mau_by_service_gauge.set(
+                    float(count),
+                    {"app_service": app_service, SERVER_NAME_LABEL: server_name},
+                )
 
-            registered_reserved_users_mau_gauge.labels(
-                **{SERVER_NAME_LABEL: server_name}
-            ).set(float(len(reserved_users)))
-            max_mau_gauge.labels(**{SERVER_NAME_LABEL: server_name}).set(
-                float(hs.config.server.max_mau_value)
+            registered_reserved_users_mau_gauge.set(
+                float(len(reserved_users)), {SERVER_NAME_LABEL: server_name}
+            )
+            max_mau_gauge.set(
+                float(hs.config.server.max_mau_value), {SERVER_NAME_LABEL: server_name}
             )
 
         return hs.run_as_background_process(

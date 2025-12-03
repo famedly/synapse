@@ -41,7 +41,7 @@ from typing import (
 )
 
 from prometheus_client import Metric
-from prometheus_client.core import REGISTRY, Gauge
+from prometheus_client.core import REGISTRY
 from typing_extensions import Concatenate, ParamSpec
 
 from twisted.internet import defer
@@ -82,10 +82,9 @@ _background_process_start_count = meter.create_counter(
     description="Number of background processes started",
 )
 
-_background_process_in_flight_count = Gauge(
+_background_process_in_flight_count = meter.create_gauge(
     "synapse_background_process_in_flight_count",
-    "Number of background processes in flight",
-    labelnames=["name", SERVER_NAME_LABEL],
+    description="Number of background processes in flight",
 )
 
 # we set registry=None in all of these to stop them getting registered with

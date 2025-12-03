@@ -35,7 +35,7 @@ from typing import (
     Union,
 )
 
-from prometheus_client import Gauge, Histogram
+from prometheus_client import Histogram
 
 from twisted.python import failure
 
@@ -119,10 +119,9 @@ pdu_process_time = Histogram(
     labelnames=[SERVER_NAME_LABEL],
 )
 
-last_pdu_ts_metric = Gauge(
+last_pdu_ts_metric = meter.create_gauge(
     "synapse_federation_last_received_pdu_time",
-    "The timestamp of the last PDU which was successfully received from the given domain",
-    labelnames=("origin_server_name", SERVER_NAME_LABEL),
+    description="The timestamp of the last PDU which was successfully received from the given domain",
 )
 
 

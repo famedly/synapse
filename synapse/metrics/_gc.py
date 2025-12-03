@@ -29,7 +29,6 @@ from typing import Iterable
 from prometheus_client.core import (
     REGISTRY,
     CounterMetricFamily,
-    Gauge,
     GaugeMetricFamily,
     Histogram,
     Metric,
@@ -38,6 +37,8 @@ from prometheus_client.core import (
 from twisted.internet import task
 
 from synapse.metrics._types import Collector
+
+from . import meter
 
 """Prometheus metrics for garbage collection"""
 
@@ -55,7 +56,9 @@ running_on_pypy = platform.python_implementation() == "PyPy"
 #
 
 # These are process-level metrics, so they do not have the `SERVER_NAME_LABEL`.
-gc_unreachable = Gauge("python_gc_unreachable_total", "Unreachable GC objects", ["gen"])  # type: ignore[missing-server-name-label]
+gc_unreachable = meter.create_gauge(
+    "python_gc_unreachable_total", description="Unreachable GC objects"
+)  # type: ignore[missing-server-name-label]
 gc_time = Histogram(  # type: ignore[missing-server-name-label]
     "python_gc_time",
     "Time taken to GC (sec)",
