@@ -544,9 +544,9 @@ class ReplicationCommandHandler:
             return
 
         stream_name = cmd.stream_name
-        inbound_rdata_count.labels(
-            stream_name=stream_name, **{SERVER_NAME_LABEL: self.server_name}
-        ).inc()
+        inbound_rdata_count.add(
+            1, {"stream_name": stream_name, SERVER_NAME_LABEL: self.server_name}
+        )
 
         # We put the received command into a queue here for two reasons:
         #   1. so we don't try and concurrently handle multiple rows for the
