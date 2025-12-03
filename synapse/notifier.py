@@ -39,7 +39,6 @@ from typing import (
 )
 
 import attr
-from prometheus_client import Counter
 
 from twisted.internet import defer
 from twisted.internet.defer import Deferred
@@ -51,7 +50,7 @@ from synapse.handlers.presence import format_user_presence_state
 from synapse.logging import issue9533_logger
 from synapse.logging.context import PreserveLoggingContext
 from synapse.logging.opentracing import log_kv, start_active_span
-from synapse.metrics import SERVER_NAME_LABEL, LaterGauge
+from synapse.metrics import SERVER_NAME_LABEL, LaterGauge, meter
 from synapse.streams.config import PaginationConfig
 from synapse.types import (
     ISynapseReactor,
@@ -76,14 +75,10 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 # FIXME: Unused metric, remove if not needed.
-notified_events_counter = Counter(
-    "synapse_notifier_notified_events", "", labelnames=[SERVER_NAME_LABEL]
-)
+notified_events_counter = meter.create_counter("synapse_notifier_notified_events")
 
-users_woken_by_stream_counter = Counter(
-    "synapse_notifier_users_woken_by_stream",
-    "",
-    labelnames=["stream", SERVER_NAME_LABEL],
+users_woken_by_stream_counter = meter.create_counter(
+    "synapse_notifier_users_woken_by_stream"
 )
 
 
@@ -386,10 +381,13 @@ class Notifier:
             for listener in listeners:
                 listener.callback(current_token)
 
-        users_woken_by_stream_counter.labels(
-            stream=StreamKeyType.UN_PARTIAL_STATED_ROOMS,
-            **{SERVER_NAME_LABEL: self.server_name},
-        ).inc(len(user_streams))
+        users_woken_by_stream_counter.add(
+            len(user_streams),
+            {
+                "stream": str(StreamKeyType.UN_PARTIAL_STATED_ROOMS),
+                SERVER_NAME_LABEL: self.server_name,
+            },
+        )
 
         # Poke the replication so that other workers also see the write to
         # the un-partial-stated rooms stream.
@@ -613,10 +611,10 @@ class Notifier:
                         listener.callback(current_token)
 
             if user_streams:
-                users_woken_by_stream_counter.labels(
-                    stream=stream_key,
-                    **{SERVER_NAME_LABEL: self.server_name},
-                ).inc(len(user_streams))
+                users_woken_by_stream_counter.add(
+                    len(user_streams),
+                    {"stream": str(stream_key), SERVER_NAME_LABEL: self.server_name},
+                )
 
         self.notify_replication()
 

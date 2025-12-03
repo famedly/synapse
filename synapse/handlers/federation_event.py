@@ -36,7 +36,7 @@ from typing import (
     Tuple,
 )
 
-from prometheus_client import Counter, Histogram
+from prometheus_client import Histogram
 
 from synapse import event_auth
 from synapse.api.constants import (
@@ -80,7 +80,7 @@ from synapse.logging.opentracing import (
     tag_args,
     trace,
 )
-from synapse.metrics import SERVER_NAME_LABEL
+from synapse.metrics import SERVER_NAME_LABEL, meter
 from synapse.replication.http.federation import (
     ReplicationFederationSendEventsRestServlet,
 )
@@ -106,10 +106,9 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-soft_failed_event_counter = Counter(
+soft_failed_event_counter = meter.create_counter(
     "synapse_federation_soft_failed_events_total",
-    "Events received over federation that we marked as soft_failed",
-    labelnames=[SERVER_NAME_LABEL],
+    description="Events received over federation that we marked as soft_failed",
 )
 
 # Added to debug performance and track progress on optimizations
@@ -2099,9 +2098,7 @@ class FederationEventHandler:
                     "hs": origin,
                 },
             )
-            soft_failed_event_counter.labels(
-                **{SERVER_NAME_LABEL: self.server_name}
-            ).inc()
+            soft_failed_event_counter.add(1, {SERVER_NAME_LABEL: self.server_name})
             event.internal_metadata.soft_failed = True
 
     async def _load_or_fetch_auth_events_for_event(

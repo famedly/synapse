@@ -24,12 +24,10 @@ import logging
 import random
 from typing import TYPE_CHECKING, List, Optional, Tuple
 
-from prometheus_client import Counter
-
 from twisted.internet.interfaces import IAddress
 from twisted.internet.protocol import ServerFactory
 
-from synapse.metrics import SERVER_NAME_LABEL
+from synapse.metrics import SERVER_NAME_LABEL, meter
 from synapse.replication.tcp.commands import PositionCommand
 from synapse.replication.tcp.protocol import ServerReplicationStreamProtocol
 from synapse.replication.tcp.streams import EventsStream
@@ -39,10 +37,8 @@ from synapse.util.metrics import Measure
 if TYPE_CHECKING:
     from synapse.server import HomeServer
 
-stream_updates_counter = Counter(
-    "synapse_replication_tcp_resource_stream_updates",
-    "",
-    labelnames=["stream_name", SERVER_NAME_LABEL],
+stream_updates_counter = meter.create_counter(
+    "synapse_replication_tcp_resource_stream_updates"
 )
 
 logger = logging.getLogger(__name__)
@@ -230,10 +226,13 @@ class ReplicationStreamer:
                                 len(updates),
                                 current_token,
                             )
-                            stream_updates_counter.labels(
-                                stream_name=stream.NAME,
-                                **{SERVER_NAME_LABEL: self.server_name},
-                            ).inc(len(updates))
+                            stream_updates_counter.add(
+                                len(updates),
+                                {
+                                    "stream_name": stream.NAME,
+                                    SERVER_NAME_LABEL: self.server_name,
+                                },
+                            )
 
                         else:
                             # The token has advanced but there is no data to

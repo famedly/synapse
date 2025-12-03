@@ -39,7 +39,8 @@ from typing import (
 
 import attr
 from immutabledict import immutabledict
-from prometheus_client import Counter, Histogram
+from opentelemetry.metrics import Counter
+from prometheus_client import Histogram
 
 from synapse.api.constants import EventTypes
 from synapse.api.room_versions import KNOWN_ROOM_VERSIONS, StateResolutionVersions
@@ -51,7 +52,7 @@ from synapse.events.snapshot import (
 )
 from synapse.logging.context import ContextResourceUsage
 from synapse.logging.opentracing import tag_args, trace
-from synapse.metrics import SERVER_NAME_LABEL
+from synapse.metrics import SERVER_NAME_LABEL, meter
 from synapse.replication.http.state import ReplicationUpdateCurrentStateRestServlet
 from synapse.state import v1, v2
 from synapse.storage.databases.main.event_federation import StateDifference
@@ -606,17 +607,15 @@ class _StateResMetrics:
     db_events: int = 0
 
 
-_biggest_room_by_cpu_counter = Counter(
+_biggest_room_by_cpu_counter = meter.create_counter(
     "synapse_state_res_cpu_for_biggest_room_seconds",
-    "CPU time spent performing state resolution for the single most expensive "
+    description="CPU time spent performing state resolution for the single most expensive "
     "room for state resolution",
-    labelnames=[SERVER_NAME_LABEL],
 )
-_biggest_room_by_db_counter = Counter(
+_biggest_room_by_db_counter = meter.create_counter(
     "synapse_state_res_db_for_biggest_room_seconds",
-    "Database time spent performing state resolution for the single most "
+    description="Database time spent performing state resolution for the single most "
     "expensive room for state resolution",
-    labelnames=[SERVER_NAME_LABEL],
 )
 
 _cpu_times = Histogram(
@@ -896,8 +895,8 @@ class StateResolutionHandler:
 
         # report info on the single biggest to prometheus
         _, biggest_metrics = biggest[0]
-        prometheus_counter_metric.labels(**{SERVER_NAME_LABEL: self.server_name}).inc(
-            extract_key(biggest_metrics)
+        prometheus_counter_metric.add(
+            extract_key(biggest_metrics), {SERVER_NAME_LABEL: self.server_name}
         )
 
 

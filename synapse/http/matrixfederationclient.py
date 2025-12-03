@@ -47,7 +47,6 @@ from typing import (
 import attr
 import treq
 from canonicaljson import encode_canonical_json
-from prometheus_client import Counter
 from signedjson.sign import sign_json
 
 from twisted.internet import defer
@@ -87,7 +86,7 @@ from synapse.http.types import QueryParams
 from synapse.logging import opentracing
 from synapse.logging.context import make_deferred_yieldable, run_in_background
 from synapse.logging.opentracing import set_tag, start_active_span, tags
-from synapse.metrics import SERVER_NAME_LABEL
+from synapse.metrics import SERVER_NAME_LABEL, meter
 from synapse.types import JsonDict
 from synapse.util.async_helpers import AwakenableSleeper, Linearizer, timeout_deferred
 from synapse.util.clock import Clock
@@ -100,15 +99,11 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-outgoing_requests_counter = Counter(
-    "synapse_http_matrixfederationclient_requests",
-    "",
-    labelnames=["method", SERVER_NAME_LABEL],
+outgoing_requests_counter = meter.create_counter(
+    "synapse_http_matrixfederationclient_requests"
 )
-incoming_responses_counter = Counter(
-    "synapse_http_matrixfederationclient_responses",
-    "",
-    labelnames=["method", "code", SERVER_NAME_LABEL],
+incoming_responses_counter = meter.create_counter(
+    "synapse_http_matrixfederationclient_responses"
 )
 
 
@@ -716,9 +711,10 @@ class MatrixFederationHttpClient:
                         _sec_timeout,
                     )
 
-                    outgoing_requests_counter.labels(
-                        method=request.method, **{SERVER_NAME_LABEL: self.server_name}
-                    ).inc()
+                    outgoing_requests_counter.add(
+                        1,
+                        {"method": request.method, SERVER_NAME_LABEL: self.server_name},
+                    )
 
                     try:
                         with Measure(
@@ -756,11 +752,14 @@ class MatrixFederationHttpClient:
                     except Exception as e:
                         raise RequestSendFailed(e, can_retry=True) from e
 
-                    incoming_responses_counter.labels(
-                        method=request.method,
-                        code=response.code,
-                        **{SERVER_NAME_LABEL: self.server_name},
-                    ).inc()
+                    incoming_responses_counter.add(
+                        1,
+                        {
+                            "method": request.method,
+                            "code": str(response.code),
+                            SERVER_NAME_LABEL: self.server_name,
+                        },
+                    )
 
                     set_tag(tags.HTTP_STATUS_CODE, response.code)
                     response_phrase = response.phrase.decode("ascii", errors="replace")

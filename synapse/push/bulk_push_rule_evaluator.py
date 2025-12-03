@@ -35,8 +35,6 @@ from typing import (
     cast,
 )
 
-from prometheus_client import Counter
-
 from twisted.internet.defer import Deferred
 
 from synapse.api.constants import (
@@ -51,7 +49,7 @@ from synapse.event_auth import auth_types_for_event, get_user_power_level
 from synapse.events import EventBase, relation_from_event
 from synapse.events.snapshot import EventContext, EventPersistencePair
 from synapse.logging.context import make_deferred_yieldable, run_in_background
-from synapse.metrics import SERVER_NAME_LABEL
+from synapse.metrics import meter
 from synapse.state import CREATE_KEY, POWER_KEY
 from synapse.storage.databases.main.roommember import EventIdMembership
 from synapse.storage.invite_rule import InviteRule
@@ -71,16 +69,12 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 # FIXME: Unused metric, remove if not needed.
-push_rules_invalidation_counter = Counter(
-    "synapse_push_bulk_push_rule_evaluator_push_rules_invalidation_counter",
-    "",
-    labelnames=[SERVER_NAME_LABEL],
+push_rules_invalidation_counter = meter.create_counter(
+    "synapse_push_bulk_push_rule_evaluator_push_rules_invalidation_counter"
 )
 # FIXME: Unused metric, remove if not needed.
-push_rules_state_size_counter = Counter(
-    "synapse_push_bulk_push_rule_evaluator_push_rules_state_size_counter",
-    "",
-    labelnames=[SERVER_NAME_LABEL],
+push_rules_state_size_counter = meter.create_counter(
+    "synapse_push_bulk_push_rule_evaluator_push_rules_state_size_counter"
 )
 
 

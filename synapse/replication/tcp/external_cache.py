@@ -22,11 +22,11 @@
 import logging
 from typing import TYPE_CHECKING, Any, Optional
 
-from prometheus_client import Counter, Histogram
+from prometheus_client import Histogram
 
 from synapse.logging import opentracing
 from synapse.logging.context import make_deferred_yieldable
-from synapse.metrics import SERVER_NAME_LABEL
+from synapse.metrics import SERVER_NAME_LABEL, meter
 from synapse.util.json import json_decoder, json_encoder
 
 if TYPE_CHECKING:
@@ -34,16 +34,14 @@ if TYPE_CHECKING:
 
     from synapse.server import HomeServer
 
-set_counter = Counter(
+set_counter = meter.create_counter(
     "synapse_external_cache_set",
-    "Number of times we set a cache",
-    labelnames=["cache_name", SERVER_NAME_LABEL],
+    description="Number of times we set a cache",
 )
 
-get_counter = Counter(
+get_counter = meter.create_counter(
     "synapse_external_cache_get",
-    "Number of times we get a cache",
-    labelnames=["cache_name", "hit", SERVER_NAME_LABEL],
+    description="Number of times we get a cache",
 )
 
 response_timer = Histogram(
@@ -96,9 +94,9 @@ class ExternalCache:
         if self._redis_connection is None:
             return
 
-        set_counter.labels(
-            cache_name=cache_name, **{SERVER_NAME_LABEL: self.server_name}
-        ).inc()
+        set_counter.add(
+            1, {"cache_name": cache_name, SERVER_NAME_LABEL: self.server_name}
+        )
 
         # txredisapi requires the value to be string, bytes or numbers, so we
         # encode stuff in JSON.
@@ -140,11 +138,14 @@ class ExternalCache:
 
         logger.debug("Got cache result %s %s: %r", cache_name, key, result)
 
-        get_counter.labels(
-            cache_name=cache_name,
-            hit=result is not None,
-            **{SERVER_NAME_LABEL: self.server_name},
-        ).inc()
+        get_counter.add(
+            1,
+            {
+                "cache_name": cache_name,
+                "hit": result is not None,
+                SERVER_NAME_LABEL: self.server_name,
+            },
+        )
 
         if not result:
             return None

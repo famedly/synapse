@@ -810,12 +810,10 @@ class FederationSender(AbstractFederationSender):
         if not destinations:
             return
 
-        sent_pdus_destination_dist_total.labels(
-            **{SERVER_NAME_LABEL: self.server_name}
-        ).inc(len(destinations))
-        sent_pdus_destination_dist_count.labels(
-            **{SERVER_NAME_LABEL: self.server_name}
-        ).inc()
+        sent_pdus_destination_dist_total.add(
+            len(destinations), {SERVER_NAME_LABEL: self.server_name}
+        )
+        sent_pdus_destination_dist_count.add(1, {SERVER_NAME_LABEL: self.server_name})
 
         assert pdu.internal_metadata.stream_ordering
 

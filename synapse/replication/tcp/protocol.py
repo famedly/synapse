@@ -30,7 +30,6 @@ import struct
 from inspect import isawaitable
 from typing import TYPE_CHECKING, Any, Collection, List, Optional
 
-from prometheus_client import Counter
 from zope.interface import Interface, implementer
 
 from twisted.internet import task
@@ -39,7 +38,7 @@ from twisted.protocols.basic import LineOnlyReceiver
 from twisted.python.failure import Failure
 
 from synapse.logging.context import PreserveLoggingContext
-from synapse.metrics import SERVER_NAME_LABEL, LaterGauge
+from synapse.metrics import SERVER_NAME_LABEL, LaterGauge, meter
 from synapse.metrics.background_process_metrics import (
     BackgroundProcessLoggingContext,
 )
@@ -62,22 +61,18 @@ if TYPE_CHECKING:
     from synapse.server import HomeServer
 
 
-connection_close_counter = Counter(
+connection_close_counter = meter.create_counter(
     "synapse_replication_tcp_protocol_close_reason",
-    "",
-    labelnames=["reason_type", SERVER_NAME_LABEL],
 )
 
-tcp_inbound_commands_counter = Counter(
+tcp_inbound_commands_counter = meter.create_counter(
     "synapse_replication_tcp_protocol_inbound_commands",
-    "Number of commands received from replication, by command and name of process connected to",
-    labelnames=["command", "name", SERVER_NAME_LABEL],
+    description="Number of commands received from replication, by command and name of process connected to",
 )
 
-tcp_outbound_commands_counter = Counter(
+tcp_outbound_commands_counter = meter.create_counter(
     "synapse_replication_tcp_protocol_outbound_commands",
-    "Number of commands sent to replication, by command and name of process connected to",
-    labelnames=["command", "name", SERVER_NAME_LABEL],
+    description="Number of commands sent to replication, by command and name of process connected to",
 )
 
 # A list of all connected protocols. This allows us to send metrics about the
@@ -255,11 +250,14 @@ class BaseReplicationStreamProtocol(LineOnlyReceiver):
 
         self.last_received_command = self.clock.time_msec()
 
-        tcp_inbound_commands_counter.labels(
-            command=cmd.NAME,
-            name=self.name,
-            **{SERVER_NAME_LABEL: self.server_name},
-        ).inc()
+        tcp_inbound_commands_counter.add(
+            1,
+            {
+                "command": cmd.NAME,
+                "name": self.name,
+                SERVER_NAME_LABEL: self.server_name,
+            },
+        )
 
         self.handle_command(cmd)
 
@@ -334,11 +332,14 @@ class BaseReplicationStreamProtocol(LineOnlyReceiver):
             self._queue_command(cmd)
             return
 
-        tcp_outbound_commands_counter.labels(
-            command=cmd.NAME,
-            name=self.name,
-            **{SERVER_NAME_LABEL: self.server_name},
-        ).inc()
+        tcp_outbound_commands_counter.add(
+            1,
+            {
+                "command": cmd.NAME,
+                "name": self.name,
+                SERVER_NAME_LABEL: self.server_name,
+            },
+        )
 
         string = "%s %s" % (cmd.NAME, cmd.to_line())
         if "\n" in string:
@@ -410,15 +411,21 @@ class BaseReplicationStreamProtocol(LineOnlyReceiver):
         logger.info("[%s] Replication connection closed: %r", self.id(), reason)
         if isinstance(reason, Failure):
             assert reason.type is not None
-            connection_close_counter.labels(
-                reason_type=reason.type.__name__,
-                **{SERVER_NAME_LABEL: self.server_name},
-            ).inc()
+            connection_close_counter.add(
+                1,
+                {
+                    "reason_type": reason.type.__name__,
+                    SERVER_NAME_LABEL: self.server_name,
+                },
+            )
         else:
-            connection_close_counter.labels(  # type: ignore[unreachable]
-                reason_type=reason.__class__.__name__,
-                **{SERVER_NAME_LABEL: self.server_name},
-            ).inc()
+            connection_close_counter.add(  # type: ignore[unreachable]
+                1,
+                {
+                    "reason_type": reason.__class__.__name__,
+                    SERVER_NAME_LABEL: self.server_name,
+                },
+            )
 
         try:
             # Remove us from list of connections to be monitored

@@ -32,8 +32,6 @@ from typing import (
     TypedDict,
 )
 
-from prometheus_client import Counter
-
 from synapse import types
 from synapse.api.constants import (
     MAX_USERID_LENGTH,
@@ -52,7 +50,7 @@ from synapse.api.errors import (
 from synapse.appservice import ApplicationService
 from synapse.config.server import is_threepid_reserved
 from synapse.http.servlet import assert_params_in_dict
-from synapse.metrics import SERVER_NAME_LABEL
+from synapse.metrics import SERVER_NAME_LABEL, meter
 from synapse.replication.http.login import RegisterDeviceReplicationServlet
 from synapse.replication.http.register import (
     ReplicationPostRegisterActionsServlet,
@@ -67,16 +65,14 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-registration_counter = Counter(
+registration_counter = meter.create_counter(
     "synapse_user_registrations_total",
-    "Number of new users registered (since restart)",
-    labelnames=["guest", "shadow_banned", "auth_provider", SERVER_NAME_LABEL],
+    description="Number of new users registered (since restart)",
 )
 
-login_counter = Counter(
+login_counter = meter.create_counter(
     "synapse_user_logins_total",
-    "Number of user logins (since restart)",
-    labelnames=["guest", "auth_provider", SERVER_NAME_LABEL],
+    description="Number of new users logged in (since restart)",
 )
 
 
@@ -90,19 +86,7 @@ def init_counters_for_auth_provider(auth_provider_id: str, server_name: str) -> 
         auth_provider_id: The ID of the auth provider to initialise counters for.
         server_name: Our server name (used to label metrics) (this should be `hs.hostname`).
     """
-    for is_guest in (True, False):
-        login_counter.labels(
-            guest=is_guest,
-            auth_provider=auth_provider_id,
-            **{SERVER_NAME_LABEL: server_name},
-        )
-        for shadow_banned in (True, False):
-            registration_counter.labels(
-                guest=is_guest,
-                shadow_banned=shadow_banned,
-                auth_provider=auth_provider_id,
-                **{SERVER_NAME_LABEL: server_name},
-            )
+    # OTEL counters don't need pre-initialization
 
 
 class LoginDict(TypedDict):
@@ -377,12 +361,15 @@ class RegistrationHandler:
                     # if user id is taken, just generate another
                     fail_count += 1
 
-        registration_counter.labels(
-            guest=make_guest,
-            shadow_banned=shadow_banned,
-            auth_provider=(auth_provider_id or ""),
-            **{SERVER_NAME_LABEL: self.server_name},
-        ).inc()
+        registration_counter.add(
+            1,
+            {
+                "guest": str(make_guest),
+                "shadow_banned": str(shadow_banned),
+                "auth_provider": (auth_provider_id or ""),
+                SERVER_NAME_LABEL: self.server_name,
+            },
+        )
 
         # If the user does not need to consent at registration, auto-join any
         # configured rooms.
@@ -807,11 +794,14 @@ class RegistrationHandler:
             auth_provider_session_id=auth_provider_session_id,
         )
 
-        login_counter.labels(
-            guest=is_guest,
-            auth_provider=(auth_provider_id or ""),
-            **{SERVER_NAME_LABEL: self.server_name},
-        ).inc()
+        login_counter.add(
+            1,
+            {
+                "guest": str(is_guest),
+                "auth_provider": (auth_provider_id or ""),
+                SERVER_NAME_LABEL: self.server_name,
+            },
+        )
 
         return (
             res["device_id"],

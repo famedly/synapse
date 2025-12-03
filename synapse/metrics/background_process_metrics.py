@@ -41,7 +41,7 @@ from typing import (
 )
 
 from prometheus_client import Metric
-from prometheus_client.core import REGISTRY, Counter, Gauge
+from prometheus_client.core import REGISTRY, Gauge
 from typing_extensions import Concatenate, ParamSpec
 
 from twisted.internet import defer
@@ -57,7 +57,7 @@ from synapse.logging.opentracing import (
     start_active_span,
     start_active_span_follows_from,
 )
-from synapse.metrics import SERVER_NAME_LABEL
+from synapse.metrics import SERVER_NAME_LABEL, meter
 from synapse.metrics._types import Collector
 
 if TYPE_CHECKING:
@@ -77,10 +77,9 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-_background_process_start_count = Counter(
+_background_process_start_count = meter.create_counter(
     "synapse_background_process_start_count",
-    "Number of background processes started",
-    labelnames=["name", SERVER_NAME_LABEL],
+    description="Number of background processes started",
 )
 
 _background_process_in_flight_count = Gauge(
@@ -93,42 +92,32 @@ _background_process_in_flight_count = Gauge(
 # the default registry. Instead we collect them all via the CustomCollector,
 # which ensures that we can update them before they are collected.
 #
-_background_process_ru_utime = Counter(
+_background_process_ru_utime = meter.create_counter(
     "synapse_background_process_ru_utime_seconds",
-    "User CPU time used by background processes, in seconds",
-    labelnames=["name", SERVER_NAME_LABEL],
-    registry=None,
+    description="User CPU time used by background processes, in seconds",
 )
 
-_background_process_ru_stime = Counter(
+_background_process_ru_stime = meter.create_counter(
     "synapse_background_process_ru_stime_seconds",
-    "System CPU time used by background processes, in seconds",
-    labelnames=["name", SERVER_NAME_LABEL],
-    registry=None,
+    description="System CPU time used by background processes, in seconds",
 )
 
-_background_process_db_txn_count = Counter(
+_background_process_db_txn_count = meter.create_counter(
     "synapse_background_process_db_txn_count",
-    "Number of database transactions done by background processes",
-    labelnames=["name", SERVER_NAME_LABEL],
-    registry=None,
+    description="Number of database transactions done by background processes",
 )
 
-_background_process_db_txn_duration = Counter(
+_background_process_db_txn_duration = meter.create_counter(
     "synapse_background_process_db_txn_duration_seconds",
-    (
+    description=(
         "Seconds spent by background processes waiting for database "
         "transactions, excluding scheduling time"
     ),
-    labelnames=["name", SERVER_NAME_LABEL],
-    registry=None,
 )
 
-_background_process_db_sched_duration = Counter(
+_background_process_db_sched_duration = meter.create_counter(
     "synapse_background_process_db_sched_duration_seconds",
-    "Seconds spent by background processes waiting for database connections",
-    labelnames=["name", SERVER_NAME_LABEL],
-    registry=None,
+    description="Seconds spent by background processes waiting for database connections",
 )
 
 # map from description to a counter, so that we can name our logcontexts
@@ -169,16 +158,7 @@ class _Collector(Collector):
         for process in _background_processes_copy:
             process.update_metrics()
 
-        # now we need to run collect() over each of the static Counters, and
-        # yield each metric they return.
-        for m in (
-            _background_process_ru_utime,
-            _background_process_ru_stime,
-            _background_process_db_txn_count,
-            _background_process_db_txn_duration,
-            _background_process_db_sched_duration,
-        ):
-            yield from m.collect()
+        return []
 
 
 # The `SERVER_NAME_LABEL` is included in the individual metrics added to this registry,
@@ -204,21 +184,25 @@ class _BackgroundProcess:
 
         # For unknown reasons, the difference in times can be negative. See comment in
         # synapse.http.request_metrics.RequestMetrics.update_metrics.
-        _background_process_ru_utime.labels(
-            name=self.desc, **{SERVER_NAME_LABEL: self.server_name}
-        ).inc(max(diff.ru_utime, 0))
-        _background_process_ru_stime.labels(
-            name=self.desc, **{SERVER_NAME_LABEL: self.server_name}
-        ).inc(max(diff.ru_stime, 0))
-        _background_process_db_txn_count.labels(
-            name=self.desc, **{SERVER_NAME_LABEL: self.server_name}
-        ).inc(diff.db_txn_count)
-        _background_process_db_txn_duration.labels(
-            name=self.desc, **{SERVER_NAME_LABEL: self.server_name}
-        ).inc(diff.db_txn_duration_sec)
-        _background_process_db_sched_duration.labels(
-            name=self.desc, **{SERVER_NAME_LABEL: self.server_name}
-        ).inc(diff.db_sched_duration_sec)
+        _background_process_ru_utime.add(
+            max(diff.ru_utime, 0),
+            {"name": self.desc, SERVER_NAME_LABEL: self.server_name},
+        )
+        _background_process_ru_stime.add(
+            max(diff.ru_stime, 0),
+            {"name": self.desc, SERVER_NAME_LABEL: self.server_name},
+        )
+        _background_process_db_txn_count.add(
+            diff.db_txn_count, {"name": self.desc, SERVER_NAME_LABEL: self.server_name}
+        )
+        _background_process_db_txn_duration.add(
+            diff.db_txn_duration_sec,
+            {"name": self.desc, SERVER_NAME_LABEL: self.server_name},
+        )
+        _background_process_db_sched_duration.add(
+            diff.db_sched_duration_sec,
+            {"name": self.desc, SERVER_NAME_LABEL: self.server_name},
+        )
 
 
 R = TypeVar("R")
@@ -278,9 +262,9 @@ def run_as_background_process(
             count = _background_process_counts.get(desc, 0)
             _background_process_counts[desc] = count + 1
 
-        _background_process_start_count.labels(
-            name=desc, **{SERVER_NAME_LABEL: server_name}
-        ).inc()
+        _background_process_start_count.add(
+            1, {"name": desc, SERVER_NAME_LABEL: server_name}
+        )
         _background_process_in_flight_count.labels(
             name=desc, **{SERVER_NAME_LABEL: server_name}
         ).inc()
