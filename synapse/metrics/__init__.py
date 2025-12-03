@@ -47,7 +47,6 @@ from opentelemetry.metrics import get_meter_provider
 from packaging.version import parse as parse_version
 from prometheus_client import (
     CollectorRegistry,
-    Counter,
     Gauge,
     Histogram,
     Metric,
@@ -609,24 +608,22 @@ REGISTRY.register(CPUMetrics())  # type: ignore[missing-server-name-label]
 # Federation Metrics
 #
 
-sent_transactions_counter = Counter(
-    "synapse_federation_client_sent_transactions", "", labelnames=[SERVER_NAME_LABEL]
+sent_transactions_counter = meter.create_counter(
+    "synapse_federation_client_sent_transactions"
 )
 
-events_processed_counter = Counter(
-    "synapse_federation_client_events_processed", "", labelnames=[SERVER_NAME_LABEL]
+events_processed_counter = meter.create_counter(
+    "synapse_federation_client_events_processed"
 )
 
-event_processing_loop_counter = Counter(
+event_processing_loop_counter = meter.create_counter(
     "synapse_event_processing_loop_count",
-    "Event processing loop iterations",
-    labelnames=["name", SERVER_NAME_LABEL],
+    description="Event processing loop iterations",
 )
 
-event_processing_loop_room_count = Counter(
+event_processing_loop_room_count = meter.create_counter(
     "synapse_event_processing_loop_room_count",
-    "Rooms seen per event processing loop iteration",
-    labelnames=["name", SERVER_NAME_LABEL],
+    description="Rooms seen per event processing loop iteration",
 )
 
 

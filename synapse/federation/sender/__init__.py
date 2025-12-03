@@ -145,7 +145,6 @@ from typing import (
 )
 
 import attr
-from prometheus_client import Counter
 
 from twisted.internet import defer
 
@@ -166,6 +165,7 @@ from synapse.metrics import (
     event_processing_loop_counter,
     event_processing_loop_room_count,
     events_processed_counter,
+    meter,
 )
 from synapse.metrics.background_process_metrics import (
     wrap_as_background_process,
@@ -187,16 +187,14 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-sent_pdus_destination_dist_count = Counter(
+sent_pdus_destination_dist_count = meter.create_counter(
     "synapse_federation_client_sent_pdu_destinations_count",
-    "Number of PDUs queued for sending to one or more destinations",
-    labelnames=[SERVER_NAME_LABEL],
+    description="Number of PDUs queued for sending to one or more destinations",
 )
 
-sent_pdus_destination_dist_total = Counter(
+sent_pdus_destination_dist_total = meter.create_counter(
     "synapse_federation_client_sent_pdu_destinations",
-    "Total number of PDUs queued for sending across all destinations",
-    labelnames=[SERVER_NAME_LABEL],
+    description="Total number of PDUs queued for sending across all destinations",
 )
 
 transaction_queue_pending_destinations_gauge = LaterGauge(
@@ -773,19 +771,25 @@ class FederationSender(AbstractFederationSender):
                         **{SERVER_NAME_LABEL: self.server_name},
                     ).set(ts)
 
-                    events_processed_counter.labels(
-                        **{SERVER_NAME_LABEL: self.server_name}
-                    ).inc(len(event_entries))
+                    events_processed_counter.add(
+                        len(event_entries), {SERVER_NAME_LABEL: self.server_name}
+                    )
 
-                    event_processing_loop_room_count.labels(
-                        name="federation_sender",
-                        **{SERVER_NAME_LABEL: self.server_name},
-                    ).inc(len(events_by_room))
+                    event_processing_loop_room_count.add(
+                        len(events_by_room),
+                        {
+                            "name": "federation_sender",
+                            SERVER_NAME_LABEL: self.server_name,
+                        },
+                    )
 
-                event_processing_loop_counter.labels(
-                    name="federation_sender",
-                    **{SERVER_NAME_LABEL: self.server_name},
-                ).inc()
+                event_processing_loop_counter.add(
+                    1,
+                    {
+                        "name": "federation_sender",
+                        SERVER_NAME_LABEL: self.server_name,
+                    },
+                )
 
                 synapse.metrics.event_processing_positions.labels(
                     name="federation_sender", **{SERVER_NAME_LABEL: self.server_name}

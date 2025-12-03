@@ -31,8 +31,6 @@ from typing import (
     Union,
 )
 
-from prometheus_client import Counter
-
 from twisted.internet import defer
 
 import synapse
@@ -45,6 +43,7 @@ from synapse.metrics import (
     SERVER_NAME_LABEL,
     event_processing_loop_counter,
     event_processing_loop_room_count,
+    meter,
 )
 from synapse.metrics.background_process_metrics import (
     wrap_as_background_process,
@@ -68,8 +67,8 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-events_processed_counter = Counter(
-    "synapse_handlers_appservice_events_processed", "", labelnames=[SERVER_NAME_LABEL]
+events_processed_counter = meter.create_counter(
+    "synapse_handlers_appservice_events_processed"
 )
 
 
@@ -210,19 +209,25 @@ class ApplicationServicesHandler:
                         **{SERVER_NAME_LABEL: self.server_name},
                     ).set(upper_bound)
 
-                    events_processed_counter.labels(
-                        **{SERVER_NAME_LABEL: self.server_name}
-                    ).inc(len(events))
+                    events_processed_counter.add(
+                        len(events), {SERVER_NAME_LABEL: self.server_name}
+                    )
 
-                    event_processing_loop_room_count.labels(
-                        name="appservice_sender",
-                        **{SERVER_NAME_LABEL: self.server_name},
-                    ).inc(len(events_by_room))
+                    event_processing_loop_room_count.add(
+                        len(events_by_room),
+                        {
+                            "name": "appservice_sender",
+                            SERVER_NAME_LABEL: self.server_name,
+                        },
+                    )
 
-                    event_processing_loop_counter.labels(
-                        name="appservice_sender",
-                        **{SERVER_NAME_LABEL: self.server_name},
-                    ).inc()
+                    event_processing_loop_counter.add(
+                        1,
+                        {
+                            "name": "appservice_sender",
+                            SERVER_NAME_LABEL: self.server_name,
+                        },
+                    )
 
                     if events:
                         now = self.clock.time_msec()

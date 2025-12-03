@@ -26,7 +26,6 @@ from types import TracebackType
 from typing import TYPE_CHECKING, Dict, Hashable, Iterable, List, Optional, Tuple, Type
 
 import attr
-from prometheus_client import Counter
 
 from twisted.internet import defer
 
@@ -42,7 +41,7 @@ from synapse.federation.units import Edu
 from synapse.handlers.presence import format_user_presence_state
 from synapse.logging import issue9533_logger
 from synapse.logging.opentracing import SynapseTags, set_tag
-from synapse.metrics import SERVER_NAME_LABEL, sent_transactions_counter
+from synapse.metrics import SERVER_NAME_LABEL, meter, sent_transactions_counter
 from synapse.types import JsonDict, ReadReceipt
 from synapse.util.retryutils import NotRetryingDestination, get_retry_limiter
 from synapse.visibility import filter_events_for_server
@@ -56,16 +55,14 @@ MAX_EDUS_PER_TRANSACTION = 100
 logger = logging.getLogger(__name__)
 
 
-sent_edus_counter = Counter(
+sent_edus_counter = meter.create_counter(
     "synapse_federation_client_sent_edus",
-    "Total number of EDUs successfully sent",
-    labelnames=[SERVER_NAME_LABEL],
+    description="Total number of EDUs successfully sent",
 )
 
-sent_edus_by_type = Counter(
+sent_edus_by_type = meter.create_counter(
     "synapse_federation_client_sent_edus_by_type",
-    "Number of sent EDUs successfully sent, by event type",
-    labelnames=["type", SERVER_NAME_LABEL],
+    description="Number of sent EDUs successfully sent, by event type",
 )
 
 
@@ -392,17 +389,20 @@ class PerDestinationQueue:
                         self._destination, pending_pdus, pending_edus
                     )
 
-                    sent_transactions_counter.labels(
-                        **{SERVER_NAME_LABEL: self.server_name}
-                    ).inc()
-                    sent_edus_counter.labels(
-                        **{SERVER_NAME_LABEL: self.server_name}
-                    ).inc(len(pending_edus))
+                    sent_transactions_counter.add(
+                        1, {SERVER_NAME_LABEL: self.server_name}
+                    )
+                    sent_edus_counter.add(
+                        len(pending_edus), {SERVER_NAME_LABEL: self.server_name}
+                    )
                     for edu in pending_edus:
-                        sent_edus_by_type.labels(
-                            type=edu.edu_type,
-                            **{SERVER_NAME_LABEL: self.server_name},
-                        ).inc()
+                        sent_edus_by_type.add(
+                            1,
+                            {
+                                "type": edu.edu_type,
+                                SERVER_NAME_LABEL: self.server_name,
+                            },
+                        )
 
         except NotRetryingDestination as e:
             logger.debug(
@@ -628,9 +628,7 @@ class PerDestinationQueue:
                     self._destination, room_catchup_pdus, []
                 )
 
-                sent_transactions_counter.labels(
-                    **{SERVER_NAME_LABEL: self.server_name}
-                ).inc()
+                sent_transactions_counter.add(1, {SERVER_NAME_LABEL: self.server_name})
 
                 # We pulled this from the DB, so it'll be non-null
                 assert pdu.internal_metadata.stream_ordering

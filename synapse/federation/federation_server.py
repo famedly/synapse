@@ -35,7 +35,7 @@ from typing import (
     Union,
 )
 
-from prometheus_client import Counter, Gauge, Histogram
+from prometheus_client import Gauge, Histogram
 
 from twisted.python import failure
 
@@ -82,7 +82,7 @@ from synapse.logging.opentracing import (
     tag_args,
     trace,
 )
-from synapse.metrics import SERVER_NAME_LABEL
+from synapse.metrics import SERVER_NAME_LABEL, meter
 from synapse.metrics.background_process_metrics import wrap_as_background_process
 from synapse.replication.http.federation import (
     ReplicationFederationSendEduRestServlet,
@@ -105,18 +105,12 @@ TRANSACTION_CONCURRENCY_LIMIT = 10
 
 logger = logging.getLogger(__name__)
 
-received_pdus_counter = Counter(
-    "synapse_federation_server_received_pdus", "", labelnames=[SERVER_NAME_LABEL]
-)
+received_pdus_counter = meter.create_counter("synapse_federation_server_received_pdus")
 
-received_edus_counter = Counter(
-    "synapse_federation_server_received_edus", "", labelnames=[SERVER_NAME_LABEL]
-)
+received_edus_counter = meter.create_counter("synapse_federation_server_received_edus")
 
-received_queries_counter = Counter(
+received_queries_counter = meter.create_counter(
     "synapse_federation_server_received_queries",
-    "",
-    labelnames=["type", SERVER_NAME_LABEL],
 )
 
 pdu_process_time = Histogram(
@@ -442,8 +436,8 @@ class FederationServer(FederationBase):
             report back to the sending server.
         """
 
-        received_pdus_counter.labels(**{SERVER_NAME_LABEL: self.server_name}).inc(
-            len(transaction.pdus)
+        received_pdus_counter.add(
+            len(transaction.pdus), {SERVER_NAME_LABEL: self.server_name}
         )
 
         origin_host, _ = parse_server_name(origin)
@@ -565,7 +559,7 @@ class FederationServer(FederationBase):
         """Process the EDUs in a received transaction."""
 
         async def _process_edu(edu_dict: JsonDict) -> None:
-            received_edus_counter.labels(**{SERVER_NAME_LABEL: self.server_name}).inc()
+            received_edus_counter.add(1, {SERVER_NAME_LABEL: self.server_name})
 
             edu = Edu(
                 origin=origin,
@@ -680,10 +674,13 @@ class FederationServer(FederationBase):
     async def on_query_request(
         self, query_type: str, args: Dict[str, str]
     ) -> Tuple[int, Dict[str, Any]]:
-        received_queries_counter.labels(
-            type=query_type,
-            **{SERVER_NAME_LABEL: self.server_name},
-        ).inc()
+        received_queries_counter.add(
+            1,
+            {
+                "type": query_type,
+                SERVER_NAME_LABEL: self.server_name,
+            },
+        )
         resp = await self.registry.on_query(query_type, args)
         return 200, resp
 
