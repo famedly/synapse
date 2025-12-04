@@ -29,6 +29,7 @@ from twisted.internet.interfaces import IDelayedCall
 from twisted.internet.task import LoopingCall
 
 from synapse.logging import context
+from synapse.logging.loggers import ExplicitlyConfiguredLogger
 from synapse.types import ISynapseThreadlessReactor
 from synapse.util import log_failure
 from synapse.util.stringutils import random_string_insecure_fast
@@ -37,6 +38,25 @@ P = ParamSpec("P")
 
 
 logger = logging.getLogger(__name__)
+
+original_logger_class = logging.getLoggerClass()
+logging.setLoggerClass(ExplicitlyConfiguredLogger)
+clock_debug_logger = logging.getLogger("synapse.util.clock.debug")
+"""
+A logger for debugging what is scheduling calls.
+
+Ideally, these wouldn't be gated behind an `ExplicitlyConfiguredLogger` as including logs
+from this logger would be helpful to track when things are being scheduled. However, for
+these logs to be meaningful, they need to include a stack trace to show what initiated the
+call in the first place.
+
+Since the stack traces can create a lot of noise and make the logs hard to read (unless you're
+specifically debugging scheduling issues) we want users to opt-in to seeing these logs. To enable
+this, they must explicitly set `synapse.util.clock.debug` in the logging configuration. Note that
+this setting won't inherit the log level from the parent logger.
+"""
+# Restore the original logger class
+logging.setLoggerClass(original_logger_class)
 
 
 class Clock:
@@ -173,7 +193,7 @@ class Clock:
             looping_call_context_string = "looping_call_now"
 
         def wrapped_f(*args: P.args, **kwargs: P.kwargs) -> Deferred:
-            logger.debug(
+            clock_debug_logger.debug(
                 "%s(%s): Executing callback", looping_call_context_string, instance_id
             )
 
@@ -221,7 +241,7 @@ class Clock:
         d.addErrback(log_failure, "Looping call died", consumeErrors=False)
         self._looping_calls.append(call)
 
-        logger.debug(
+        clock_debug_logger.debug(
             "%s(%s): Scheduled looping call every %sms later",
             looping_call_context_string,
             instance_id,
@@ -282,7 +302,7 @@ class Clock:
             raise Exception("Cannot start delayed call. Clock has been shutdown")
 
         def wrapped_callback(*args: Any, **kwargs: Any) -> None:
-            logger.debug("call_later(%s): Executing callback", call_id)
+            clock_debug_logger.debug("call_later(%s): Executing callback", call_id)
 
             assert context.current_context() is context.SENTINEL_CONTEXT, (
                 "Expected `call_later` callback from the reactor to start with the sentinel logcontext "
@@ -324,7 +344,7 @@ class Clock:
         # be called.
         call = self._reactor.callLater(delay, wrapped_callback, *args, **kwargs)  # type: ignore[call-later-not-tracked]
 
-        logger.debug(
+        clock_debug_logger.debug(
             "call_later(%s): Scheduled call for %ss later (tracked for shutdown: %s)",
             call_id,
             delay,
@@ -344,7 +364,7 @@ class Clock:
         self, wrapped_call: "DelayedCallWrapper", ignore_errs: bool = False
     ) -> None:
         try:
-            logger.debug(
+            clock_debug_logger.debug(
                 "cancel_call_later: cancelling scheduled call %s", wrapped_call.call_id
             )
             wrapped_call.delayed_call.cancel()
@@ -364,7 +384,7 @@ class Clock:
         # will result in the call removing itself from the map mid-iteration.
         for call_id, call in list(self._call_id_to_delayed_call.items()):
             try:
-                logger.debug(
+                clock_debug_logger.debug(
                     "cancel_all_delayed_calls: cancelling scheduled call %s", call_id
                 )
                 call.cancel()
@@ -393,7 +413,9 @@ class Clock:
         instance_id = random_string_insecure_fast(5)
 
         def wrapped_callback(*args: Any, **kwargs: Any) -> None:
-            logger.debug("call_when_running(%s): Executing callback", instance_id)
+            clock_debug_logger.debug(
+                "call_when_running(%s): Executing callback", instance_id
+            )
 
             # Since this callback can be invoked immediately if the reactor is already
             # running, we can't always assume that we're running in the sentinel
@@ -433,7 +455,7 @@ class Clock:
         # callWhenRunning should be called.
         self._reactor.callWhenRunning(wrapped_callback, *args, **kwargs)  # type: ignore[prefer-synapse-clock-call-when-running]
 
-        logger.debug(
+        clock_debug_logger.debug(
             "call_when_running(%s): Scheduled call",
             instance_id,
             # Find out who is scheduling the call which makes it easy to follow in the
@@ -469,7 +491,7 @@ class Clock:
         instance_id = random_string_insecure_fast(5)
 
         def wrapped_callback(*args: Any, **kwargs: Any) -> None:
-            logger.debug(
+            clock_debug_logger.debug(
                 "add_system_event_trigger(%s): Executing %s %s callback",
                 instance_id,
                 phase,
@@ -506,7 +528,7 @@ class Clock:
                 # logcontext to the reactor
                 context.run_in_background(callback, *args, **kwargs)
 
-        logger.debug(
+        clock_debug_logger.debug(
             "add_system_event_trigger(%s) for %s %s",
             instance_id,
             phase,
