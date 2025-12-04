@@ -43,6 +43,12 @@ from typing import (
 )
 
 import attr
+from opentelemetry import metrics
+from opentelemetry.exporter.prometheus import (
+    PrometheusMetricReader,
+)
+from opentelemetry.sdk.metrics import MeterProvider
+from opentelemetry.sdk.resources import SERVICE_NAME, Resource as OtelResource
 from packaging.version import parse as parse_version
 from prometheus_client import (
     CollectorRegistry,
@@ -137,6 +143,16 @@ def _set_prometheus_client_use_created_metrics(new_value: bool) -> None:
 
 # Set this globally so it applies wherever we generate/collect metrics
 _set_prometheus_client_use_created_metrics(False)
+
+# This will create a Resource that can do the displaying of the prometheus metrics. The
+# start_http_server() that is used by the listen_metrics() call in _base.py will pick
+# this up and serve it.
+resource = OtelResource(attributes={SERVICE_NAME: "synapse"})
+reader = PrometheusMetricReader()
+provider = MeterProvider(resource=resource, metric_readers=[reader])
+metrics.set_meter_provider(provider)
+# Global meter for registering otel metrics
+meter = provider.get_meter("synapse-otel-meter")
 
 
 class _RegistryProxy:
