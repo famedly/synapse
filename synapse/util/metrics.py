@@ -41,14 +41,14 @@ from synapse.logging.context import (
     LoggingContext,
     current_context,
 )
-from synapse.metrics import SERVER_NAME_LABEL, InFlightGauge
+from synapse.metrics import SERVER_NAME_LABEL, InFlightGauge, SynapseCounter
 from synapse.util.clock import Clock
 
 logger = logging.getLogger(__name__)
 
 # Metrics to see the number of and how much time is spend in various blocks of code.
 #
-block_counter = Counter(
+block_counter = SynapseCounter(
     "synapse_util_metrics_block_count",
     documentation="The number of times this block has been called.",
     labelnames=["block_name", SERVER_NAME_LABEL],
