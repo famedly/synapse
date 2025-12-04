@@ -27,6 +27,7 @@ import platform
 import threading
 from importlib import metadata
 from typing import (
+    Any,
     Callable,
     Dict,
     Generic,
@@ -63,6 +64,7 @@ from prometheus_client.core import (
     GaugeHistogramMetricFamily,
     GaugeMetricFamily,
 )
+from typing_extensions import Self
 
 from twisted.python.threadpool import ThreadPool
 from twisted.web.resource import Resource
@@ -168,6 +170,84 @@ class _RegistryProxy:
 # for it to be usable in the contexts in which we use it.
 # TODO Do something nicer about this.
 RegistryProxy = cast(CollectorRegistry, _RegistryProxy)
+
+
+def _build_full_name(
+    metric_type: str, name: str, namespace: str, subsystem: str, unit: str
+) -> str:
+    # Ripped from prometheus_client/metrics.py
+    if not name:
+        raise ValueError("Metric name should not be empty")
+    full_name = ""
+    if namespace:
+        full_name += namespace + "_"
+    if subsystem:
+        full_name += subsystem + "_"
+    full_name += name
+    if metric_type == "counter" and full_name.endswith("_total"):
+        full_name = full_name[:-6]  # Munge to OpenMetrics.
+    if unit and not full_name.endswith("_" + unit):
+        full_name += "_" + unit
+    if unit and metric_type in ("info", "stateset"):
+        raise ValueError(
+            "Metric name is of a type that cannot have a unit: " + full_name
+        )
+    return full_name
+
+
+class SynapseCounter:
+    _type: str = "counter"
+
+    def __init__(
+        self,
+        name: str,
+        documentation: str,
+        labelnames: Iterable[str] = (),
+        namespace: str = "",
+        subsystem: str = "",
+        unit: str = "",
+        registry: Optional[CollectorRegistry] = None,
+        _labelvalues: Optional[Sequence[str]] = None,
+    ) -> None:
+        # Here is where we grab the global meter to create a FauxCounter
+        self._counter = meter.create_counter(name, unit=unit, description=documentation)
+        self._name = _build_full_name(self._type, name, namespace, subsystem, unit)
+
+        # prom validates these, should we do that?
+        # labelnames provide a simple way to register that a given set of kwargs call
+        # from labels can be used. All should be used in a call?
+        self._labelnames = tuple(labelnames or ())
+
+        self._labelvalues = tuple(_labelvalues or ())
+
+        self._current_attributes = ()
+        self._lock = threading.Lock()
+
+    def labels(self, *labelvalues: Any, **labelkwargs: Any) -> Self:
+        if labelkwargs:
+            if sorted(labelkwargs) != sorted(self._labelnames):
+                raise ValueError("Incorrect label names")
+            labelvalues = tuple(str(labelkwargs[lv]) for lv in self._labelnames)
+        else:
+            if len(labelvalues) != len(self._labelnames):
+                raise ValueError("Incorrect label count")
+            labelvalues = tuple(str(lv) for lv in labelvalues)
+
+        # The lock needs to block, which means it will wait until it is released for the
+        # next call. May need a timeout later, dunno
+        if self._lock.acquire_lock():
+            self._current_attributes = labelvalues
+
+        return self
+
+    def inc(self, amount: float = 1.0) -> None:
+        # Need to verify what happens with Counters that do not have labels as children,
+        # this may not be appropriate in those cases. Can probably just leave the
+        # attributes param as empty in that case?
+        self._counter.add(amount, dict(zip(self._labelnames, self._current_attributes)))
+        # If this was a "child" metric, then the lock will have been taken in labels()
+        if self._lock.locked():
+            self._lock.release()
 
 
 @attr.s(slots=True, hash=True, auto_attribs=True, kw_only=True)
@@ -791,4 +871,5 @@ __all__ = [
     "GaugeBucketCollector",
     "MIN_TIME_BETWEEN_GCS",
     "install_gc_manager",
+    "SynapseCounter",
 ]
