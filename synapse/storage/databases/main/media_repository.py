@@ -82,7 +82,7 @@ class MediaRestrictions:
         if self.profile_user_id:
             return {
                 "org.matrix.msc3911.restrictions": {
-                    "profile_user_id": str(self.profile_user_id)
+                    "profile_user_id": self.profile_user_id.to_string()
                 }
             }
         return {}

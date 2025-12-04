@@ -319,7 +319,11 @@ class AbstractMediaRepository:
         Verify that media requested for download should be visible to the user making
         the request
         """
-        requesting_user_id = requester.user.to_string()
+        # Handle both string and UserID types for requester.user
+        if isinstance(requester.user, UserID):
+            requester_user_id_str = requester.user.to_string()
+        else:
+            requester_user_id_str = str(requester.user)  # type: ignore
         if not self.enable_media_restriction:
             return
 
@@ -330,7 +334,7 @@ class AbstractMediaRepository:
             # When the media has not been attached yet, only the originating user can
             # see it. But once attachments have been formed, standard other rules apply
             if isinstance(media_info_object, LocalMedia) and (
-                requesting_user_id == str(media_info_object.user_id)
+                requester_user_id_str == media_info_object.user_id
             ):
                 return
 
@@ -339,14 +343,18 @@ class AbstractMediaRepository:
                 "Media ID ('%s') as requested by '%s' was restricted but had no "
                 "attachments",
                 media_info_object.media_id,
-                requesting_user_id,
+                requester_user_id_str,
             )
             raise UnauthorizedRequestAPICallError(
                 f"Media requested ('{media_info_object.media_id}') is restricted"
             )
 
-        attached_event_id = media_info_object.attachments.event_id
-        attached_profile_user_id = media_info_object.attachments.profile_user_id
+        attachments = media_info_object.attachments.to_dict().get(
+            "org.matrix.msc3911.restrictions", {}
+        )
+        # Safely extract values from the nested structure, handling missing keys
+        attached_event_id = attachments.get("event_id")
+        attached_profile_user_id = attachments.get("profile_user_id")
 
         if attached_event_id:
             # Check if event is redacted or not. If it is redacted, normal user no
@@ -365,7 +373,7 @@ class AbstractMediaRepository:
                     logger.debug(
                         "Media ID (%s) as requested by '%s' was redacted from event '%s'",
                         media_info_object.media_id,
-                        requesting_user_id,
+                        requester_user_id_str,
                         attached_event_id,
                     )
                     raise UnauthorizedRequestAPICallError(
@@ -391,13 +399,13 @@ class AbstractMediaRepository:
                     membership_now,
                     _,
                 ) = await self.store.get_local_current_membership_for_user_in_room(
-                    requesting_user_id, event_base.room_id
+                    requester_user_id_str, event_base.room_id
                 )
 
                 if not membership_now:
                     membership_now = Membership.LEAVE
 
-                membership_state_key = (EventTypes.Member, requesting_user_id)
+                membership_state_key = (EventTypes.Member, requester_user_id_str)
                 types = (_HISTORY_VIS_KEY, membership_state_key)
 
                 # and history visibility and membership of THEN
@@ -490,14 +498,13 @@ class AbstractMediaRepository:
                 storage_controllers = self.hs.get_storage_controllers()
                 filtered_events = await filter_events_for_client(
                     storage_controllers,
-                    requesting_user_id,
+                    requester_user_id_str,
                     [event_base],
                 )
                 if len(filtered_events) > 0:
                     return
 
         elif attached_profile_user_id:
-            profile_user_id = attached_profile_user_id.to_string()
             # Can this user see that profile?
 
             # The error returns here may not be suitable, use the work around below
@@ -511,22 +518,22 @@ class AbstractMediaRepository:
             if self.hs.config.server.limit_profile_requests_to_users_who_share_rooms:
                 # First take care of the case where the requesting user IS the creating
                 # user. The other function below does not handle this.
-                if requesting_user_id == profile_user_id:
+                if requester_user_id_str == attached_profile_user_id:
                     return
 
                 # This call returns a set() that contains which of the "other_user_ids"
                 # share a room. Since we give it only one, if bool(set()) is True, then they
                 # share some room or had at least one invite between them.
                 if not await self.store.do_users_share_a_room_joined_or_invited(
-                    requesting_user_id,
-                    [profile_user_id],
+                    requester_user_id_str,
+                    [attached_profile_user_id],
                 ):
                     logger.debug(
                         "Media ID (%s) as requested by '%s' was restricted by "
                         "profile, but was not allowed(is "
                         "'limit_profile_requests_to_users_who_share_rooms' enabled?)",
                         media_info_object.media_id,
-                        requesting_user_id,
+                        requester_user_id_str,
                     )
 
                     raise UnauthorizedRequestAPICallError(
@@ -545,7 +552,7 @@ class AbstractMediaRepository:
             "Media ID (%s) as requested by '%s' was restricted, but was not "
             "allowed(media_attachments=%s)",
             media_info_object.media_id,
-            requesting_user_id,
+            requester_user_id_str,
             media_info_object.attachments,
         )
         raise UnauthorizedRequestAPICallError(
