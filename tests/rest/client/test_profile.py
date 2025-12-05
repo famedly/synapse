@@ -1013,7 +1013,7 @@ class ProfileMediaAttachmentTestCase(unittest.HomeserverTestCase):
         )
         assert restrictions is not None, str(restrictions)
         assert restrictions.event_id is None
-        assert restrictions.profile_user_id == UserID.from_string(self.user)
+        assert restrictions.profile_user_id == self.user
 
     def test_attaching_nonexistent_local_media_to_profile_fails(self) -> None:
         """
@@ -1274,7 +1274,7 @@ class ProfileMediaAttachmentTestCase(unittest.HomeserverTestCase):
         media_info = self.get_success(self.store.get_local_media(mxc_uri.media_id))
         assert media_info is not None
         assert media_info.attachments is not None
-        assert media_info.attachments.profile_user_id == UserID.from_string(self.user)
+        assert media_info.attachments.profile_user_id == self.user
 
         # Check the media was copied and attached to a member event
         events = self.get_success(
@@ -1446,7 +1446,7 @@ class ProfileMediaAttachmentReplicationTestCase(BaseMultiWorkerStreamTestCase):
         media_info = self.get_success(self.store.get_local_media(mxc_uri.media_id))
         assert media_info is not None
         assert media_info.attachments is not None
-        assert media_info.attachments.profile_user_id == UserID.from_string(self.user)
+        assert media_info.attachments.profile_user_id == self.user
 
         # Check the media was copied and attached to a member event
         events = self.get_success(

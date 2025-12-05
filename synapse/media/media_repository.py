@@ -319,11 +319,7 @@ class AbstractMediaRepository:
         Verify that media requested for download should be visible to the user making
         the request
         """
-        # Handle both string and UserID types for requester.user
-        if isinstance(requester.user, UserID):
-            requester_user_id_str = requester.user.to_string()
-        else:
-            requester_user_id_str = str(requester.user)  # type: ignore
+        requester_user_id_str = requester.user.to_string()
         if not self.enable_media_restriction:
             return
 
@@ -349,12 +345,8 @@ class AbstractMediaRepository:
                 f"Media requested ('{media_info_object.media_id}') is restricted"
             )
 
-        attachments = media_info_object.attachments.to_dict().get(
-            "org.matrix.msc3911.restrictions", {}
-        )
-        # Safely extract values from the nested structure, handling missing keys
-        attached_event_id = attachments.get("event_id")
-        attached_profile_user_id = attachments.get("profile_user_id")
+        attached_event_id = media_info_object.attachments.event_id
+        attached_profile_user_id = media_info_object.attachments.profile_user_id
 
         if attached_event_id:
             # Check if event is redacted or not. If it is redacted, normal user no

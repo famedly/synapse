@@ -74,15 +74,15 @@ class MediaRestrictions:
     """
 
     event_id: Optional[str] = None
-    profile_user_id: Optional[UserID] = None
+    profile_user_id: Optional[str] = None
 
     def to_dict(self) -> dict:
         if self.event_id:
-            return {"org.matrix.msc3911.restrictions": {"event_id": str(self.event_id)}}
+            return {"org.matrix.msc3911.restrictions": {"event_id": self.event_id}}
         if self.profile_user_id:
             return {
                 "org.matrix.msc3911.restrictions": {
-                    "profile_user_id": self.profile_user_id.to_string()
+                    "profile_user_id": self.profile_user_id
                 }
             }
         return {}
@@ -1172,7 +1172,7 @@ class MediaRepositoryStore(MediaRepositoryBackgroundUpdateStore):
         if row:
             event_id = row[0][0]
             # Because the UserID object can be None, the 'to_string()' method may not exist
-            profile_user_id = UserID.from_string(row[0][1]) if row[0][1] else None
+            profile_user_id = row[0][1] if row[0][1] else None
             return MediaRestrictions(event_id=event_id, profile_user_id=profile_user_id)
 
         return None
