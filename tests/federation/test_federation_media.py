@@ -665,7 +665,7 @@ class FederationClientDownloadTestCase(unittest.HomeserverTestCase):
         )
         assert isinstance(restrictions, MediaRestrictions)
         assert restrictions.profile_user_id is not None
-        assert restrictions.profile_user_id.to_string() == "@bob:example.com"
+        assert restrictions.profile_user_id == "@bob:example.com"
 
     def test_downloading_remote_media_with_no_restrictions_does_not_save_to_db(
         self,

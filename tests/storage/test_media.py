@@ -2,7 +2,6 @@ from twisted.test.proto_helpers import MemoryReactor
 
 from synapse.api.errors import SynapseError
 from synapse.server import HomeServer
-from synapse.types import UserID
 from synapse.util import Clock
 from synapse.util.stringutils import random_string
 
