@@ -2,7 +2,6 @@ from twisted.test.proto_helpers import MemoryReactor
 
 from synapse.api.errors import SynapseError
 from synapse.server import HomeServer
-from synapse.types import UserID
 from synapse.util import Clock
 from synapse.util.stringutils import random_string
 
@@ -41,11 +40,11 @@ class MediaAttachmentStorageTestCase(unittest.HomeserverTestCase):
         assert retrieved_restrictions.profile_user_id is None
 
     def test_store_and_retrieve_media_restrictions_by_profile_user_id(self) -> None:
-        user_id = UserID.from_string("@frank:test")
+        user_id = "@frank:test"
         media_id = random_string(24)
         self.get_success_or_raise(
             self.store.set_media_restricted_to_user_profile(
-                self.server_name, media_id, user_id.to_string()
+                self.server_name, media_id, user_id
             )
         )
 

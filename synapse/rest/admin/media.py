@@ -282,9 +282,10 @@ class DeleteMediaByID(RestServlet):
 
         logger.info("Deleting local media by ID: %s", media_id)
 
-        deleted_media, total = await self.media_repository.delete_local_media_ids(
-            [media_id]
-        )
+        (
+            deleted_media,
+            total,
+        ) = await self.media_repository.delete_media_from_disk_by_media_ids([media_id])
         return HTTPStatus.OK, {"deleted_media": deleted_media, "total": total}
 
 
@@ -446,7 +447,10 @@ class UserMediaRestServlet(RestServlet):
             start, limit, user_id, order_by, direction
         )
 
-        deleted_media, total = await self.media_repository.delete_local_media_ids(
+        (
+            deleted_media,
+            total,
+        ) = await self.media_repository.delete_media_from_disk_by_media_ids(
             [m.media_id for m in media]
         )
 

@@ -206,8 +206,8 @@ class EventRedactBehaviour(Enum):
     What to do when retrieving a redacted event from the database.
     """
 
-    as_is = auto()
-    redact = auto()
+    as_is = auto()  # Leave redacted events untouched
+    redact = auto()  # Strip content for redacted events
     block = auto()
 
 
@@ -2671,4 +2671,40 @@ class EventsWorkerStore(SQLBaseStore):
         return EventMetadata(
             sender=row[0],
             received_ts=row[1],
+        )
+
+    async def get_redacted_event_ids_before_interval(
+        self, interval_ms: int
+    ) -> List[str]:
+        """Get the event ids of redacted events before the given interval.
+
+        Args:
+            interval_ms: The interval in milliseconds.
+
+        Returns:
+            The list of event IDs of redacted events before the given interval,
+            or empty list if no such event exists.
+        """
+
+        def _get_redacted_event_id_before_interval_txn(
+            txn: LoggingTransaction, threshold_ts: int
+        ) -> List[str]:
+            sql = """
+                SELECT redacts
+                FROM redactions
+                WHERE received_ts < ?
+            """
+
+            txn.execute(sql, (threshold_ts,))
+            rows = txn.fetchall()
+
+            if not rows:
+                return []
+            return [row[0] for row in rows]
+
+        threshold_ts = self._clock.time_msec() - interval_ms
+        return await self.db_pool.runInteraction(
+            "_get_redacted_event_id_before_interval_txn",
+            _get_redacted_event_id_before_interval_txn,
+            threshold_ts,
         )

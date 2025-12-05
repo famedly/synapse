@@ -18,22 +18,32 @@
 # [This file includes modifications made by New Vector Limited]
 #
 #
-from typing import List, Optional
+import io
+import os
+import time
+from http import HTTPStatus
+from typing import List, Optional, Tuple
 
 from parameterized import parameterized
 
 from twisted.test.proto_helpers import MemoryReactor
+from twisted.web.resource import Resource
 
+from synapse.api.auth.base import BaseAuth
 from synapse.api.constants import EventTypes, RelationTypes
 from synapse.api.room_versions import RoomVersion, RoomVersions
+from synapse.media.media_repository import (
+    MediaRepository,
+)
 from synapse.rest import admin
-from synapse.rest.client import login, room, sync
+from synapse.rest.client import login, media, room, sync
 from synapse.server import HomeServer
 from synapse.storage._base import db_to_json
 from synapse.storage.database import LoggingTransaction
-from synapse.types import JsonDict
+from synapse.types import JsonDict, Requester, UserID
 from synapse.util import Clock
 
+from tests.test_utils import SMALL_PNG
 from tests.unittest import HomeserverTestCase, override_config
 
 
@@ -656,3 +666,288 @@ class RedactionsTestCase(HomeserverTestCase):
         else:
             self.assertEqual(event_json["redacts"], event_id)
             self.assertNotIn("redacts", event_json["content"])
+
+
+class MediaDeletionOnRedactionTests(HomeserverTestCase):
+    extra_config = {
+        "experimental_features": {"msc3911_enabled": True},
+    }
+
+    servlets = [
+        media.register_servlets,
+        login.register_servlets,
+        admin.register_servlets,
+        room.register_servlets,
+    ]
+
+    def make_homeserver(self, reactor: MemoryReactor, clock: Clock) -> HomeServer:
+        config = self.default_config()
+        config.update(self.extra_config)
+        return self.setup_test_homeserver(config=config)
+
+    def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
+        self.auth = hs.get_auth()
+        self.admin_handler = hs.get_admin_handler()
+        self.store = hs.get_datastores().main
+        self.media_repo = hs.get_media_repository()
+        self.bad_user = self.register_user("bad_user", "hackme")
+        self.bad_user_tok = self.login("bad_user", "hackme")
+        self.user = self.register_user("user", "pass")
+        self.user_tok = self.login("user", "pass")
+        self.admin = self.register_user("admin", "admin_pass", admin=True)
+        self.admin_tok = self.login("admin", "admin_pass")
+        self.room = self.helper.create_room_as(
+            room_creator=self.admin, tok=self.admin_tok
+        )
+
+    def create_resource_dict(self) -> dict[str, Resource]:
+        resources = super().create_resource_dict()
+        resources["/_matrix/media"] = self.hs.get_media_repository_resource()
+        return resources
+
+    def _redact_event(
+        self,
+        access_token: str,
+        room_id: str,
+        event_id: str,
+        expect_code: int = 200,
+        with_relations: Optional[List[str]] = None,
+        content: Optional[JsonDict] = None,
+    ) -> JsonDict:
+        """Helper function to send a redaction event.
+
+        Returns the json body.
+        """
+        path = "/_matrix/client/r0/rooms/%s/redact/%s" % (room_id, event_id)
+
+        request_content = content or {}
+        if with_relations:
+            request_content["org.matrix.msc3912.with_relations"] = with_relations
+
+        channel = self.make_request(
+            "POST", path, request_content, access_token=access_token
+        )
+        assert channel.code == expect_code, channel.json_body
+        return channel.json_body
+
+    def _create_test_resource(self) -> Tuple[List, List]:
+        event_ids = []
+        media_ids = []
+        self.helper.join(self.room, self.user, tok=self.user_tok)
+        self.helper.join(self.room, self.bad_user, tok=self.bad_user_tok)
+
+        for _ in range(3):
+            # Create restricted media
+            mxc_uri = self.get_success(
+                self.media_repo.create_or_update_content(
+                    "image/png",
+                    "test_png_upload",
+                    io.BytesIO(SMALL_PNG),
+                    67,
+                    UserID.from_string(self.bad_user),
+                    restricted=True,
+                )
+            )
+            # Make sure media is saved
+            assert mxc_uri is not None
+            assert isinstance(self.media_repo, MediaRepository)
+            media_path = self.media_repo.filepaths.local_media_filepath(
+                mxc_uri.media_id
+            )
+            self.assertTrue(os.path.exists(media_path))
+            assert self.get_success(self.store.get_local_media(mxc_uri.media_id))
+            media_ids.append(mxc_uri.media_id)
+
+            # Bad user create events with media attached
+            channel = self.make_request(
+                "PUT",
+                f"/rooms/{self.room}/send/m.room.message/{str(time.time())}?org.matrix.msc3911.attach_media={str(mxc_uri)}",
+                content={"msgtype": "m.text", "body": "Hi, this is a message"},
+                access_token=self.bad_user_tok,
+            )
+            assert channel.code == HTTPStatus.OK, channel.json_body
+            assert "event_id" in channel.json_body
+            event_id = channel.json_body["event_id"]
+            event_ids.append(event_id)
+
+            # Check media restrictions field has proper event_id
+            restrictions = self.get_success(
+                self.hs.get_datastores().main.get_media_restrictions(
+                    mxc_uri.server_name, mxc_uri.media_id
+                )
+            )
+            assert restrictions is not None, str(restrictions)
+            assert restrictions.event_id == event_id
+        return media_ids, event_ids
+
+    def test_is_moderator(self) -> None:
+        """Test BaseAuth function `is_moderator`"""
+        # Admin is a moderator
+        assert isinstance(self.auth, BaseAuth)
+        admin = Requester(
+            user=UserID.from_string(self.admin),
+            access_token_id=None,
+            is_guest=False,
+            scope={"scope"},
+            shadow_banned=False,
+            device_id=None,
+            app_service=None,
+            authenticated_entity="auth",
+        )
+        assert self.get_success(self.auth.is_moderator(self.room, admin))
+
+        # Normal user is not a moderator
+        self.helper.join(self.room, self.user, tok=self.user_tok)
+        user = Requester(
+            user=UserID.from_string(self.user),
+            access_token_id=None,
+            is_guest=False,
+            scope={"scope"},
+            shadow_banned=False,
+            device_id=None,
+            app_service=None,
+            authenticated_entity="auth",
+        )
+        assert not self.get_success(self.auth.is_moderator(self.room, user))
+
+        # Update power level to make normal user a moderator
+        power_levels = self.helper.get_state(
+            self.room,
+            "m.room.power_levels",
+            tok=self.user_tok,
+        )
+        power_levels["users"][self.user] = 80
+        self.helper.send_state(
+            self.room,
+            "m.room.power_levels",
+            body=power_levels,
+            tok=self.admin_tok,
+        )
+        assert self.get_success(self.auth.is_moderator(self.room, user))
+
+    def test_get_media_ids_attached_to_event(self) -> None:
+        """Test db function `get_media_ids_attached_to_event`"""
+        # Create events with media attached
+        media_ids, event_ids = self._create_test_resource()
+
+        # Check if `get_media_ids_attached_to_event` can get media ids attached to an event
+        for event_id in event_ids:
+            media_ids = self.get_success(
+                self.store.get_media_ids_attached_to_event(event_id)
+            )
+            assert len(media_ids) == 1
+
+    def test_redacting_media_deletes_attached_media(self) -> None:
+        """Test that the redacted media cleanup loop deletes media that has been
+        redacted before 48 hours.
+        """
+        # Confirm that there are no redacted events at the start
+        current_redacted_events = self.get_success(
+            self.store.get_redacted_event_ids_before_interval(0)
+        )
+        assert len(current_redacted_events) == 0
+
+        # Create events with media attached
+        media_ids, event_ids = self._create_test_resource()
+
+        # Redact the events
+        for event_id in event_ids:
+            self._redact_event(
+                self.admin_tok,
+                self.room,
+                event_id,
+                expect_code=200,
+            )
+            # Confirm the events redaction
+            event_dict = self.helper.get_event(self.room, event_id, self.admin_tok)
+            assert "redacted_because" in event_dict, event_dict
+
+        # Confirm that the redacted events are recorded in the db
+        current_redacted_events = self.get_success(
+            self.store.get_redacted_event_ids_before_interval(0)
+        )
+        # assert all(item in current_redacted_events for item in event_ids)
+        assert event_ids == current_redacted_events
+
+        # Fast forward 49 hours to make sure the redacted media cleanup loop runs
+        self.reactor.advance(49 * 60 * 60)
+
+        # Check if the media is deleted from storage.
+        for media_id in media_ids:
+            media = self.get_success(self.store.get_local_media(media_id))
+            assert media is None
+            assert isinstance(self.media_repo, MediaRepository)
+            assert not os.path.exists(
+                self.media_repo.filepaths.local_media_filepath(media_id)
+            )
+
+    def test_normal_users_lose_access_to_media_right_after_redaction(self) -> None:
+        """Test that normal users lose access to media after the event they
+        were attached to has been redacted.
+        """
+        # Create events with media attached
+        media_ids, event_ids = self._create_test_resource()
+
+        # Redact the bad user's events
+        for event_id in event_ids:
+            self._redact_event(
+                self.admin_tok,
+                self.room,
+                event_id,
+                expect_code=200,
+            )
+            event_dict = self.helper.get_event(self.room, event_id, self.admin_tok)
+            self.assertIn("redacted_because", event_dict, event_dict)
+
+        # Normal user trying to access redacted media should get 403
+        for media_id in media_ids:
+            channel = self.make_request(
+                "GET",
+                f"/_matrix/client/v1/media/download/{self.hs.hostname}/{media_id}",
+                shorthand=False,
+                access_token=self.user_tok,
+            )
+            assert channel.code == 403
+
+    def test_moderators_still_have_access_to_media_after_redaction_until_permanent_deletion(
+        self,
+    ) -> None:
+        """Test that users with moderator privileges still have access to media
+        after the event they were attached to has been redacted.
+        """
+        # Create events with media attached
+        media_ids, event_ids = self._create_test_resource()
+
+        # Redact the bad user's events
+        for event_id in event_ids:
+            self._redact_event(
+                self.admin_tok,
+                self.room,
+                event_id,
+                expect_code=200,
+            )
+            event_dict = self.helper.get_event(self.room, event_id, self.admin_tok)
+            self.assertIn("redacted_because", event_dict, event_dict)
+
+        # User with moderator privileges still have access to redacted media
+        for media_id in media_ids:
+            channel = self.make_request(
+                "GET",
+                f"/_matrix/client/v1/media/download/{self.hs.hostname}/{media_id}",
+                shorthand=False,
+                access_token=self.admin_tok,
+            )
+            assert channel.code == 200
+
+        # After 48 hours, media that are attached to the redacted events should be
+        # permanatly deleted from disk and moderators no longer have access to them
+        self.reactor.advance(49 * 60 * 60)
+
+        for media_id in media_ids:
+            channel = self.make_request(
+                "GET",
+                f"/_matrix/client/v1/media/download/{self.hs.hostname}/{media_id}",
+                shorthand=False,
+                access_token=self.admin_tok,
+            )
+            assert channel.code == 404

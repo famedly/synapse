@@ -305,7 +305,7 @@ class ThumbnailProvider:
             if requester is not None:
                 # Only check media visibility if this is for a local request. This will
                 # raise directly back to the client if not visible
-                await self.media_repo.is_media_visible(requester.user, media_info)
+                await self.media_repo.is_media_visible(requester, media_info)
             restrictions = await self.media_repo.validate_media_restriction(
                 request, media_info, None, for_federation
             )
@@ -365,7 +365,7 @@ class ThumbnailProvider:
             if requester is not None:
                 # Only check media visibility if this is for a local request. This will
                 # raise directly back to the client if not visible
-                await self.media_repo.is_media_visible(requester.user, media_info)
+                await self.media_repo.is_media_visible(requester, media_info)
             restrictions = await self.media_repo.validate_media_restriction(
                 request, None, media_id, for_federation
             )
@@ -482,7 +482,7 @@ class ThumbnailProvider:
         # if MSC3911 is enabled, check visibility of the media for the user
         if self.enable_media_restriction and requester is not None:
             # This will raise directly back to the client if not visible
-            await self.media_repo.is_media_visible(requester.user, media_info)
+            await self.media_repo.is_media_visible(requester, media_info)
 
         # Check if the media is cached on the client, if so return 304.
         if check_for_cached_entry_and_respond(request):
@@ -572,7 +572,7 @@ class ThumbnailProvider:
         # if MSC3911 is enabled, check visibility of the media for the user
         if self.enable_media_restriction and requester is not None:
             # This will raise directly back to the client if not visible
-            await self.media_repo.is_media_visible(requester.user, media_info)
+            await self.media_repo.is_media_visible(requester, media_info)
 
         # Check if the media is cached on the client, if so return 304.
         if check_for_cached_entry_and_respond(request):

@@ -592,7 +592,12 @@ class ExperimentalConfig(Config):
         # MSC3911: Linking Media to Events
         self.msc3911_enabled: bool = experimental.get("msc3911_enabled", False)
 
-        # Disable the current media create and upload endpoints
+        # MSC3911: Disable the current media create and upload endpoints
         self.msc3911_unrestricted_media_upload_disabled: bool = experimental.get(
             "msc3911_unrestricted_media_upload_disabled", False
+        )
+
+        # MSC3911: Retention time for media that are attached to redacted events
+        self.msc3911_redacted_event_media_cleanup_interval: int = experimental.get(
+            "msc3911_redacted_event_media_cleanup_interval", 48 * 60 * 60 * 1000
         )
