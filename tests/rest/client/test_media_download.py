@@ -22,7 +22,6 @@ from typing import Optional
 from matrix_common.types.mxc_uri import MXCUri
 
 from twisted.test.proto_helpers import MemoryReactor
-from twisted.web.resource import Resource
 
 from synapse.api.constants import (
     EventContentFields,
@@ -74,11 +73,6 @@ class RestrictedResourceDownloadTestCase(unittest.HomeserverTestCase):
         )
         self.other_profile_test_user_tok = self.login("profile_test_user", "testpass")
 
-    def create_resource_dict(self) -> dict[str, Resource]:
-        resources = super().create_resource_dict()
-        resources["/_matrix/media"] = self.hs.get_media_repository_resource()
-        return resources
-
     def _create_restricted_media(self, user: str) -> MXCUri:
         mxc_uri = self.get_success(
             self.repo.create_or_update_content(
@@ -109,7 +103,7 @@ class RestrictedResourceDownloadTestCase(unittest.HomeserverTestCase):
         )
         assert channel.code == expected_code, channel.code
 
-    def test_user_download_local_media_unrestricted(self) -> None:
+    def test_local_media_download_unrestricted(self) -> None:
         """Test that unrestricted media is not affected"""
         mxc_uri = self.get_success(
             self.repo.create_or_update_content(
@@ -125,7 +119,7 @@ class RestrictedResourceDownloadTestCase(unittest.HomeserverTestCase):
         self.fetch_media(mxc_uri)
         self.fetch_media(mxc_uri, access_token=self.other_user_tok)
 
-    def test_download_local_media_restricted_but_pending_state(self) -> None:
+    def test_local_media_download_restricted_but_pending_state(self) -> None:
         """Test originating user can access media even though it is not attached"""
         mxc_uri = self._create_restricted_media(self.creator)
         # The creator user can see their own media
@@ -133,7 +127,7 @@ class RestrictedResourceDownloadTestCase(unittest.HomeserverTestCase):
         # But another user can not
         self.fetch_media(mxc_uri, access_token=self.other_user_tok, expected_code=403)
 
-    def test_user_download_local_media_attached_to_user_profile_success(self) -> None:
+    def test_local_media_download_attached_to_user_profile_success(self) -> None:
         """Test retrieving media attached to user's profile"""
         prime_mxc_uri = self._create_restricted_media(self.creator)
         other_mxc_uri = self._create_restricted_media(self.other_profile_test_user)
@@ -166,7 +160,7 @@ class RestrictedResourceDownloadTestCase(unittest.HomeserverTestCase):
             "limit_profile_requests_to_users_who_share_rooms": True,
         }
     )
-    def test_user_download_local_media_attached_to_user_profile_failure(self) -> None:
+    def test_local_media_download_attached_to_user_profile_failure(self) -> None:
         """
         Test that limiting profile requests works as expected. Specifically, that users
         that are not sharing a room can not see profile avatars
@@ -204,7 +198,7 @@ class RestrictedResourceDownloadTestCase(unittest.HomeserverTestCase):
             expected_code=403,
         )
 
-    def test_user_download_local_media_attached_to_message_event_success(self) -> None:
+    def test_local_media_download_attached_to_message_event_success(self) -> None:
         """Test that can local media attached to image event can be viewed"""
         mxc_uri = self._create_restricted_media(self.creator)
         room_id = self.helper.create_room_as(self.creator, tok=self.creator_tok)
@@ -240,7 +234,7 @@ class RestrictedResourceDownloadTestCase(unittest.HomeserverTestCase):
         self.fetch_media(mxc_uri)
         self.fetch_media(mxc_uri, access_token=self.other_user_tok)
 
-    def test_user_download_local_media_attached_to_message_event_failure(self) -> None:
+    def test_local_media_download_attached_to_message_event_failure(self) -> None:
         """Test that can local media attached to image event can be restricted"""
         mxc_uri = self._create_restricted_media(self.creator)
         room_id = self.helper.create_room_as(self.creator, tok=self.creator_tok)
@@ -277,7 +271,7 @@ class RestrictedResourceDownloadTestCase(unittest.HomeserverTestCase):
         # should fail.
         self.fetch_media(mxc_uri, access_token=self.other_user_tok, expected_code=403)
 
-    def test_user_download_local_media_attached_to_state_event_success(self) -> None:
+    def test_local_media_download_attached_to_state_event_success(self) -> None:
         """Test that a simple membership avatar is viewable when appropriate"""
         mxc_uri = self._create_restricted_media(self.creator)
         room_id = self.helper.create_room_as(self.creator, tok=self.creator_tok)
@@ -311,7 +305,7 @@ class RestrictedResourceDownloadTestCase(unittest.HomeserverTestCase):
         self.fetch_media(mxc_uri)
         self.fetch_media(mxc_uri, access_token=self.other_user_tok)
 
-    def test_user_download_local_media_attached_to_state_event_failure(self) -> None:
+    def test_local_media_download_attached_to_state_event_failure(self) -> None:
         """Test that a simple membership avatar is restricted when appropriate"""
         mxc_uri = self._create_restricted_media(self.creator)
         room_id = self.helper.create_room_as(self.creator, tok=self.creator_tok)

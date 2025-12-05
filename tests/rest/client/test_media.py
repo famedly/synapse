@@ -28,7 +28,7 @@ import time
 from contextlib import nullcontext
 from http import HTTPStatus
 from typing import Any, BinaryIO, ClassVar, Dict, List, Optional, Sequence, Tuple, Type
-from unittest.mock import AsyncMock, MagicMock, Mock, patch
+from unittest.mock import MagicMock, Mock, patch
 from urllib import parse
 from urllib.parse import quote, urlencode
 
@@ -68,7 +68,6 @@ from synapse.rest.client import login, media, room
 from synapse.server import HomeServer
 from synapse.storage.databases.main.media_repository import (
     LocalMedia,
-    MediaRestrictions,
 )
 from synapse.types import JsonDict, UserID, create_requester
 from synapse.util import Clock, json_encoder
@@ -3001,22 +3000,25 @@ class DisableUnrestrictedResourceTestCase(unittest.HomeserverTestCase):
     limited when `msc3911_unrestricted_media_upload_disabled` is configured to be True.
     """
 
-    extra_config = {
-        "experimental_features": {"msc3911_unrestricted_media_upload_disabled": True}
-    }
     servlets = [
         media.register_servlets,
     ]
 
-    def make_homeserver(self, reactor: MemoryReactor, clock: Clock) -> HomeServer:
-        config = self.default_config()
-        config.update(self.extra_config)
-        return self.setup_test_homeserver(config=config)
+    def default_config(self) -> JsonDict:
+        config = super().default_config()
+        config.setdefault("experimental_features", {})
+        config["experimental_features"].update(
+            {"msc3911_unrestricted_media_upload_disabled": True}
+        )
+        return config
 
     def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
         self.media_repo = hs.get_media_repository_resource()
 
     def create_resource_dict(self) -> dict[str, Resource]:
+        # Important detail: while we are specifically testing these endpoints are
+        # logically disabled, if we do not load them then this would test the wrong
+        # thing.
         resources = super().create_resource_dict()
         resources["/_matrix/media"] = self.hs.get_media_repository_resource()
         return resources
@@ -3061,19 +3063,17 @@ class RestrictedResourceUploadTestCase(unittest.HomeserverTestCase):
     configured to be True.
     """
 
-    extra_config = {
-        "experimental_features": {"msc3911_enabled": True},
-    }
     servlets = [
         media.register_servlets,
         login.register_servlets,
         admin.register_servlets,
     ]
 
-    def make_homeserver(self, reactor: MemoryReactor, clock: Clock) -> HomeServer:
-        config = self.default_config()
-        config.update(self.extra_config)
-        return self.setup_test_homeserver(config=config)
+    def default_config(self) -> JsonDict:
+        config = super().default_config()
+        config.setdefault("experimental_features", {})
+        config["experimental_features"].update({"msc3911_enabled": True})
+        return config
 
     def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
         self.media_repo = hs.get_media_repository_resource()
@@ -3084,6 +3084,7 @@ class RestrictedResourceUploadTestCase(unittest.HomeserverTestCase):
         self.other_user_tok = self.login("random_user", "testpass")
 
     def create_resource_dict(self) -> dict[str, Resource]:
+        # Need this for test_async_upload_restricted_resource()
         resources = super().create_resource_dict()
         resources["/_matrix/media"] = self.hs.get_media_repository_resource()
         return resources
@@ -3103,12 +3104,12 @@ class RestrictedResourceUploadTestCase(unittest.HomeserverTestCase):
         media_id = channel.json_body["content_uri"].split("/")[-1]
 
         # Check the `restricted` field is True.
-        media = self.get_success(
+        local_media = self.get_success(
             self.hs.get_datastores().main.get_local_media(media_id)
         )
-        assert media is not None
-        self.assertEqual(media.media_id, media_id)
-        self.assertTrue(media.restricted)
+        assert local_media is not None
+        self.assertEqual(local_media.media_id, media_id)
+        self.assertTrue(local_media.restricted)
 
     def test_upload_restricted_resource(self) -> None:
         """
@@ -3127,12 +3128,12 @@ class RestrictedResourceUploadTestCase(unittest.HomeserverTestCase):
         media_id = channel.json_body["content_uri"].split("/")[-1]
 
         # Check the `restricted` field is True.
-        media = self.get_success(
+        local_media = self.get_success(
             self.hs.get_datastores().main.get_local_media(media_id)
         )
-        assert media is not None
-        self.assertEqual(media.media_id, media_id)
-        self.assertTrue(media.restricted)
+        assert local_media is not None
+        self.assertEqual(local_media.media_id, media_id)
+        self.assertTrue(local_media.restricted)
 
         # The media is not attached to any event yet, only creator can see it.
         # The creator can download the restricted resource.
@@ -3179,12 +3180,12 @@ class RestrictedResourceUploadTestCase(unittest.HomeserverTestCase):
         self.assertEqual(channel.code, 200)
 
         # Check the `restricted` field is True.
-        media = self.get_success(
+        local_media = self.get_success(
             self.hs.get_datastores().main.get_local_media(media_id)
         )
-        assert media is not None
-        self.assertEqual(media.media_id, media_id)
-        self.assertTrue(media.restricted)
+        assert local_media is not None
+        self.assertEqual(local_media.media_id, media_id)
+        self.assertTrue(local_media.restricted)
 
         # Media is not attached to any event yet, only creator can see it.
         # The creator can download the restricted resource.
@@ -3209,10 +3210,6 @@ class CopyRestrictedResourceTestCase(unittest.HomeserverTestCase):
     Tests copy API when `msc3911_enabled` is configured to be True.
     """
 
-    extra_config = {
-        "experimental_features": {"msc3911_enabled": True},
-    }
-
     servlets = [
         media.register_servlets,
         login.register_servlets,
@@ -3220,10 +3217,11 @@ class CopyRestrictedResourceTestCase(unittest.HomeserverTestCase):
         room.register_servlets,
     ]
 
-    def make_homeserver(self, reactor: MemoryReactor, clock: Clock) -> HomeServer:
-        config = self.default_config()
-        config.update(self.extra_config)
-        return self.setup_test_homeserver(config=config)
+    def default_config(self) -> JsonDict:
+        config = super().default_config()
+        config.setdefault("experimental_features", {})
+        config["experimental_features"].update({"msc3911_enabled": True})
+        return config
 
     def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
         self.media_repo = hs.get_media_repository()
@@ -3232,11 +3230,6 @@ class CopyRestrictedResourceTestCase(unittest.HomeserverTestCase):
         self.user_tok = self.login("user", "testpass")
         self.other_user = self.register_user("other", "testpass")
         self.other_user_tok = self.login("other", "testpass")
-
-    def create_resource_dict(self) -> dict[str, Resource]:
-        resources = super().create_resource_dict()
-        resources["/_matrix/media"] = self.hs.get_media_repository_resource()
-        return resources
 
     def fetch_media(
         self,
@@ -3622,7 +3615,6 @@ class RestrictedMediaVisibilityTestCase(unittest.HomeserverTestCase):
         login.register_servlets,
         media.register_servlets,
         room.register_servlets,
-        room.register_deprecated_servlets,
     ]
 
     def default_config(self) -> JsonDict:
@@ -3641,12 +3633,6 @@ class RestrictedMediaVisibilityTestCase(unittest.HomeserverTestCase):
 
         self.alice_user_id = self.register_user("alice", "password")
         self.alice_tok = self.login("alice", "password")
-
-    def create_resource_dict(self) -> Dict[str, Resource]:
-        resources = super().create_resource_dict()
-        # The old endpoints are not loaded with the register_servlets above
-        resources["/_matrix/media"] = self.hs.get_media_repository_resource()
-        return resources
 
     def create_restricted_media(self, user: Optional[str] = None) -> MXCUri:
         mxc_uri = self.get_success(
@@ -4503,97 +4489,6 @@ class RestrictedMediaVisibilityTestCase(unittest.HomeserverTestCase):
         assert media_object is not None
         self.assert_expected_result(alice_user_id, media_object, True)
         self.assert_expected_result(profile_viewing_user_id, media_object, False)
-
-
-class FederationClientDownloadTestCase(unittest.HomeserverTestCase):
-    test_image = small_png
-    headers = {
-        b"Content-Length": [b"%d" % (len(test_image.data))],
-        b"Content-Type": [test_image.content_type],
-        b"Content-Disposition": [b"inline"],
-    }
-
-    servlets = [
-        media.register_servlets,
-        login.register_servlets,
-        admin.register_servlets,
-    ]
-
-    def make_homeserver(self, reactor: MemoryReactor, clock: Clock) -> HomeServer:
-        # Mock out the homeserver's MatrixFederationHttpClient
-        client = Mock()
-        federation_get_file = AsyncMock()
-        client.federation_get_file = federation_get_file
-        self.fed_client_mock = federation_get_file
-
-        hs = self.setup_test_homeserver(federation_http_client=client)
-
-        return hs
-
-    def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
-        self.store = hs.get_datastores().main
-        self.media_repo = hs.get_media_repository()
-
-        self.remote_server = "example.com"
-        # mapping of media_id -> byte string of the json with the restrictions
-        self.media_id_data: Dict[str, bytes] = {}
-
-        self.user = self.register_user("user", "pass")
-        self.tok = self.login("user", "pass")
-
-    def generate_remote_media_id_and_restrictions(
-        self, json_dict_response: Optional[JsonDict] = None
-    ) -> str:
-        media_id = random_string(24)
-        byte_string = b"{}"
-        if json_dict_response:
-            byte_string = json_encoder.encode(json_dict_response).encode()
-
-        self.media_id_data[media_id] = byte_string
-        return media_id
-
-    def make_request_for_media(
-        self, json_dict_response: Optional[JsonDict] = None, expected_code: int = 200
-    ) -> str:
-        # Generate media id and restrictions based on SMALL_PNG
-        media_id = self.generate_remote_media_id_and_restrictions(json_dict_response)
-        self.fed_client_mock.return_value = (
-            67,
-            self.headers,
-            self.media_id_data[media_id],
-        )
-
-        channel = self.make_request(
-            "GET",
-            f"/_matrix/client/v1/media/download/{self.remote_server}/{media_id}",
-            shorthand=False,
-            access_token=self.tok,
-        )
-
-        self.assertEqual(channel.code, expected_code)
-
-        return media_id
-
-    def test_downloading_remote_media_with_restrictions_is_in_database(self) -> None:
-        # Note the unstable prefix is filtered out properly before persistence
-        media_id = self.make_request_for_media(
-            {"org.matrix.msc3911.restrictions": {"profile_user_id": "@bob:example.com"}}
-        )
-        restrictions = self.get_success(
-            self.store.get_media_restrictions(self.remote_server, media_id)
-        )
-        assert isinstance(restrictions, MediaRestrictions)
-        assert restrictions.profile_user_id is not None
-        assert restrictions.profile_user_id.to_string() == "@bob:example.com"
-
-    def test_downloading_remote_media_with_no_restrictions_does_not_save_to_db(
-        self,
-    ) -> None:
-        media_id = self.make_request_for_media()
-        restrictions = self.get_success(
-            self.store.get_media_restrictions(self.remote_server, media_id)
-        )
-        assert restrictions is None
 
 
 configs_2 = [
