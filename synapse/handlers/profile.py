@@ -80,9 +80,9 @@ class ProfileHandler:
 
         self._third_party_rules = hs.get_module_api_callbacks().third_party_event_rules
 
-        self.enable_restricted_media = hs.config.experimental.msc3911_enabled
-        self.disable_unrestricted_media = (
-            hs.config.experimental.msc3911_unrestricted_media_upload_disabled
+        self.enable_restricted_media = hs.config.experimental.msc3911.enabled
+        self.block_unrestricted_media = (
+            hs.config.experimental.msc3911.block_unrestricted_media_upload
         )
 
     async def get_profile(self, user_id: str, ignore_backoff: bool = True) -> JsonDict:
@@ -334,7 +334,7 @@ class ProfileHandler:
             # event, it will either be copied/passed along/dropped depending on the
             # above circumstances
             if not media_info:
-                if self.disable_unrestricted_media:
+                if self.block_unrestricted_media:
                     # The user should have done a COPY on this media previous to this
                     # attempt to set
                     raise SynapseError(
@@ -345,7 +345,7 @@ class ProfileHandler:
                 # For backwards compatible behavior, treat the media as unrestricted
                 return
 
-        if self.disable_unrestricted_media and not media_info.restricted:
+        if self.block_unrestricted_media and not media_info.restricted:
             raise SynapseError(
                 HTTPStatus.BAD_REQUEST,
                 f"The media attachment request is invalid as the media '{mxc_uri.media_id}' is not restricted",

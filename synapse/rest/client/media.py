@@ -410,7 +410,7 @@ def register_servlets(hs: "HomeServer", http_server: HttpServer) -> None:
     MediaConfigResource(hs).register(http_server)
     ThumbnailResource(hs, media_repo, media_repo.media_storage).register(http_server)
     DownloadResource(hs, media_repo).register(http_server)
-    if hs.config.experimental.msc3911_enabled:
+    if hs.config.experimental.msc3911.enabled:
         CreateResource(hs, media_repo, restricted=True).register(http_server)
         UploadRestrictedResource(hs, media_repo).register(http_server)
         CopyResource(hs, media_repo).register(http_server)

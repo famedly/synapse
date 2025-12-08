@@ -277,7 +277,7 @@ class RoomStateEventRestServlet(RestServlet):
         self._max_event_delay_ms = hs.config.server.max_event_delay_ms
         self._spam_checker_module_callbacks = hs.get_module_api_callbacks().spam_checker
         self.store = hs.get_datastores().main
-        self.enable_restricted_media = hs.config.experimental.msc3911_enabled
+        self.enable_restricted_media = hs.config.experimental.msc3911.enabled
         self.server_name = hs.config.server.server_name
 
     def register(self, http_server: HttpServer) -> None:
@@ -486,7 +486,7 @@ class RoomSendEventRestServlet(TransactionRestServlet):
         self.auth = hs.get_auth()
         self._max_event_delay_ms = hs.config.server.max_event_delay_ms
         self.store = hs.get_datastores().main
-        self.enable_restricted_media = hs.config.experimental.msc3911_enabled
+        self.enable_restricted_media = hs.config.experimental.msc3911.enabled
         self.server_name = hs.config.server.server_name
 
     def register(self, http_server: HttpServer) -> None:

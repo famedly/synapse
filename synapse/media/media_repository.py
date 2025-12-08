@@ -112,7 +112,7 @@ class AbstractMediaRepository:
         self.server_name = hs.hostname
         self.store = hs.get_datastores().main
         self._is_mine_server_name = hs.is_mine_server_name
-        self.enable_media_restriction = self.hs.config.experimental.msc3911_enabled
+        self.enable_media_restriction = self.hs.config.experimental.msc3911.enabled
 
     @trace
     async def create_media_id_without_expiration(
@@ -643,6 +643,16 @@ class MediaRepository(AbstractMediaRepository):
             key=lambda limit: limit.time_period_ms, reverse=True
         )
 
+        if (
+            self.hs.config.experimental.msc3911.purge_pending_unattached_media
+            and hs.config.media.media_instance_running_background_jobs
+            == hs.config.worker.worker_name
+        ):
+            self.clock.looping_call(
+                self._pending_media_cleanup,
+                self.hs.config.experimental.msc3911.pending_media_cleanup_interval_ms,
+            )
+
     def _start_update_recently_accessed(self) -> Deferred:
         return run_as_background_process(
             "update_recently_accessed_media", self._update_recently_accessed
@@ -663,6 +673,13 @@ class MediaRepository(AbstractMediaRepository):
         await self.store.update_cached_last_access_time(
             local_media, remote_media, self.clock.time_msec()
         )
+
+    async def _pending_media_cleanup(self) -> None:
+        pending_media_ids = await self.store.get_pending_media_ids(
+            self.hs.config.experimental.msc3911.pending_media_cleanup_interval_ms
+        )
+        if pending_media_ids:
+            await self.delete_local_media_ids(pending_media_ids)
 
     def mark_recently_accessed(self, server_name: Optional[str], media_id: str) -> None:
         """Mark the given media as recently accessed.

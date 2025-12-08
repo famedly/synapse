@@ -232,7 +232,7 @@ class FederationRestrictedMediaDownloadsTest(unittest.FederatingHomeserverTestCa
     def default_config(self) -> JsonDict:
         config = super().default_config()
         config.setdefault("experimental_features", {})
-        config["experimental_features"].update({"msc3911_enabled": True})
+        config["experimental_features"].update({"msc3911": {"enabled": True}})
         return config
 
     def test_restricted_media_download_with_restrictions_field(self) -> None:
@@ -505,7 +505,7 @@ class FederationRestrictedThumbnailTest(unittest.FederatingHomeserverTestCase):
     def default_config(self) -> JsonDict:
         config = super().default_config()
         config.setdefault("experimental_features", {})
-        config["experimental_features"].update({"msc3911_enabled": True})
+        config["experimental_features"].update({"msc3911": {"enabled": True}})
         return config
 
     def test_restricted_thumbnail_download_with_restrictions_field(self) -> None:

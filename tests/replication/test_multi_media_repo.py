@@ -502,7 +502,7 @@ class AuthenticatedMediaRepoShardTestCase(BaseMultiWorkerStreamTestCase):
 
 class CopyRestrictedResourceReplicationTestCase(BaseMultiWorkerStreamTestCase):
     """
-    Tests copy API when `msc3911_enabled` is configured to be True.
+    Tests copy API when `msc3911.enabled` is configured to be True.
     """
 
     servlets = [
@@ -515,7 +515,7 @@ class CopyRestrictedResourceReplicationTestCase(BaseMultiWorkerStreamTestCase):
         config = super().default_config()
         config.update(
             {
-                "experimental_features": {"msc3911_enabled": True},
+                "experimental_features": {"msc3911": {"enabled": True}},
                 "media_repo_instances": ["media_worker_1"],
             }
         )

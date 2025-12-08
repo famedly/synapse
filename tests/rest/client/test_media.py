@@ -64,7 +64,7 @@ from synapse.media.media_repository import MediaRepository
 from synapse.media.thumbnailer import ThumbnailProvider
 from synapse.media.url_previewer import IMAGE_CACHE_EXPIRY_MS
 from synapse.rest import admin
-from synapse.rest.client import login, media, room
+from synapse.rest.client import login, media, profile, room
 from synapse.server import HomeServer
 from synapse.storage.databases.main.media_repository import (
     LocalMedia,
@@ -2997,23 +2997,30 @@ class MediaUploadLimits(unittest.HomeserverTestCase):
 class DisableUnrestrictedResourceTestCase(unittest.HomeserverTestCase):
     """
     This test case simulates a homeserver with media create and upload endpoints are
-    limited when `msc3911_unrestricted_media_upload_disabled` is configured to be True.
+    limited when `msc3911.block_unrestricted_media_upload` is configured to be True.
     """
 
     servlets = [
         media.register_servlets,
+        admin.register_servlets,
+        login.register_servlets,
+        profile.register_servlets,
+        room.register_servlets,
     ]
 
     def default_config(self) -> JsonDict:
         config = super().default_config()
         config.setdefault("experimental_features", {})
         config["experimental_features"].update(
-            {"msc3911_unrestricted_media_upload_disabled": True}
+            {"msc3911": {"enabled": True, "block_unrestricted_media_upload": True}}
         )
         return config
 
     def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
-        self.media_repo = hs.get_media_repository_resource()
+        self.media_repo = hs.get_media_repository()
+        self.store = hs.get_datastores().main
+        self.user = self.register_user("david", "password")
+        self.tok = self.login("david", "password")
 
     def create_resource_dict(self) -> dict[str, Resource]:
         # Important detail: while we are specifically testing these endpoints are
@@ -3026,7 +3033,7 @@ class DisableUnrestrictedResourceTestCase(unittest.HomeserverTestCase):
     def test_unrestricted_resource_creation_disabled(self) -> None:
         """
         Tests that CreateResource raises an error when
-        `msc3911_unrestricted_media_upload_disabled` is True.
+        `msc3911.block_unrestricted_media_upload` is True.
         """
         channel = self.make_request(
             "POST",
@@ -3041,7 +3048,7 @@ class DisableUnrestrictedResourceTestCase(unittest.HomeserverTestCase):
     def test_unrestricted_resource_upload_disabled(self) -> None:
         """
         Tests that UploadServlet raises an error when
-        `msc3911_unrestricted_media_upload_disabled` is True.
+        `msc3911.block_unrestricted_media_upload` is True.
         """
         channel = self.make_request(
             "POST",
@@ -3056,10 +3063,106 @@ class DisableUnrestrictedResourceTestCase(unittest.HomeserverTestCase):
             channel.json_body["error"], "Unrestricted media upload is disabled"
         )
 
+    def test_attaching_unrestricted_media_to_profile_fails(self) -> None:
+        """
+        Test that attaching unrestricted media to user profile fails when unrestricted
+        media is banned by configuration.
+        """
+        # Create unrestricted media.
+        content = io.BytesIO(SMALL_PNG)
+        assert isinstance(self.media_repo, MediaRepository)
+        content_uri = self.get_success(
+            self.media_repo.create_or_update_content(
+                "image/png",
+                "test_png_upload",
+                content,
+                67,
+                UserID.from_string(self.user),
+                restricted=False,
+            )
+        )
+
+        # Check media is unrestricted.
+        media_info = self.get_success(self.store.get_local_media(content_uri.media_id))
+        assert media_info is not None
+        assert not media_info.restricted
+
+        # Try to update user profile with unrestricted media.
+        channel = self.make_request(
+            "PUT",
+            f"/_matrix/client/v3/profile/{self.user}/avatar_url",
+            access_token=self.tok,
+            content={"avatar_url": str(content_uri)},
+        )
+        assert channel.code == HTTPStatus.BAD_REQUEST, channel.json_body
+        assert channel.json_body["errcode"] == Codes.INVALID_PARAM
+        assert "is not restricted" in channel.json_body["error"]
+
+    def test_attaching_unreachable_remote_media_to_profile_fails(self) -> None:
+        """
+        Test that media that can not be retrieved will fail to be attached to a user
+        profile when legacy unrestricted media is disabled.
+        """
+        # Generate non-existing media.
+        nonexistent_mxc_uri = MXCUri.from_str("mxc://remote/fakeMediaId_2")
+        channel = self.make_request(
+            "PUT",
+            f"/_matrix/client/v3/profile/{self.user}/avatar_url",
+            access_token=self.tok,
+            content={"avatar_url": str(nonexistent_mxc_uri)},
+        )
+
+        assert channel.code == HTTPStatus.NOT_FOUND, channel.json_body
+        assert channel.json_body["errcode"] == Codes.NOT_FOUND
+
+    def test_create_room_with_missing_profile_avatar_media_succeeds(self) -> None:
+        """
+        Test that a profile avatar that should automatically be included in a room
+        creator's join event does not break the room when the actual media of the avatar
+        is missing.
+        """
+        # First inject a profile avatar url directly into the database. The handler
+        # functions for such can not be used as they do validation, and it would fail as
+        # the media does not actually exist.
+        avatar_mxc_uri = MXCUri.from_str("mxc://fake-domain/whatever")
+        # Make sure to add the restrictions too
+        self.get_success_or_raise(
+            self.hs.get_datastores().main.set_media_restricted_to_user_profile(
+                avatar_mxc_uri.server_name,
+                avatar_mxc_uri.media_id,
+                self.user,
+            )
+        )
+        self.get_success_or_raise(
+            self.store.set_profile_avatar_url(
+                UserID.from_string(self.user), str(avatar_mxc_uri)
+            )
+        )
+
+        # try and create room. This should succeed, but the avatar will have been
+        # stripped from the join event of the creator
+        room_id = self.helper.create_room_as(
+            self.user,
+            tok=self.tok,
+        )
+        assert room_id is not None
+        # Make sure the avatar is not on the event
+        membership_as_set = self.get_success_or_raise(
+            self.store.get_membership_event_ids_for_user(self.user, room_id)
+        )
+        join_event_id = membership_as_set.pop()
+        join_event = self.get_success_or_raise(self.store.get_event(join_event_id))
+        assert join_event.content["membership"] == Membership.JOIN
+        assert "avatar_url" not in join_event.content
+
+        # The display name would have been added, see if that is still there
+        assert "displayname" in join_event.content
+        assert join_event.content["displayname"] == "david"
+
 
 class RestrictedResourceUploadTestCase(unittest.HomeserverTestCase):
     """
-    Tests restricted media creation and upload endpoints when `msc3911_enabled` is
+    Tests restricted media creation and upload endpoints when `msc3911.enabled` is
     configured to be True.
     """
 
@@ -3072,7 +3175,7 @@ class RestrictedResourceUploadTestCase(unittest.HomeserverTestCase):
     def default_config(self) -> JsonDict:
         config = super().default_config()
         config.setdefault("experimental_features", {})
-        config["experimental_features"].update({"msc3911_enabled": True})
+        config["experimental_features"].update({"msc3911": {"enabled": True}})
         return config
 
     def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
@@ -3207,7 +3310,7 @@ class RestrictedResourceUploadTestCase(unittest.HomeserverTestCase):
 
 class CopyRestrictedResourceTestCase(unittest.HomeserverTestCase):
     """
-    Tests copy API when `msc3911_enabled` is configured to be True.
+    Tests copy API when `msc3911.enabled` is configured to be True.
     """
 
     servlets = [
@@ -3220,7 +3323,7 @@ class CopyRestrictedResourceTestCase(unittest.HomeserverTestCase):
     def default_config(self) -> JsonDict:
         config = super().default_config()
         config.setdefault("experimental_features", {})
-        config["experimental_features"].update({"msc3911_enabled": True})
+        config["experimental_features"].update({"msc3911": {"enabled": True}})
         return config
 
     def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
@@ -3620,7 +3723,7 @@ class RestrictedMediaVisibilityTestCase(unittest.HomeserverTestCase):
     def default_config(self) -> JsonDict:
         config = super().default_config()
         config.setdefault("experimental_features", {})
-        config["experimental_features"].update({"msc3911_enabled": True})
+        config["experimental_features"].update({"msc3911": {"enabled": True}})
         return config
 
     def prepare(
@@ -4524,7 +4627,7 @@ class RestrictedMediaBackwardCompatTestCase(unittest.HomeserverTestCase):
         config["media_store_path"] = self.media_store_path
         config["enable_authenticated_media"] = True
         config["experimental_features"] = {
-            "msc3911_enabled": self.enable_restricted_media
+            "msc3911": {"enabled": self.enable_restricted_media}
         }
 
         provider_config = {

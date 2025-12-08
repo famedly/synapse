@@ -79,7 +79,7 @@ class BaseFederationServerServlet(BaseFederationServlet):
     ):
         super().__init__(hs, authenticator, ratelimiter, server_name)
         self.handler = hs.get_federation_server()
-        self.enable_restricted_media = hs.config.experimental.msc3911_enabled
+        self.enable_restricted_media = hs.config.experimental.msc3911.enabled
 
 
 class FederationSendServlet(BaseFederationServerServlet):

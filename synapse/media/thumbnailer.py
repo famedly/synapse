@@ -271,7 +271,7 @@ class ThumbnailProvider:
         self.media_storage = media_storage
         self.store = hs.get_datastores().main
         self.dynamic_thumbnails = hs.config.media.dynamic_thumbnails
-        self.enable_media_restriction = self.hs.config.experimental.msc3911_enabled
+        self.enable_media_restriction = self.hs.config.experimental.msc3911.enabled
 
     async def respond_local_thumbnail(
         self,

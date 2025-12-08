@@ -109,7 +109,7 @@ class ProfileFieldRestServlet(RestServlet):
         self.hs = hs
         self.profile_handler = hs.get_profile_handler()
         self.auth = hs.get_auth()
-        self.enable_restricted_media = hs.config.experimental.msc3911_enabled
+        self.enable_restricted_media = hs.config.experimental.msc3911.enabled
 
     async def on_GET(
         self, request: SynapseRequest, user_id: str, field_name: str
@@ -178,7 +178,7 @@ class ProfileFieldRestServlet(RestServlet):
 
         content = parse_json_object_from_request(request)
         try:
-            new_value = content[field_name]
+            input_value = content[field_name]
         except KeyError:
             raise SynapseError(
                 400, f"Missing key '{field_name}'", errcode=Codes.MISSING_PARAM
@@ -200,24 +200,24 @@ class ProfileFieldRestServlet(RestServlet):
             )
         if field_name == ProfileFields.DISPLAYNAME:
             await self.profile_handler.set_displayname(
-                user, requester, new_value, is_admin, propagate=propagate
+                user, requester, input_value, is_admin, propagate=propagate
             )
         elif field_name == ProfileFields.AVATAR_URL:
-            if self.enable_restricted_media and new_value:
+            if self.enable_restricted_media and input_value:
                 current_avatar_url = (
                     await self.profile_handler.store.get_profile_avatar_url(
                         requester.user
                     )
                 )
                 # If new_value is the same as existing one, keep the function idempotent
-                if current_avatar_url and str(current_avatar_url) == new_value:
+                if current_avatar_url and str(current_avatar_url) == input_value:
                     return 200, {}
             await self.profile_handler.set_avatar_url(
-                user, requester, new_value, is_admin, propagate=propagate
+                user, requester, input_value, is_admin, propagate=propagate
             )
         else:
             await self.profile_handler.set_profile_field(
-                user, requester, field_name, new_value, is_admin
+                user, requester, field_name, input_value, is_admin
             )
 
         return 200, {}
