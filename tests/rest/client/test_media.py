@@ -5131,29 +5131,20 @@ class MediaStorageSha256PathCompatTestCase(unittest.HomeserverTestCase):
         admin.register_servlets,
     ]
 
-    def make_homeserver(self, reactor: MemoryReactor, clock: Clock) -> HomeServer:
-        config = self.default_config()
+    def default_config(self) -> JsonDict:
+        config = super().default_config()
         config.setdefault("experimental_features", {})
         config["experimental_features"].update({"msc3911": {"enabled": True}})
         config["enable_local_media_storage_deduplication"] = True
-        self.storage_path = self.mktemp()
-        self.media_store_path = self.mktemp()
-        os.mkdir(self.storage_path)
-        os.mkdir(self.media_store_path)
-        config["media_store_path"] = self.media_store_path
-        provider_config = {
-            "module": "synapse.media.storage_provider.FileStorageProviderBackend",
-            "store_local": True,
-            "store_synchronous": False,
-            "store_remote": True,
-            "config": {"directory": self.storage_path},
-        }
-        config["media_storage_providers"] = [provider_config]
-        return self.setup_test_homeserver(config=config)
+        return config
 
     def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
+        super().prepare(reactor, clock, hs)
         self.test_dir = tempfile.mkdtemp(prefix="synapse-tests-")
         self.addCleanup(shutil.rmtree, self.test_dir)
+        self.primary_base_path = os.path.join(self.test_dir, "primary")
+        self.secondary_base_path = os.path.join(self.test_dir, "secondary")
+        hs.config.media.media_store_path = self.primary_base_path
         self.repo = hs.get_media_repository()
         self.user = self.register_user("user", "pass")
         self.tok = self.login("user", "pass")

@@ -1762,7 +1762,7 @@ class MediaRepository(AbstractMediaRepository):
             try:
                 file_info = FileInfo(
                     server_name=None,
-                    file_id=sha256 if self.use_sha256_path and sha256 else media_id,
+                    file_id=media_id,
                     url_cache=url_cache,
                     thumbnail=ThumbnailInfo(
                         width=t_width,
@@ -1898,7 +1898,7 @@ class MediaRepository(AbstractMediaRepository):
             server_name: The server name if remote media, else None if local
             media_id: The media ID of the content. (This is the same as
                 the file_id for local content)
-            file_id: Local file ID. If sha256 path is enabled, this will be the sha256 of the media.
+            file_id: Local file ID.
             media_type: The content type of the file
             url_cache: If we are thumbnailing images downloaded for the URL cache,
                 used exclusively by the url previewer
@@ -2146,7 +2146,7 @@ class MediaRepository(AbstractMediaRepository):
         self, media_ids: List[str]
     ) -> Tuple[List[str], int]:
         """
-        Delete the given local media ID from this server
+        Delete the given local or remote media ID from this server
 
         Args:
             media_ids: The list of media IDs to delete.
@@ -2164,7 +2164,7 @@ class MediaRepository(AbstractMediaRepository):
         delete_protected_media: bool = False,
     ) -> Tuple[List[str], int]:
         """
-        Delete local media from this server by size and timestamp. Removes
+        Delete local or remote media from this server by size and timestamp. Removes
         media files, any thumbnails and cached URLs.
 
         Args:
@@ -2192,7 +2192,7 @@ class MediaRepository(AbstractMediaRepository):
         self, media_ids: List[str]
     ) -> Tuple[List[str], int]:
         """
-        Delete local media from this server. Removes media files,
+        Delete local or remote media from this server. Removes media files,
         any thumbnails and cached URLs.
 
         Args:

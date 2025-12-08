@@ -74,7 +74,8 @@ class MediaStorageTests(unittest.HomeserverTestCase):
 
     def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
         """
-        "enable_local_media_storage_deduplication": False,
+        This tests applies to both de-duplication enabled and disabled cases. Parameter
+        `use_dedupe` controls `enable_local_media_storage_deduplication` config.
         """
         self.test_dir = tempfile.mkdtemp(prefix="synapse-tests-")
         self.addCleanup(shutil.rmtree, self.test_dir)
