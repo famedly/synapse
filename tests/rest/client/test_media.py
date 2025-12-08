@@ -5134,7 +5134,7 @@ class MediaStorageSha256PathCompatTestCase(unittest.HomeserverTestCase):
     def make_homeserver(self, reactor: MemoryReactor, clock: Clock) -> HomeServer:
         config = self.default_config()
         config.setdefault("experimental_features", {})
-        config["experimental_features"].update({"msc3911_enabled": True})
+        config["experimental_features"].update({"msc3911": {"enabled": True}})
         config["enable_local_media_storage_deduplication"] = True
         self.storage_path = self.mktemp()
         self.media_store_path = self.mktemp()

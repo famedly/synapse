@@ -47,7 +47,7 @@ class MediaRepositorySha256PathTestCase(unittest.HomeserverTestCase):
     def default_config(self) -> JsonDict:
         config = super().default_config()
         config.setdefault("experimental_features", {})
-        config["experimental_features"].update({"msc3911_enabled": True})
+        config["experimental_features"].update({"msc3911": {"enabled": True}})
         config["enable_local_media_storage_deduplication"] = True
 
         return config

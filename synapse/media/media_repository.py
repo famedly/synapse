@@ -112,7 +112,7 @@ class AbstractMediaRepository:
         self.server_name = hs.hostname
         self.store = hs.get_datastores().main
         self._is_mine_server_name = hs.is_mine_server_name
-        self.enable_media_restriction = self.hs.config.experimental.msc3911.enabled
+        self.msc3911_config = hs.config.experimental.msc3911
 
     @trace
     async def create_media_id_without_expiration(
@@ -319,7 +319,7 @@ class AbstractMediaRepository:
         the request
         """
 
-        if not self.enable_media_restriction:
+        if not self.msc3911_config.enabled:
             return
 
         if not media_info_object.restricted:
@@ -646,13 +646,13 @@ class MediaRepository(AbstractMediaRepository):
         )
 
         if (
-            self.hs.config.experimental.msc3911.purge_pending_unattached_media
+            self.msc3911_config.purge_pending_unattached_media
             and hs.config.media.media_instance_running_background_jobs
             == hs.config.worker.worker_name
         ):
             self.clock.looping_call(
                 self._pending_media_cleanup,
-                self.hs.config.experimental.msc3911.pending_media_cleanup_interval_ms,
+                self.msc3911_config.pending_media_cleanup_interval_ms,
             )
 
     def _start_update_recently_accessed(self) -> Deferred:
@@ -678,7 +678,7 @@ class MediaRepository(AbstractMediaRepository):
 
     async def _pending_media_cleanup(self) -> None:
         pending_media_ids = await self.store.get_pending_media_ids(
-            self.hs.config.experimental.msc3911.pending_media_cleanup_interval_ms
+            self.msc3911_config.pending_media_cleanup_interval_ms
         )
         if pending_media_ids:
             await self.delete_local_media_ids(pending_media_ids)
@@ -1041,7 +1041,7 @@ class MediaRepository(AbstractMediaRepository):
         restrictions = None
         # if MSC3911 is enabled, check visibility of the media for the user and retrieve
         # any restrictions
-        if self.enable_media_restriction:
+        if self.msc3911_config.enabled:
             if requester is not None:
                 # Only check media visibility if this is for a local request. This will
                 # raise directly back to the client if not visible
@@ -1278,7 +1278,7 @@ class MediaRepository(AbstractMediaRepository):
             # check exists twice in this function, once up here for when it already
             # exists in the local database and again further down for after it was
             # retrieved from the remote.
-            if self.enable_media_restriction and requester is not None:
+            if self.msc3911_config.enabled and requester is not None:
                 # This will raise directly back to the client if not visible
                 await self.is_media_visible(requester.user, media_info)
 
@@ -1336,7 +1336,7 @@ class MediaRepository(AbstractMediaRepository):
         # Restricted media requires authentication to be enabled
         if (
             self.hs.config.media.enable_authenticated_media
-            and self.enable_media_restriction
+            and self.msc3911_config.enabled
             and requester is not None
         ):
             # This will raise directly back to the client if not visible

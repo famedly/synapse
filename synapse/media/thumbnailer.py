@@ -271,7 +271,7 @@ class ThumbnailProvider:
         self.media_storage = media_storage
         self.store = hs.get_datastores().main
         self.dynamic_thumbnails = hs.config.media.dynamic_thumbnails
-        self.enable_media_restriction = self.hs.config.experimental.msc3911.enabled
+        self.msc3911_config = hs.config.experimental.msc3911
         self.use_sha256_path = self.media_repo.use_sha256_path
 
     async def respond_local_thumbnail(
@@ -302,7 +302,7 @@ class ThumbnailProvider:
         # if MSC3911 is enabled, check visibility of the media for the user and retrieve
         # any restrictions
         restrictions = None
-        if self.enable_media_restriction:
+        if self.msc3911_config.enabled:
             if requester is not None:
                 # Only check media visibility if this is for a local request. This will
                 # raise directly back to the client if not visible
@@ -363,7 +363,7 @@ class ThumbnailProvider:
         # if MSC3911 is enabled, check visibility of the media for the user and retrieve
         # any restrictions
         restrictions = None
-        if self.enable_media_restriction:
+        if self.msc3911_config.enabled:
             if requester is not None:
                 # Only check media visibility if this is for a local request. This will
                 # raise directly back to the client if not visible
@@ -483,7 +483,7 @@ class ThumbnailProvider:
                 return
 
         # if MSC3911 is enabled, check visibility of the media for the user
-        if self.enable_media_restriction and requester is not None:
+        if self.msc3911_config.enabled and requester is not None:
             # This will raise directly back to the client if not visible
             await self.media_repo.is_media_visible(requester.user, media_info)
 
@@ -575,7 +575,7 @@ class ThumbnailProvider:
                 raise NotFoundError()
 
         # if MSC3911 is enabled, check visibility of the media for the user
-        if self.enable_media_restriction and requester is not None:
+        if self.msc3911_config.enabled and requester is not None:
             # This will raise directly back to the client if not visible
             await self.media_repo.is_media_visible(requester.user, media_info)
 
