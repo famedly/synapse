@@ -1,3 +1,10 @@
+# Synapse 1.144.0 (2025-12-09)
+
+No significant changes since 1.144.0rc1.
+
+
+
+
 # Synapse 1.144.0rc1 (2025-12-02)
 
 Admins using the unstable [MSC2666](https://github.com/matrix-org/matrix-spec-proposals/pull/2666) endpoint (`/_matrix/client/unstable/uk.half-shot.msc2666/user/mutual_rooms`), please check [the relevant section in the upgrade notes](https://github.com/element-hq/synapse/blob/develop/docs/upgrade.md#upgrading-to-v11440) as this release contains changes that disable that endpoint by default.
