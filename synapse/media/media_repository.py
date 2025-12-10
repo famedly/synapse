@@ -921,20 +921,17 @@ class MediaRepository(AbstractMediaRepository):
 
         # It may end up being that this needs to be pushed down into the MediaStorage
         # class. It needs abstraction badly, but that is beyond me at the moment.
-        io_object = open(local_path, "rb")
-
-        # Let existing methods handle creating the new file for us. By not passing a
-        # media id, one will be created.
-        new_mxc_uri = await self.create_or_update_content(
-            old_media_info.media_type,
-            old_media_info.upload_name,
-            io_object,
-            old_media_info.media_length,
-            auth_user,
-            restricted=True,
-        )
-        # I could not find a place this was close()'d explicitly, but this felt prudent
-        io_object.close()
+        with open(local_path, "rb") as io_object:
+            # Let existing methods handle creating the new file for us. By not passing a
+            # media id, one will be created.
+            new_mxc_uri = await self.create_or_update_content(
+                old_media_info.media_type,
+                old_media_info.upload_name,
+                io_object,
+                old_media_info.media_length,
+                auth_user,
+                restricted=True,
+            )
 
         return new_mxc_uri
 
