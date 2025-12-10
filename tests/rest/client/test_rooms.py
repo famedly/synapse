@@ -5437,7 +5437,7 @@ class RoomMemberEventMediaAttachmentTestCase(unittest.HomeserverTestCase):
         assert event.type == EventTypes.Member
 
         # Verify that this event is the correct one
-        assert event.content.get(EventContentFields.MEMBERSHIP_DISPLAYNAME) != str(
+        assert event.content.get(EventContentFields.MEMBERSHIP_AVATAR_URL) != str(
             joiner_avatar_mxc_uri
         )
 
@@ -5568,7 +5568,7 @@ class RoomMemberEventMediaAttachmentTestCase(unittest.HomeserverTestCase):
         assert member_event_id is not None
         event = self.get_success(self.store.get_event(member_event_id))
         assert event.type == EventTypes.Member
-        assert event.content.get(EventContentFields.MEMBERSHIP_DISPLAYNAME) != str(
+        assert event.content.get(EventContentFields.MEMBERSHIP_AVATAR_URL) != str(
             knocker_avatar_mxc_uri
         )
 
@@ -5739,7 +5739,7 @@ class RoomMemberEventMediaAttachmentTestCase(unittest.HomeserverTestCase):
         assert creator_member_event_id is not None
         event = self.get_success(self.store.get_event(creator_member_event_id))
         assert event.type == EventTypes.Member
-        assert event.content.get(EventContentFields.MEMBERSHIP_DISPLAYNAME) != str(
+        assert event.content.get(EventContentFields.MEMBERSHIP_AVATAR_URL) != str(
             mxc_uri
         )
 
