@@ -370,7 +370,7 @@ class MediaRepositoryStore(MediaRepositoryBackgroundUpdateStore):
                     sha256,
                     restricted,
                     ma.restrictions_json->'restrictions'->>'event_id' AS event_id,
-                    ma.restrictions_json->'restrictions'->>'event_id' AS profile_user_id
+                    ma.restrictions_json->'restrictions'->>'profile_user_id' AS profile_user_id
                 FROM local_media_repository AS lmr
                 -- a LEFT JOIN allows values from the right table to be NULL if non-existent
                 LEFT JOIN media_attachments AS ma ON lmr.media_id = ma.media_id
