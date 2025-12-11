@@ -1402,7 +1402,10 @@ class RoomRedactEventRestServlet(TransactionRestServlet):
                 ) = await self.event_creation_handler.create_and_send_nonmember_event(
                     requester, event_dict, txn_id=txn_id
                 )
-
+                # TODO
+                # Find all the media that was attached to the original event
+                # and quarantine them.
+                await self._store.quarantine_media_by_event_id(event_id, requester.user.to_string())
                 if with_relations:
                     run_as_background_process(
                         "redact_related_events",

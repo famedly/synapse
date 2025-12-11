@@ -46,6 +46,7 @@ from synapse.api.constants import (
     JoinRules,
     PublicRoomsFilterFields,
 )
+from synapse.storage.engines import PostgresEngine
 from synapse.api.errors import StoreError
 from synapse.api.room_versions import RoomVersion, RoomVersions
 from synapse.config.homeserver import HomeServerConfig
@@ -1084,6 +1085,77 @@ class RoomWorkerStore(CacheInvalidationWorkerStore):
 
         return await self.db_pool.runInteraction(
             "quarantine_media_by_user", _quarantine_media_by_id_txn
+        )
+
+    async def get_media_ids_attached_to_event(self, event_id: str) -> Dict[str, List]:
+        """
+        Get media IDs that are attached to a specific event_id.
+        Automatically chooses the query based on database engine.
+
+        Returns:
+            A dictionary with 'local' and 'remote' keys:
+            - 'local': List of media IDs (strings)
+            - 'remote': List of (server_name, media_id) tuples
+        """
+        def get_media_ids_attached_to_event_txn(txn: LoggingTransaction) -> Dict[str, List]:
+            if isinstance(self.db_pool.engine, PostgresEngine):
+                # Use GIN index for Postgres
+                sql = """
+                SELECT server_name, media_id
+                FROM media_attachments
+                WHERE restrictions_json @> '{"restrictions": {"event_id": ?}}'
+                """
+            else:
+                # Use cross-database compatible query for the rest
+                sql = """
+                SELECT server_name, media_id
+                FROM media_attachments
+                WHERE restrictions_json->'restrictions'->>'event_id' = ?
+                """
+            txn.execute(sql, (event_id,))
+
+            local_media = []
+            remote_media = []
+
+            for server_name, media_id in txn.fetchall():
+                if self.hs.is_mine_server_name(server_name):
+                    local_media.append(media_id)
+                else:
+                    remote_media.append((server_name, media_id))
+
+            return {"local": local_media, "remote": remote_media}
+
+        return await self.db_pool.runInteraction(
+            "get_media_ids_attached_to_event",
+            get_media_ids_attached_to_event_txn,
+        )
+
+    async def quarantine_media_by_event_id(
+        self,
+        event_id: str,
+        quarantined_by: Optional[str],
+    ) -> int:
+        """quarantines or unquarantines multiple local or remote media ids
+
+        Args:
+            event_id: The ID of the redacted event that has attached media to be quarantined
+            quarantined_by: The user ID that initiated the quarantine request
+                If it is `None` media will be removed from quarantine
+        """
+        logger.info("Quarantining attached media of event %s", event_id)
+
+        attached_media = await self.get_media_ids_attached_to_event(event_id)
+
+        def _quarantine_media_by_event_id_txn(txn: LoggingTransaction) -> int:
+            local_mxcs = attached_media["local"]
+            remote_mxcs = attached_media["remote"]
+
+            return self._quarantine_media_txn(
+                txn, local_mxcs, remote_mxcs, quarantined_by
+            )
+
+        return await self.db_pool.runInteraction(
+            "quarantine_media_by_event_id", _quarantine_media_by_event_id_txn
         )
 
     async def quarantine_media_ids_by_user(

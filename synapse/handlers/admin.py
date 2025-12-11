@@ -504,6 +504,12 @@ class AdminHandler:
                         prev_event_ids=[event.event_id],
                         ratelimit=False,
                     )
+                    # TODO
+                    # Find all the media that was attached to the original event
+                    #  and quarantine them!
+                    await self._store.quarantine_media_by_event_id(
+                        event.event_id, requester.user.to_string()
+                    )
                 except Exception as ex:
                     logger.info(
                         "Redaction of event %s failed due to: %s", event.event_id, ex
