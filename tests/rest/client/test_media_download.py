@@ -338,3 +338,109 @@ class RestrictedResourceDownloadTestCase(unittest.HomeserverTestCase):
         # This user has joined the room and can now see this image. Can't see the
         # related membership event, but :man-shrug:
         self.fetch_media(mxc_uri, access_token=self.other_user_tok)
+
+    def _redact_event(
+        self,
+        access_token: str,
+        room_id: str,
+        event_id: str,
+        expect_code: int = 200,
+        with_relations: Optional[list[str]] = None,
+        content: Optional[JsonDict] = None,
+    ) -> JsonDict:
+        """Helper function to send a redaction event.
+
+        Returns the json body.
+        """
+        path = "/_matrix/client/r0/rooms/%s/redact/%s" % (room_id, event_id)
+
+        request_content = content or {}
+        if with_relations:
+            request_content["org.matrix.msc3912.with_relations"] = with_relations
+
+        channel = self.make_request(
+            "POST", path, request_content, access_token=access_token
+        )
+        self.assertEqual(channel.code, expect_code)
+        return channel.json_body
+
+    def test_local_media_download_attached_to_redacted_event(self) -> None:
+        """Test that can local media attached to image event can be restricted if redacted"""
+        mxc_uri = self._create_restricted_media(self.creator)
+        room_id = self.helper.create_room_as(self.creator, tok=self.creator_tok)
+
+        # set room history_visibility to joined, otherwise it will be 'shared'
+        self.helper.send_state(
+            room_id=room_id,
+            event_type=EventTypes.RoomHistoryVisibility,
+            body={"history_visibility": HistoryVisibility.JOINED},
+            tok=self.creator_tok,
+        )
+
+        _ = self.helper.join(room_id, self.other_user, tok=self.other_user_tok)
+
+        image = {
+            "body": "test_png_upload",
+            "info": {"h": 1, "mimetype": "image/png", "size": 67, "w": 1},
+            "msgtype": "m.image",
+            "url": str(mxc_uri),
+        }
+        json_body = self.helper.send_event(
+            room_id,
+            "m.room.message",
+            content=image,
+            tok=self.creator_tok,
+            expect_code=200,
+            attach_media_mxc=str(mxc_uri),
+        )
+        assert "event_id" in json_body
+
+        # Both users should be able to see the event
+        self.fetch_media(mxc_uri)
+        self.fetch_media(mxc_uri, access_token=self.other_user_tok)
+
+        # now, redact that event, and try and retrieve the media again
+        self._redact_event(self.creator_tok, room_id, json_body["event_id"])
+
+        self.fetch_media(mxc_uri, expected_code=404)
+        self.fetch_media(mxc_uri, access_token=self.other_user_tok, expected_code=404)
+
+    def test_local_media_download_attached_to_redacted_state_event(self) -> None:
+        """Test that a simple membership avatar is viewable when appropriate"""
+        mxc_uri = self._create_restricted_media(self.creator)
+        room_id = self.helper.create_room_as(self.creator, tok=self.creator_tok)
+
+        # set room history_visibility to joined
+        self.helper.send_state(
+            room_id=room_id,
+            event_type=EventTypes.RoomHistoryVisibility,
+            body={"history_visibility": HistoryVisibility.JOINED},
+            tok=self.creator_tok,
+        )
+
+        _ = self.helper.join(room_id, self.other_user, tok=self.other_user_tok)
+
+        membership_content = {
+            EventContentFields.MEMBERSHIP: Membership.JOIN,
+            "avatar_url": str(mxc_uri),
+        }
+        json_body = self.helper.send_state(
+            room_id,
+            EventTypes.Member,
+            body=membership_content,
+            tok=self.creator_tok,
+            expect_code=200,
+            state_key=self.creator,
+            attach_media_mxc=str(mxc_uri),
+        )
+        assert "event_id" in json_body
+
+        # Both users should be able to see the media
+        self.fetch_media(mxc_uri)
+        self.fetch_media(mxc_uri, access_token=self.other_user_tok)
+
+        # now, redact that event, and try and retrieve the media again
+        self._redact_event(self.creator_tok, room_id, json_body["event_id"])
+
+        self.fetch_media(mxc_uri, expected_code=404)
+        self.fetch_media(mxc_uri, access_token=self.other_user_tok, expected_code=404)

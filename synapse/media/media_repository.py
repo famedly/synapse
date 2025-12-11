@@ -349,6 +349,13 @@ class AbstractMediaRepository:
 
         if attached_event_id:
             event_base = await self.store.get_event(attached_event_id)
+            if event_base.internal_metadata.is_redacted():
+                # If the event the media is attached to is redacted, don't server that
+                # media to the user. Moderators and admins should probably be excluded
+                # from this restriction
+                # XXX: better error code?
+                raise NotFoundError()
+
             if event_base.is_state():
                 # The standard event visibility utility, filter_events_for_client(),
                 # does not seem to meet the needs of a good UX when restricting and
