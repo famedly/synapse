@@ -24,7 +24,7 @@ from twisted.web.server import Request
 
 from synapse.appservice import ApplicationService
 from synapse.http.site import SynapseRequest
-from synapse.metrics import SERVER_NAME_LABEL, meter
+from synapse.metrics import meter
 from synapse.types import Requester
 
 if TYPE_CHECKING:

@@ -63,7 +63,6 @@ from twisted.web.server import Request
 
 # This module is imported for its side effects; flake8 needn't warn that it's unused.
 import synapse.metrics._reactor_metrics  # noqa: F401
-from synapse.metrics._gc import MIN_TIME_BETWEEN_GCS, install_gc_manager
 from synapse.metrics._types import Collector
 from synapse.types import StrSequence
 from synapse.util import SYNAPSE_VERSION
@@ -140,6 +139,9 @@ _set_prometheus_client_use_created_metrics(False)
 
 # Global meter for registering otel metrics
 meter = get_meter_provider().get_meter("synapse")
+
+# Import _gc after meter is defined to avoid circular import
+from synapse.metrics._gc import MIN_TIME_BETWEEN_GCS, install_gc_manager  # noqa: E402
 
 
 class _RegistryProxy:
