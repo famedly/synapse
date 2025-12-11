@@ -106,16 +106,18 @@ class ExternalCache:
             "ExternalCache.set",
             tags={opentracing.SynapseTags.CACHE_NAME: cache_name},
         ):
-            with response_timer.labels(
-                method="set", **{SERVER_NAME_LABEL: self.server_name}
-            ).time():
-                return await make_deferred_yieldable(
-                    self._redis_connection.set(
-                        self._get_redis_key(cache_name, key),
-                        encoded_value,
-                        pexpire=expiry_ms,
-                    )
+            start = time.perf_counter()
+            await make_deferred_yieldable(
+                self._redis_connection.set(
+                    self._get_redis_key(cache_name, key),
+                    encoded_value,
+                    pexpire=expiry_ms,
                 )
+            )
+            response_timer.record(
+                time.perf_counter() - start,
+                {"method": "set", SERVER_NAME_LABEL: self.server_name},
+            )
 
     async def get(self, cache_name: str, key: str) -> Optional[Any]:
         """Look up a key/value in the named cache."""

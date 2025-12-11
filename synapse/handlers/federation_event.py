@@ -22,6 +22,7 @@
 import collections
 import itertools
 import logging
+import time
 from http import HTTPStatus
 from typing import (
     TYPE_CHECKING,
@@ -730,23 +731,24 @@ class FederationEventHandler:
         if not events:
             return
 
-        with backfill_processing_after_timer.labels(
-            **{SERVER_NAME_LABEL: self.server_name}
-        ).time():
-            # if there are any events in the wrong room, the remote server is buggy and
-            # should not be trusted.
-            for ev in events:
-                if ev.room_id != room_id:
-                    raise InvalidResponseError(
-                        f"Remote server {dest} returned event {ev.event_id} which is in "
-                        f"room {ev.room_id}, when we were backfilling in {room_id}"
-                    )
+        start = time.perf_counter()
+        # if there are any events in the wrong room, the remote server is buggy and
+        # should not be trusted.
+        for ev in events:
+            if ev.room_id != room_id:
+                raise InvalidResponseError(
+                    f"Remote server {dest} returned event {ev.event_id} which is in "
+                    f"room {ev.room_id}, when we were backfilling in {room_id}"
+                )
 
-            await self._process_pulled_events(
-                dest,
-                events,
-                backfilled=True,
-            )
+        await self._process_pulled_events(
+            dest,
+            events,
+            backfilled=True,
+        )
+        backfill_processing_after_timer.record(
+            time.perf_counter() - start, {SERVER_NAME_LABEL: self.server_name}
+        )
 
     @trace
     async def _get_missing_events_for_pdu(

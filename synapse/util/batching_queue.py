@@ -33,8 +33,6 @@ from typing import (
     TypeVar,
 )
 
-from opentelemetry.metrics._internal.instrument import Gauge
-
 from twisted.internet import defer
 
 from synapse.logging.context import PreserveLoggingContext, make_deferred_yieldable
