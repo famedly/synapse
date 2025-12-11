@@ -656,9 +656,7 @@ event_processing_lag_by_event = meter.create_histogram(
 # This is a process-level metric, so it does not have the `SERVER_NAME_LABEL`. We
 # consider this process-level because all Synapse homeservers running in the process
 # will use the same Synapse version.
-build_info = meter.create_gauge(  # type: ignore[missing-server-name-label]
-    "synapse_build_info", description="Build information"
-)
+build_info = meter.create_gauge("synapse_build_info", description="Build information")
 build_info.set(
     1,
     {

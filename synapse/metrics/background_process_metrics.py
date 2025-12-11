@@ -82,7 +82,7 @@ _background_process_start_count = meter.create_counter(
     description="Number of background processes started",
 )
 
-_background_process_in_flight_count = meter.create_gauge(
+_background_process_in_flight_count = meter.create_up_down_counter(
     "synapse_background_process_in_flight_count",
     description="Number of background processes in flight",
 )
@@ -264,9 +264,9 @@ def run_as_background_process(
         _background_process_start_count.add(
             1, {"name": desc, SERVER_NAME_LABEL: server_name}
         )
-        _background_process_in_flight_count.labels(
-            name=desc, **{SERVER_NAME_LABEL: server_name}
-        ).inc()
+        _background_process_in_flight_count.add(
+            1, {"name": desc, SERVER_NAME_LABEL: server_name}
+        )
 
         with BackgroundProcessLoggingContext(
             name=desc, server_name=server_name, instance_id=count
@@ -373,9 +373,9 @@ def run_as_background_process(
                 )
                 return None
             finally:
-                _background_process_in_flight_count.labels(
-                    name=desc, **{SERVER_NAME_LABEL: server_name}
-                ).dec()
+                _background_process_in_flight_count.add(
+                    -1, {"name": desc, SERVER_NAME_LABEL: server_name}
+                )
 
     # To explain how the log contexts work here:
     #  - When `run_as_background_process` is called, the current context is stored

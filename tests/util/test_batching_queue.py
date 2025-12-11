@@ -20,7 +20,7 @@
 #
 from typing import List, Tuple
 
-from prometheus_client import Gauge
+from opentelemetry.metrics._internal.instrument import Gauge
 
 from twisted.internet import defer
 
@@ -40,12 +40,13 @@ class BatchingQueueTestCase(HomeserverTestCase):
         super().setUp()
 
         # We ensure that we remove any existing metrics for "test_queue".
-        try:
-            number_queued.remove("test_queue", "test_server")
-            number_of_keys.remove("test_queue", "test_server")
-            number_in_flight.remove("test_queue", "test_server")
-        except KeyError:
-            pass
+        # there doesn't seem to be an equivalent for otel
+        # try:
+        #     number_queued.remove("test_queue", "test_server")
+        #     number_of_keys.remove("test_queue", "test_server")
+        #     number_in_flight.remove("test_queue", "test_server")
+        # except KeyError:
+        #     pass
 
         self._pending_calls: List[Tuple[List[str], defer.Deferred]] = []
         self.queue: BatchingQueue[str, str] = BatchingQueue(

@@ -57,8 +57,8 @@ running_on_pypy = platform.python_implementation() == "PyPy"
 # These are process-level metrics, so they do not have the `SERVER_NAME_LABEL`.
 gc_unreachable = meter.create_gauge(
     "python_gc_unreachable_total", description="Unreachable GC objects"
-)  # type: ignore[missing-server-name-label]
-gc_time = meter.create_histogram(  # type: ignore[missing-server-name-label]
+)
+gc_time = meter.create_histogram(
     "python_gc_time",
     description="Time taken to GC (sec)",
     explicit_bucket_boundaries_advisory=[
