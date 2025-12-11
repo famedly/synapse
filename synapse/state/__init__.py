@@ -618,15 +618,13 @@ _biggest_room_by_db_counter = meter.create_counter(
     "expensive room for state resolution",
 )
 
-_cpu_times = Histogram(
+_cpu_times = meter.create_histogram(
     "synapse_state_res_cpu_for_all_rooms_seconds",
-    "CPU time (utime+stime) spent computing a single state resolution",
-    labelnames=[SERVER_NAME_LABEL],
+    description="CPU time (utime+stime) spent computing a single state resolution",
 )
-_db_times = Histogram(
+_db_times = meter.create_histogram(
     "synapse_state_res_db_for_all_rooms_seconds",
-    "Database time spent computing a single state resolution",
-    labelnames=[SERVER_NAME_LABEL],
+    description="Database time spent computing a single state resolution",
 )
 
 

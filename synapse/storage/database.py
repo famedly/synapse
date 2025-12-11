@@ -47,7 +47,6 @@ from typing import (
 )
 
 import attr
-from prometheus_client import Histogram
 from typing_extensions import Concatenate, ParamSpec
 
 from twisted.enterprise import adbapi
@@ -81,13 +80,11 @@ sql_logger = logging.getLogger("synapse.storage.SQL")
 transaction_logger = logging.getLogger("synapse.storage.txn")
 perf_logger = logging.getLogger("synapse.storage.TIME")
 
-sql_scheduling_timer = Histogram(
-    "synapse_storage_schedule_time", "sec", labelnames=[SERVER_NAME_LABEL]
+sql_scheduling_timer = meter.create_histogram(
+    "synapse_storage_schedule_time", unit="sec"
 )
 
-sql_query_timer = Histogram(
-    "synapse_storage_query_time", "sec", labelnames=["verb", SERVER_NAME_LABEL]
-)
+sql_query_timer = meter.create_histogram("synapse_storage_query_time", unit="sec")
 sql_txn_count = meter.create_counter(
     "synapse_storage_transaction_time_count", description="sec"
 )

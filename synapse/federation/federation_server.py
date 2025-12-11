@@ -35,8 +35,6 @@ from typing import (
     Union,
 )
 
-from prometheus_client import Histogram
-
 from twisted.python import failure
 
 from synapse.api.constants import (
@@ -113,10 +111,9 @@ received_queries_counter = meter.create_counter(
     "synapse_federation_server_received_queries",
 )
 
-pdu_process_time = Histogram(
+pdu_process_time = meter.create_histogram(
     "synapse_federation_server_pdu_process_time",
-    "Time taken to process an event",
-    labelnames=[SERVER_NAME_LABEL],
+    description="Time taken to process an event",
 )
 
 last_pdu_ts_metric = meter.create_gauge(

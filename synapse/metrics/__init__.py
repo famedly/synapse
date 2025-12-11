@@ -644,10 +644,9 @@ event_processing_last_ts = meter.create_gauge("synapse_event_processing_last_ts"
 # finished being processed.
 event_processing_lag = meter.create_gauge("synapse_event_processing_lag")
 
-event_processing_lag_by_event = Histogram(
+event_processing_lag_by_event = meter.create_histogram(
     "synapse_event_processing_lag_by_event",
-    "Time between an event being persisted and it being queued up to be sent to the relevant remote servers",
-    labelnames=["name", SERVER_NAME_LABEL],
+    description="Time between an event being persisted and it being queued up to be sent to the relevant remote servers",
 )
 
 # Build info of the running server.

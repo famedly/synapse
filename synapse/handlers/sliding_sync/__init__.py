@@ -17,7 +17,6 @@ import logging
 from itertools import chain
 from typing import TYPE_CHECKING, AbstractSet, Dict, List, Mapping, Optional, Set, Tuple
 
-from prometheus_client import Histogram
 from typing_extensions import assert_never
 
 from synapse.api.constants import Direction, EventTypes, Membership
@@ -38,7 +37,7 @@ from synapse.logging.opentracing import (
     tag_args,
     trace,
 )
-from synapse.metrics import SERVER_NAME_LABEL
+from synapse.metrics import SERVER_NAME_LABEL, meter
 from synapse.storage.databases.main.roommember import extract_heroes_from_room_summary
 from synapse.storage.databases.main.state_deltas import StateDelta
 from synapse.storage.databases.main.stream import PaginateFunction
@@ -77,10 +76,9 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-sync_processing_time = Histogram(
+sync_processing_time = meter.create_histogram(
     "synapse_sliding_sync_processing_time",
-    "Time taken to generate a sliding sync response, ignoring wait times.",
-    labelnames=["initial", SERVER_NAME_LABEL],
+    description="Time taken to generate a sliding sync response, ignoring wait times.",
 )
 
 # Limit the number of state_keys we should remember sending down the connection for each
