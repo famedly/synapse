@@ -375,6 +375,11 @@ class CopyResource(RestServlet):
         if not media_info:
             raise NotFoundError()
         if media_info.quarantined_by:
+            # TODO:
+            # if the requester is moderator of the room
+            # allow download
+            # if not a moderator, return 404
+            # But do moderators need to copy quarantined media?
             raise NotFoundError()
 
         await self._validate_user_media_limit(requester, media_info)

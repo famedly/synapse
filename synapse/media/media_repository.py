@@ -26,6 +26,8 @@ import shutil
 from http import HTTPStatus
 from io import BytesIO
 from typing import IO, TYPE_CHECKING, Dict, List, Optional, Set, Tuple, Union
+from synapse.api.auth.base import BaseAuth
+
 
 import attr
 from matrix_common.types.mxc_uri import MXCUri
@@ -156,10 +158,11 @@ class AbstractMediaRepository:
             raise SynapseError(
                 HTTPStatus.NOT_FOUND, "Media not found", errcode=Codes.NOT_FOUND
             )
-        if media_info.quarantined_by:
-            raise SynapseError(
-                HTTPStatus.NOT_FOUND, "Media not found", errcode=Codes.NOT_FOUND
-            )
+        # TODO: We no longer check the quarantined_by here, because we need to check it with the requester.
+        # if media_info.quarantined_by:
+        #     raise SynapseError(
+        #         HTTPStatus.NOT_FOUND, "Media not found", errcode=Codes.NOT_FOUND
+        #     )
         return media_info
 
     async def create_or_update_content(
@@ -312,13 +315,13 @@ class AbstractMediaRepository:
         return attachments
 
     async def is_media_visible(
-        self, requesting_user: UserID, media_info_object: Union[LocalMedia, RemoteMedia]
+        self, requester: Requester, media_info_object: Union[LocalMedia, RemoteMedia]
     ) -> None:
         """
         Verify that media requested for download should be visible to the user making
         the request
         """
-
+        requester_user_id_str = requester.user.to_string()
         if not self.enable_media_restriction:
             return
 
@@ -329,7 +332,7 @@ class AbstractMediaRepository:
             # When the media has not been attached yet, only the originating user can
             # see it. But once attachments have been formed, standard other rules apply
             if isinstance(media_info_object, LocalMedia) and (
-                requesting_user.to_string() == str(media_info_object.user_id)
+                requester_user_id_str == str(media_info_object.user_id)
             ):
                 return
 
@@ -338,7 +341,7 @@ class AbstractMediaRepository:
                 "Media ID ('%s') as requested by '%s' was restricted but had no "
                 "attachments",
                 media_info_object.media_id,
-                requesting_user.to_string(),
+                requester_user_id_str,
             )
             raise UnauthorizedRequestAPICallError(
                 f"Media requested ('{media_info_object.media_id}') is restricted"
@@ -363,18 +366,27 @@ class AbstractMediaRepository:
                 # time to find out if a given room ever had anything other than a leave
                 # event, this is the simplest without having to do tablescans
 
+                if media_info_object.quarantined_by:
+                    assert isinstance(self.auth, BaseAuth)
+                    is_moderator = await self.auth.is_moderator(event_base.room_id, requester)
+                    if not is_moderator:
+                        raise SynapseError(
+                            HTTPStatus.NOT_FOUND, "Media not found", errcode=Codes.NOT_FOUND
+                        )
+                    return
+
                 # Need membership of NOW
                 (
                     membership_now,
                     _,
                 ) = await self.store.get_local_current_membership_for_user_in_room(
-                    requesting_user.to_string(), event_base.room_id
+                    requester_user_id_str, event_base.room_id
                 )
 
                 if not membership_now:
                     membership_now = Membership.LEAVE
 
-                membership_state_key = (EventTypes.Member, requesting_user.to_string())
+                membership_state_key = (EventTypes.Member, requester_user_id_str)
                 types = (_HISTORY_VIS_KEY, membership_state_key)
 
                 # and history visibility and membership of THEN
@@ -467,7 +479,7 @@ class AbstractMediaRepository:
                 storage_controllers = self.hs.get_storage_controllers()
                 filtered_events = await filter_events_for_client(
                     storage_controllers,
-                    requesting_user.to_string(),
+                    requester_user_id_str,
                     [event_base],
                 )
                 if len(filtered_events) > 0:
@@ -487,14 +499,14 @@ class AbstractMediaRepository:
             if self.hs.config.server.limit_profile_requests_to_users_who_share_rooms:
                 # First take care of the case where the requesting user IS the creating
                 # user. The other function below does not handle this.
-                if requesting_user.to_string() == attached_profile_user_id.to_string():
+                if requester_user_id_str == attached_profile_user_id.to_string():
                     return
 
                 # This call returns a set() that contains which of the "other_user_ids"
                 # share a room. Since we give it only one, if bool(set()) is True, then they
                 # share some room or had at least one invite between them.
                 if not await self.store.do_users_share_a_room_joined_or_invited(
-                    requesting_user.to_string(),
+                    requester_user_id_str,
                     [attached_profile_user_id.to_string()],
                 ):
                     logger.debug(
@@ -502,7 +514,7 @@ class AbstractMediaRepository:
                         "profile, but was not allowed(is "
                         "'limit_profile_requests_to_users_who_share_rooms' enabled?)",
                         media_info_object.media_id,
-                        requesting_user.to_string(),
+                        requester_user_id_str,
                     )
 
                     raise UnauthorizedRequestAPICallError(
@@ -521,7 +533,7 @@ class AbstractMediaRepository:
             "Media ID (%s) as requested by '%s' was restricted, but was not "
             "allowed(media_attachments=%s)",
             media_info_object.media_id,
-            requesting_user.to_string(),
+            requester_user_id_str,
             media_info_object.attachments,
         )
         raise UnauthorizedRequestAPICallError(
@@ -812,6 +824,7 @@ class MediaRepository(AbstractMediaRepository):
         logger.info("Stored local media in file %r", fname)
 
         if should_quarantine:
+            # Question: why doesn't it stop the create or update when the hash is quarantined?
             logger.warning(
                 "Media has been automatically quarantined as it matched existing quarantined media"
             )
@@ -855,6 +868,7 @@ class MediaRepository(AbstractMediaRepository):
                 user_id=auth_user,
                 sha256=sha256,
                 quarantined_by="system" if should_quarantine else None,
+                # Question: I thought `quarantined_by` should be the UserID, not something else.
                 restricted=restricted,
             )
         else:
@@ -888,6 +902,15 @@ class MediaRepository(AbstractMediaRepository):
         """
 
         old_media_info = await self.get_media_info(existing_mxc)
+
+        # TODO: thus get_media_info no longer checkes the quarantined_by field, we need to check it here
+        # If the media is quarantined, we should not copy it even though user is a moderator.
+        if old_media_info.quarantined_by:
+            raise SynapseError(
+                HTTPStatus.NOT_FOUND,
+                "Media not found",
+                errcode=Codes.NOT_FOUND,
+            )
         if isinstance(old_media_info, RemoteMedia):
             file_info = FileInfo(
                 server_name=old_media_info.media_origin,
@@ -958,10 +981,11 @@ class MediaRepository(AbstractMediaRepository):
                 respond_404(request)
                 return None
 
-            if media_info.quarantined_by:
-                logger.info("Media %s is quarantined", media_id)
-                respond_404(request)
-                return None
+            # TODO: we should not block here on quarantined media, because we want the moderators still have access to it.
+            # if media_info.quarantined_by:
+            #     logger.info("Media %s is quarantined", media_id)
+            #     respond_404(request)
+            #     return None
 
             # The file has been uploaded, so stop looping
             if media_info.media_length is not None:
@@ -1267,9 +1291,10 @@ class MediaRepository(AbstractMediaRepository):
             file_id = media_info.filesystem_id
             file_info = FileInfo(server_name, file_id)
 
-            if media_info.quarantined_by:
-                logger.info("Media is quarantined")
-                raise NotFoundError()
+            # TODO: we should not block here on quarantined media, because we want the moderators still have access to it.
+            # if media_info.quarantined_by:
+            #     logger.info("Media is quarantined")
+            #     raise NotFoundError()
 
             if not media_info.media_type:
                 media_info = attr.evolve(

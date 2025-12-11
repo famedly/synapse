@@ -239,6 +239,51 @@ class BaseAuth:
 
         return user_level >= send_level
 
+    async def is_moderator(self, room_id: str, requester: Requester) -> bool:
+        """Determine whether the user is moderator of the room.
+
+        Args:
+            room_id: The room_id of the room to check
+            requester: The user making the request
+        """
+        is_admin = await self.is_server_admin(requester)
+        if is_admin:
+            return True
+        await self.check_user_in_room(room_id, requester)
+
+        # We currently require the user is a "moderator" in the room. We do this
+        # by checking if they would (theoretically) be able to change the
+        # m.room.canonical_alias events
+
+        auth_events = await self._storage_controllers.state.get_current_state(
+            room_id,
+            StateFilter.from_types(
+                [
+                    POWER_KEY,
+                    CREATE_KEY,
+                ]
+            ),
+        )
+
+        send_level = event_auth.get_send_level(
+            EventTypes.CanonicalAlias,
+            "",
+            auth_events.get(POWER_KEY),
+        )
+
+        user_level = event_auth.get_user_power_level(
+            requester.user.to_string(), auth_events
+        )
+        # Check multiple moderator-level actions
+        kick_level = event_auth.get_named_level(auth_events, "kick", 50)
+        ban_level = event_auth.get_named_level(auth_events, "ban", 50)
+        redact_level = event_auth.get_named_level(auth_events, "redact", 50)
+
+        # Consider someone a moderator if they can perform key mod actions
+        moderator_threshold = min(kick_level, ban_level, redact_level)
+
+        return user_level >= send_level and user_level >= moderator_threshold
+
     @staticmethod
     def has_access_token(request: Request) -> bool:
         """Checks if the request has an access_token.

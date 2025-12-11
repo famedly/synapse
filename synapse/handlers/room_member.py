@@ -26,6 +26,8 @@ from http import HTTPStatus
 from typing import TYPE_CHECKING, Iterable, List, Optional, Set, Tuple
 
 from matrix_common.types.mxc_uri import MXCUri
+from synapse.api.auth.base import BaseAuth
+
 
 from synapse import types
 from synapse.api.constants import (
@@ -882,7 +884,17 @@ class RoomMemberHandler(metaclass=abc.ABCMeta):
                         # The actual info is irrelevant at this stage, just ignore. This
                         # will raise if the media does not exist
                         _ = await media_repo.get_media_info(existing_mxc_uri)
-
+                        # TODO: thus get_media_info no longer checkes the quarantined_by field, we need to check it here
+                        # with the requester. information.
+                        # if media.quarantined_by:
+                        #     assert isinstance(self.auth, BaseAuth)
+                        #     is_moderator = await self.auth.is_moderator(room_id, requester)
+                        #     if not is_moderator:
+                        #         raise SynapseError(
+                        #             HTTPStatus.NOT_FOUND,
+                        #             "Media not found",
+                        #             errcode=Codes.NOT_FOUND,
+                        #         )
                         new_mxc_uri = await media_repo.copy_media(
                             existing_mxc_uri, requester.user, 20_000
                         )
@@ -938,6 +950,17 @@ class RoomMemberHandler(metaclass=abc.ABCMeta):
 
                     else:
                         media_object = await media_repo.get_media_info(new_mxc_uri)
+                        # TODO: thus get_media_info no longer checkes the quarantined_by field, we need to check it here
+                        # with the requester. information.
+                        if media_object.quarantined_by:
+                            assert isinstance(self.auth, BaseAuth)
+                            is_moderator = await self.auth.is_moderator(room_id, requester)
+                            if not is_moderator:
+                                raise SynapseError(
+                                    HTTPStatus.NOT_FOUND,
+                                    "Media not found",
+                                    errcode=Codes.NOT_FOUND,
+                                )
                         assert isinstance(media_object, LocalMedia)
                         media_info_for_attachment = {media_object}
                         content[EventContentFields.MEMBERSHIP_AVATAR_URL] = str(

@@ -95,6 +95,7 @@ class RelationsHandler:
         self._event_handler = hs.get_event_handler()
         self._event_serializer = hs.get_event_client_serializer()
         self._event_creation_handler = hs.get_event_creation_handler()
+        self._store = hs.get_datastores().main
 
     async def get_relations(
         self,
@@ -258,6 +259,12 @@ class RelationsHandler:
                     },
                     ratelimit=False,
                 )
+                # TODO
+                # Find all the media that was attached to the original event
+                # and quarantine them!
+                await self._store.quarantine_media_by_event_id(
+                        related_event_id, requester.user.to_string()
+                    )
             except SynapseError as e:
                 logger.warning(
                     "Failed to redact event %s (related to event %s): %s",
