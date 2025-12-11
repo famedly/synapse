@@ -717,10 +717,13 @@ class FederationSender(AbstractFederationSender):
                         now = self.clock.time_msec()
                         ts = event_to_received_ts[event.event_id]
                         assert ts is not None
-                        synapse.metrics.event_processing_lag_by_event.labels(
-                            name="federation_sender",
-                            **{SERVER_NAME_LABEL: self.server_name},
-                        ).observe((now - ts) / 1000)
+                        synapse.metrics.event_processing_lag_by_event.record(
+                            (now - ts) / 1000,
+                            {
+                                "name": "federation_sender",
+                                SERVER_NAME_LABEL: self.server_name,
+                            },
+                        )
 
                 async def handle_room_events(events: List[EventBase]) -> None:
                     logger.debug(
@@ -762,14 +765,20 @@ class FederationSender(AbstractFederationSender):
                     ts = max(t for t in event_to_received_ts.values() if t)
                     assert ts is not None
 
-                    synapse.metrics.event_processing_lag.labels(
-                        name="federation_sender",
-                        **{SERVER_NAME_LABEL: self.server_name},
-                    ).set(now - ts)
-                    synapse.metrics.event_processing_last_ts.labels(
-                        name="federation_sender",
-                        **{SERVER_NAME_LABEL: self.server_name},
-                    ).set(ts)
+                    synapse.metrics.event_processing_lag.set(
+                        now - ts,
+                        {
+                            "name": "federation_sender",
+                            SERVER_NAME_LABEL: self.server_name,
+                        },
+                    )
+                    synapse.metrics.event_processing_last_ts.set(
+                        ts,
+                        {
+                            "name": "federation_sender",
+                            SERVER_NAME_LABEL: self.server_name,
+                        },
+                    )
 
                     events_processed_counter.add(
                         len(event_entries), {SERVER_NAME_LABEL: self.server_name}
@@ -791,9 +800,10 @@ class FederationSender(AbstractFederationSender):
                     },
                 )
 
-                synapse.metrics.event_processing_positions.labels(
-                    name="federation_sender", **{SERVER_NAME_LABEL: self.server_name}
-                ).set(next_token)
+                synapse.metrics.event_processing_positions.set(
+                    next_token,
+                    {"name": "federation_sender", SERVER_NAME_LABEL: self.server_name},
+                )
 
         finally:
             self._is_processing = False

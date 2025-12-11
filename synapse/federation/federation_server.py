@@ -545,9 +545,10 @@ class FederationServer(FederationBase):
         )
 
         if newest_pdu_ts and origin in self._federation_metrics_domains:
-            last_pdu_ts_metric.labels(
-                origin_server_name=origin, **{SERVER_NAME_LABEL: self.server_name}
-            ).set(newest_pdu_ts / 1000)
+            last_pdu_ts_metric.set(
+                newest_pdu_ts / 1000,
+                {"origin_server_name": origin, SERVER_NAME_LABEL: self.server_name},
+            )
 
         return pdu_results
 
@@ -1347,9 +1348,10 @@ class FederationServer(FederationBase):
                     origin, event.event_id
                 )
                 if received_ts is not None:
-                    pdu_process_time.labels(
-                        **{SERVER_NAME_LABEL: self.server_name}
-                    ).observe((self._clock.time_msec() - received_ts) / 1000)
+                    pdu_process_time.record(
+                        (self._clock.time_msec() - received_ts) / 1000,
+                        {SERVER_NAME_LABEL: self.server_name},
+                    )
 
             next = await self._get_next_nonspam_staged_event_for_room(
                 room_id, room_version

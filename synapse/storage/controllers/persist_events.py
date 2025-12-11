@@ -45,7 +45,6 @@ from typing import (
 )
 
 import attr
-from prometheus_client import Histogram
 
 from twisted.internet import defer
 
@@ -98,20 +97,32 @@ state_delta_reuse_delta_counter = meter.create_counter(
 )
 
 # The number of forward extremities for each new event.
-forward_extremities_counter = Histogram(
+forward_extremities_counter = meter.create_histogram(
     "synapse_storage_events_forward_extremities_persisted",
-    "Number of forward extremities for each new event",
-    labelnames=[SERVER_NAME_LABEL],
-    buckets=(1, 2, 3, 5, 7, 10, 15, 20, 50, 100, 200, 500, "+Inf"),
+    description="Number of forward extremities for each new event",
+    explicit_bucket_boundaries_advisory=[1, 2, 3, 5, 7, 10, 15, 20, 50, 100, 200, 500],
 )
 
 # The number of stale forward extremities for each new event. Stale extremities
 # are those that were in the previous set of extremities as well as the new.
-stale_forward_extremities_counter = Histogram(
+stale_forward_extremities_counter = meter.create_histogram(
     "synapse_storage_events_stale_forward_extremities_persisted",
-    "Number of unchanged forward extremities for each new event",
-    labelnames=[SERVER_NAME_LABEL],
-    buckets=(0, 1, 2, 3, 5, 7, 10, 15, 20, 50, 100, 200, 500, "+Inf"),
+    description="Number of unchanged forward extremities for each new event",
+    explicit_bucket_boundaries_advisory=[
+        0,
+        1,
+        2,
+        3,
+        5,
+        7,
+        10,
+        15,
+        20,
+        50,
+        100,
+        200,
+        500,
+    ],
 )
 
 state_resolutions_during_persistence = meter.create_counter(
@@ -843,13 +854,13 @@ class EventsPersistenceStorageController:
         # We only update metrics for events that change forward extremities
         # (e.g. we ignore backfill/outliers/etc)
         if result != latest_event_ids:
-            forward_extremities_counter.labels(
-                **{SERVER_NAME_LABEL: self.server_name}
-            ).observe(len(result))
+            forward_extremities_counter.record(
+                len(result), {SERVER_NAME_LABEL: self.server_name}
+            )
             stale = latest_event_ids & result
-            stale_forward_extremities_counter.labels(
-                **{SERVER_NAME_LABEL: self.server_name}
-            ).observe(len(stale))
+            stale_forward_extremities_counter.record(
+                len(stale), {SERVER_NAME_LABEL: self.server_name}
+            )
 
         return result
 

@@ -183,10 +183,13 @@ class ApplicationServicesHandler:
                         ts = event_to_received_ts[event.event_id]
                         assert ts is not None
 
-                        synapse.metrics.event_processing_lag_by_event.labels(
-                            name="appservice_sender",
-                            **{SERVER_NAME_LABEL: self.server_name},
-                        ).observe((now - ts) / 1000)
+                        synapse.metrics.event_processing_lag_by_event.record(
+                            (now - ts) / 1000,
+                            {
+                                "name": "appservice_sender",
+                                SERVER_NAME_LABEL: self.server_name,
+                            },
+                        )
 
                     async def handle_room_events(events: Iterable[EventBase]) -> None:
                         for event in events:

@@ -40,7 +40,6 @@ from typing import (
 import attr
 from immutabledict import immutabledict
 from opentelemetry.metrics import Counter
-from prometheus_client import Histogram
 
 from synapse.api.constants import EventTypes
 from synapse.api.room_versions import KNOWN_ROOM_VERSIONS, StateResolutionVersions
@@ -74,11 +73,10 @@ logger = logging.getLogger(__name__)
 metrics_logger = logging.getLogger("synapse.state.metrics")
 
 # Metrics for number of state groups involved in a resolution.
-state_groups_histogram = Histogram(
+state_groups_histogram = meter.create_histogram(
     "synapse_state_number_state_groups_in_resolution",
-    "Number of state groups used when performing a state resolution",
-    labelnames=[SERVER_NAME_LABEL],
-    buckets=(1, 2, 3, 5, 7, 10, 15, 20, 50, 100, 200, 500, "+Inf"),
+    description="Number of state groups used when performing a state resolution",
+    explicit_bucket_boundaries_advisory=[1, 2, 3, 5, 7, 10, 15, 20, 50, 100, 200, 500],
 )
 
 
@@ -742,9 +740,9 @@ class StateResolutionHandler:
                     f"State groups have been deleted: {shortstr(missing_state_groups)}"
                 )
 
-            state_groups_histogram.labels(
-                **{SERVER_NAME_LABEL: self.server_name}
-            ).observe(len(state_groups_ids))
+            state_groups_histogram.record(
+                len(state_groups_ids), {SERVER_NAME_LABEL: self.server_name}
+            )
 
             new_state = await self.resolve_events_with_store(
                 room_id,
@@ -831,11 +829,11 @@ class StateResolutionHandler:
         room_metrics.db_time += rusage.db_txn_duration_sec
         room_metrics.db_events += rusage.evt_db_fetch_count
 
-        _cpu_times.labels(**{SERVER_NAME_LABEL: self.server_name}).observe(
-            rusage.ru_utime + rusage.ru_stime
+        _cpu_times.record(
+            rusage.ru_utime + rusage.ru_stime, {SERVER_NAME_LABEL: self.server_name}
         )
-        _db_times.labels(**{SERVER_NAME_LABEL: self.server_name}).observe(
-            rusage.db_txn_duration_sec
+        _db_times.record(
+            rusage.db_txn_duration_sec, {SERVER_NAME_LABEL: self.server_name}
         )
 
     def _report_metrics(self) -> None:

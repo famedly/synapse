@@ -30,7 +30,6 @@ from prometheus_client.core import (
     REGISTRY,
     CounterMetricFamily,
     GaugeMetricFamily,
-    Histogram,
     Metric,
 )
 
@@ -59,11 +58,10 @@ running_on_pypy = platform.python_implementation() == "PyPy"
 gc_unreachable = meter.create_gauge(
     "python_gc_unreachable_total", description="Unreachable GC objects"
 )  # type: ignore[missing-server-name-label]
-gc_time = Histogram(  # type: ignore[missing-server-name-label]
+gc_time = meter.create_histogram(  # type: ignore[missing-server-name-label]
     "python_gc_time",
-    "Time taken to GC (sec)",
-    ["gen"],
-    buckets=[
+    description="Time taken to GC (sec)",
+    explicit_bucket_boundaries_advisory=[
         0.0025,
         0.005,
         0.01,

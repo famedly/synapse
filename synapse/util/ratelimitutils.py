@@ -23,6 +23,7 @@ import collections
 import contextlib
 import logging
 import threading
+import time
 import typing
 from typing import (
     Any,
@@ -50,7 +51,7 @@ from synapse.logging.context import (
     run_in_background,
 )
 from synapse.logging.opentracing import start_active_span
-from synapse.metrics import SERVER_NAME_LABEL, Histogram, LaterGauge, meter
+from synapse.metrics import SERVER_NAME_LABEL, LaterGauge, meter
 from synapse.util.clock import Clock
 
 if typing.TYPE_CHECKING:
@@ -68,11 +69,10 @@ rate_limit_reject_counter = meter.create_counter(
     "synapse_rate_limit_reject",
     description="Number of requests rejected by the rate limiter",
 )
-queue_wait_timer = Histogram(
+queue_wait_timer = meter.create_histogram(
     "synapse_rate_limit_queue_wait_time_seconds",
-    "Amount of time spent waiting for the rate limiter to let our request through.",
-    labelnames=["rate_limiter_name", SERVER_NAME_LABEL],
-    buckets=(
+    description="Amount of time spent waiting for the rate limiter to let our request through.",
+    explicit_bucket_boundaries_advisory=[
         0.005,
         0.01,
         0.025,
@@ -86,8 +86,7 @@ queue_wait_timer = Histogram(
         5.0,
         10.0,
         20.0,
-        "+Inf",
-    ),
+    ],
 )
 
 
@@ -289,14 +288,18 @@ class _PerHostRatelimiter:
         return len(self.request_times) > self.sleep_limit
 
     async def _on_enter_with_tracing(self, request_id: object) -> None:
-        maybe_metrics_cm: ContextManager = contextlib.nullcontext()
-        if self.metrics_name:
-            maybe_metrics_cm = queue_wait_timer.labels(
-                rate_limiter_name=self.metrics_name,
-                **{SERVER_NAME_LABEL: self.our_server_name},
-            ).time()
-        with start_active_span("ratelimit wait"), maybe_metrics_cm:
+        with start_active_span("ratelimit wait"):
+            start = time.perf_counter()
             await self._on_enter(request_id)
+
+            if self.metrics_name:
+                queue_wait_timer.record(
+                    time.perf_counter() - start,
+                    {
+                        "rate_limiter_name": self.metrics_name,
+                        SERVER_NAME_LABEL: self.our_server_name,
+                    },
+                )
 
     def _on_enter(self, request_id: object) -> "defer.Deferred[None]":
         time_now = self.clock.time_msec()

@@ -36,8 +36,6 @@ from typing import (
     Tuple,
 )
 
-from prometheus_client import Histogram
-
 from synapse import event_auth
 from synapse.api.constants import (
     EventContentFields,
@@ -112,11 +110,10 @@ soft_failed_event_counter = meter.create_counter(
 )
 
 # Added to debug performance and track progress on optimizations
-backfill_processing_after_timer = Histogram(
+backfill_processing_after_timer = meter.create_histogram(
     "synapse_federation_backfill_processing_after_time_seconds",
-    "sec",
-    labelnames=[SERVER_NAME_LABEL],
-    buckets=(
+    unit="sec",
+    explicit_bucket_boundaries_advisory=[
         0.1,
         0.25,
         0.5,
@@ -137,8 +134,7 @@ backfill_processing_after_timer = Histogram(
         120.0,
         150.0,
         180.0,
-        "+Inf",
-    ),
+    ],
 )
 
 

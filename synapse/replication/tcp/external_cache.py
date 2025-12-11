@@ -22,8 +22,6 @@
 import logging
 from typing import TYPE_CHECKING, Any, Optional
 
-from prometheus_client import Histogram
-
 from synapse.logging import opentracing
 from synapse.logging.context import make_deferred_yieldable
 from synapse.metrics import SERVER_NAME_LABEL, meter
@@ -44,18 +42,17 @@ get_counter = meter.create_counter(
     description="Number of times we get a cache",
 )
 
-response_timer = Histogram(
+response_timer = meter.create_histogram(
     "synapse_external_cache_response_time_seconds",
-    "Time taken to get a response from Redis for a cache get/set request",
-    labelnames=["method", SERVER_NAME_LABEL],
-    buckets=(
+    description="Time taken to get a response from Redis for a cache get/set request",
+    explicit_bucket_boundaries_advisory=[
         0.001,
         0.002,
         0.005,
         0.01,
         0.02,
         0.05,
-    ),
+    ],
 )
 
 
