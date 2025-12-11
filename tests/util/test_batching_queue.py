@@ -21,6 +21,7 @@
 from typing import List, Tuple
 
 from opentelemetry.metrics._internal.instrument import Gauge
+from prometheus_client.core import REGISTRY
 
 from twisted.internet import defer
 
@@ -65,9 +66,10 @@ class BatchingQueueTestCase(HomeserverTestCase):
         """For a prometheus metric get the value of the sample that has a
         matching "name" label.
         """
-        for sample in next(iter(metric.collect())).samples:
-            if sample.labels.get("name") == name:
-                return sample.value
+        for metric_family in REGISTRY.collect():
+            for sample in metric_family.samples:
+                if sample.labels.get("name") == name:
+                    return sample.value
 
         self.fail("Found no matching sample")
 
