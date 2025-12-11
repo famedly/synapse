@@ -44,10 +44,10 @@ from typing import (
 
 import attr
 from opentelemetry.metrics import get_meter_provider
+from opentelemetry.metrics._internal import Meter
 from packaging.version import parse as parse_version
 from prometheus_client import (
     CollectorRegistry,
-    Histogram,
     Metric,
     generate_latest,
 )
@@ -61,8 +61,6 @@ from twisted.python.threadpool import ThreadPool
 from twisted.web.resource import Resource
 from twisted.web.server import Request
 
-# This module is imported for its side effects; flake8 needn't warn that it's unused.
-import synapse.metrics._reactor_metrics  # noqa: F401
 from synapse.metrics._types import Collector
 from synapse.types import StrSequence
 from synapse.util import SYNAPSE_VERSION
@@ -138,9 +136,11 @@ _set_prometheus_client_use_created_metrics(False)
 
 
 # Global meter for registering otel metrics
-meter = get_meter_provider().get_meter("synapse")
+meter: Meter = get_meter_provider().get_meter("synapse")
 
-# Import _gc after meter is defined to avoid circular import
+# Import after meter is defined to avoid circular import
+# This module is imported for its side effects; flake8 needn't warn that it's unused.
+import synapse.metrics._reactor_metrics  # noqa: F401, E402
 from synapse.metrics._gc import MIN_TIME_BETWEEN_GCS, install_gc_manager  # noqa: E402
 
 
@@ -675,13 +675,12 @@ module_instances_info = meter.create_gauge(
 )
 
 # 3PID send info
-threepid_send_requests = Histogram(
+threepid_send_requests = meter.create_histogram(
     "synapse_threepid_send_requests_with_tries",
-    documentation="Number of requests for a 3pid token by try count. Note if"
+    description="Number of requests for a 3pid token by try count. Note if"
     " there is a request with try count of 4, then there would have been one"
     " each for 1, 2 and 3",
-    buckets=(1, 2, 3, 4, 5, 10),
-    labelnames=("type", "reason", SERVER_NAME_LABEL),
+    explicit_bucket_boundaries_advisory=[1, 2, 3, 4, 5, 10],
 )
 
 threadpool_total_threads = meter.create_gauge(

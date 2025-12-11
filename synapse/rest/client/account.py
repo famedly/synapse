@@ -137,11 +137,14 @@ class EmailPasswordRequestTokenRestServlet(RestServlet):
             self.mailer.send_password_reset_mail,
             body.next_link,
         )
-        threepid_send_requests.labels(
-            type="email",
-            reason="password_reset",
-            **{SERVER_NAME_LABEL: self.server_name},
-        ).observe(body.send_attempt)
+        threepid_send_requests.record(
+            body.send_attempt,
+            {
+                "type": "email",
+                "reason": "password_reset",
+                SERVER_NAME_LABEL: self.server_name,
+            },
+        )
 
         # Wrap the session id in a JSON object
         return 200, {"sid": sid}
@@ -398,11 +401,14 @@ class EmailThreepidRequestTokenRestServlet(RestServlet):
             body.next_link,
         )
 
-        threepid_send_requests.labels(
-            type="email",
-            reason="add_threepid",
-            **{SERVER_NAME_LABEL: self.server_name},
-        ).observe(body.send_attempt)
+        threepid_send_requests.record(
+            body.send_attempt,
+            {
+                "type": "email",
+                "reason": "add_threepid",
+                SERVER_NAME_LABEL: self.server_name,
+            },
+        )
 
         # Wrap the session id in a JSON object
         return 200, {"sid": sid}
@@ -476,11 +482,14 @@ class MsisdnThreepidRequestTokenRestServlet(RestServlet):
             body.next_link,
         )
 
-        threepid_send_requests.labels(
-            type="msisdn",
-            reason="add_threepid",
-            **{SERVER_NAME_LABEL: self.server_name},
-        ).observe(body.send_attempt)
+        threepid_send_requests.record(
+            body.send_attempt,
+            {
+                "type": "msisdn",
+                "reason": "add_threepid",
+                SERVER_NAME_LABEL: self.server_name,
+            },
+        )
         logger.info("MSISDN %s: got response from identity server: %s", msisdn, ret)
 
         return 200, ret
