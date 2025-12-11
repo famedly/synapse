@@ -5281,6 +5281,7 @@ class RoomMemberEventMediaAttachmentTestCase(unittest.HomeserverTestCase):
         room.register_servlets,
         room.register_deprecated_servlets,
     ]
+    use_isolated_media_paths = True
 
     def prepare(
         self, reactor: MemoryReactor, clock: Clock, homeserver: HomeServer

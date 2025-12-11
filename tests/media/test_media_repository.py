@@ -1,6 +1,5 @@
 import io
 import os
-import shutil
 import typing
 from typing import (
     BinaryIO,
@@ -38,11 +37,7 @@ class MediaRepositorySha256PathTestCase(unittest.HomeserverTestCase):
         login.register_servlets,
         admin.register_servlets,
     ]
-
-    def safe_cleanup_media(self) -> None:
-        media_path = os.path.abspath("media")
-        if os.path.exists(media_path):
-            shutil.rmtree(media_path, ignore_errors=True)
+    use_isolated_media_paths = True
 
     def default_config(self) -> JsonDict:
         config = super().default_config()
@@ -53,8 +48,6 @@ class MediaRepositorySha256PathTestCase(unittest.HomeserverTestCase):
         return config
 
     def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
-        self.safe_cleanup_media()  # clean up the media directory if it exists
-        self.addCleanup(self.safe_cleanup_media)
         self.repo = hs.get_media_repository()
         self.store = hs.get_datastores().main
         self.creator = self.register_user("creator", "testpass")
@@ -250,7 +243,7 @@ class MediaRepositorySha256PathTestCase(unittest.HomeserverTestCase):
     ) -> None:
         """Test that `create_or_update_content` function creates new media with sha256 path"""
         # Confirm that the sha256 path does not exist yet
-        expected_path = os.path.join("media", SMALL_PNG_SHA256_PATH)
+        expected_path = os.path.join(self._media_store_path, SMALL_PNG_SHA256_PATH)
         assert not os.path.exists(expected_path)
 
         # Create a new media with sha256 path
@@ -320,14 +313,16 @@ class MediaRepositorySha256PathTestCase(unittest.HomeserverTestCase):
             )
         )
         assert mxc_uri.media_id == updated_mxc_uri.media_id
-        assert os.path.exists(os.path.join("media", SMALL_PNG_SHA256_PATH))
+        assert os.path.exists(
+            os.path.join(self._media_store_path, SMALL_PNG_SHA256_PATH)
+        )
         assert isinstance(self.repo, MediaRepository)
         assert not os.path.exists(self.repo.filepaths.local_media_filepath(media_id))
 
     def test_copy_media_with_media_id_path(self) -> None:
         """Test that `copy_media` function can copy media with media_id path"""
         # Confirm that the sha256 path does not exist yet
-        expected_path = os.path.join("media", SMALL_PNG_SHA256_PATH)
+        expected_path = os.path.join(self._media_store_path, SMALL_PNG_SHA256_PATH)
         assert not os.path.exists(expected_path)
 
         # Create media with media_id path
@@ -348,7 +343,7 @@ class MediaRepositorySha256PathTestCase(unittest.HomeserverTestCase):
         )
 
         # Make sure the new media is only created with sha256 path.
-        assert os.path.exists(os.path.join("media", SMALL_PNG_SHA256_PATH))
+        assert expected_path
         assert not os.path.exists(
             self.repo.filepaths.local_media_filepath(copied_mxc_uri.media_id)
         )
@@ -367,7 +362,9 @@ class MediaRepositorySha256PathTestCase(unittest.HomeserverTestCase):
         assert copied_mxc_uri.media_id != original_mxc_uri.media_id
 
         # Make sure the new media is only created with sha256 path.
-        assert os.path.exists(os.path.join("media", SMALL_PNG_SHA256_PATH))
+        assert os.path.exists(
+            os.path.join(self._media_store_path, SMALL_PNG_SHA256_PATH)
+        )
         assert isinstance(self.repo, MediaRepository)
         assert not os.path.exists(
             self.repo.filepaths.local_media_filepath(copied_mxc_uri.media_id)
@@ -526,4 +523,6 @@ class MediaRepositorySha256PathTestCase(unittest.HomeserverTestCase):
         )
         assert removed_media_id == [media1_id, media2_id]
         assert total == 2
-        assert not os.path.exists(os.path.join("media", SMALL_PNG_SHA256_PATH))
+        assert not os.path.exists(
+            os.path.join(self._media_store_path, SMALL_PNG_SHA256_PATH)
+        )

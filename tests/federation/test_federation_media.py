@@ -20,8 +20,6 @@
 import io
 import json
 import os
-import shutil
-import tempfile
 from typing import (
     BinaryIO,
     Dict,
@@ -57,27 +55,23 @@ from tests.unittest import override_config
 
 
 class FederationMediaDownloadsTest(unittest.FederatingHomeserverTestCase):
+    use_isolated_media_paths = True
+
     def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
         super().prepare(reactor, clock, hs)
-        self.test_dir = tempfile.mkdtemp(prefix="synapse-tests-")
-        self.addCleanup(shutil.rmtree, self.test_dir)
-        self.primary_base_path = os.path.join(self.test_dir, "primary")
-        self.secondary_base_path = os.path.join(self.test_dir, "secondary")
-
-        hs.config.media.media_store_path = self.primary_base_path
 
         storage_providers = [
             StorageProviderWrapper(
-                FileStorageProviderBackend(hs, self.secondary_base_path),
+                FileStorageProviderBackend(hs, self._media_storage_provider_path),
                 store_local=True,
                 store_remote=False,
                 store_synchronous=True,
             )
         ]
 
-        self.filepaths = MediaFilePaths(self.primary_base_path)
+        self.filepaths = MediaFilePaths(self._media_store_path)
         self.media_storage = MediaStorage(
-            hs, self.primary_base_path, self.filepaths, storage_providers
+            hs, self._media_store_path, self.filepaths, storage_providers
         )
         self.media_repo = hs.get_media_repository()
 
@@ -290,25 +284,21 @@ class FederationRestrictedMediaDownloadsTest(unittest.FederatingHomeserverTestCa
 
     def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
         super().prepare(reactor, clock, hs)
-        self.test_dir = tempfile.mkdtemp(prefix="synapse-tests-")
-        self.addCleanup(shutil.rmtree, self.test_dir)
-        self.primary_base_path = os.path.join(self.test_dir, "primary")
-        self.secondary_base_path = os.path.join(self.test_dir, "secondary")
-        hs.config.media.media_store_path = self.primary_base_path
+
         self.store = hs.get_datastores().main
 
         storage_providers = [
             StorageProviderWrapper(
-                FileStorageProviderBackend(hs, self.secondary_base_path),
+                FileStorageProviderBackend(hs, self._media_storage_provider_path),
                 store_local=True,
                 store_remote=False,
                 store_synchronous=True,
             )
         ]
 
-        self.filepaths = MediaFilePaths(self.primary_base_path)
+        self.filepaths = MediaFilePaths(self._media_store_path)
         self.media_storage = MediaStorage(
-            hs, self.primary_base_path, self.filepaths, storage_providers
+            hs, self._media_store_path, self.filepaths, storage_providers
         )
         self.media_repo = hs.get_media_repository()
 
@@ -455,25 +445,19 @@ class FederationRestrictedMediaDownloadsTest(unittest.FederatingHomeserverTestCa
 class FederationThumbnailTest(unittest.FederatingHomeserverTestCase):
     def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
         super().prepare(reactor, clock, hs)
-        self.test_dir = tempfile.mkdtemp(prefix="synapse-tests-")
-        self.addCleanup(shutil.rmtree, self.test_dir)
-        self.primary_base_path = os.path.join(self.test_dir, "primary")
-        self.secondary_base_path = os.path.join(self.test_dir, "secondary")
-
-        hs.config.media.media_store_path = self.primary_base_path
 
         storage_providers = [
             StorageProviderWrapper(
-                FileStorageProviderBackend(hs, self.secondary_base_path),
+                FileStorageProviderBackend(hs, self._media_storage_provider_path),
                 store_local=True,
                 store_remote=False,
                 store_synchronous=True,
             )
         ]
 
-        self.filepaths = MediaFilePaths(self.primary_base_path)
+        self.filepaths = MediaFilePaths(self._media_store_path)
         self.media_storage = MediaStorage(
-            hs, self.primary_base_path, self.filepaths, storage_providers
+            hs, self._media_store_path, self.filepaths, storage_providers
         )
         self.media_repo = hs.get_media_repository()
 
@@ -563,25 +547,19 @@ class FederationThumbnailTest(unittest.FederatingHomeserverTestCase):
 class FederationRestrictedThumbnailTest(unittest.FederatingHomeserverTestCase):
     def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
         super().prepare(reactor, clock, hs)
-        self.test_dir = tempfile.mkdtemp(prefix="synapse-tests-")
-        self.addCleanup(shutil.rmtree, self.test_dir)
-        self.primary_base_path = os.path.join(self.test_dir, "primary")
-        self.secondary_base_path = os.path.join(self.test_dir, "secondary")
-
-        hs.config.media.media_store_path = self.primary_base_path
 
         storage_providers = [
             StorageProviderWrapper(
-                FileStorageProviderBackend(hs, self.secondary_base_path),
+                FileStorageProviderBackend(hs, self._media_storage_provider_path),
                 store_local=True,
                 store_remote=False,
                 store_synchronous=True,
             )
         ]
 
-        self.filepaths = MediaFilePaths(self.primary_base_path)
+        self.filepaths = MediaFilePaths(self._media_store_path)
         self.media_storage = MediaStorage(
-            hs, self.primary_base_path, self.filepaths, storage_providers
+            hs, self._media_store_path, self.filepaths, storage_providers
         )
         self.media_repo = hs.get_media_repository()
 
