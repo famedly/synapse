@@ -3676,6 +3676,7 @@ class UserMediaRestTestCase(unittest.HomeserverTestCase):
         login.register_servlets,
         media.register_servlets,
     ]
+    use_isolated_media_paths = True
 
     def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
         self.store = hs.get_datastores().main

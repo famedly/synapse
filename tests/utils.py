@@ -152,7 +152,8 @@ def default_config(
         "server_name": name,
         # Setting this to an empty list turns off federation sending.
         "federation_sender_instances": [],
-        "media_store_path": "media",
+        # This is now established dynamically in setUp() and HomeserverTestCase.default_config()
+        # "media_store_path": "media",
         # the test signing key is just an arbitrary ed25519 key to keep the config
         # parser happy
         "signing_key": "ed25519 a_lPym qvioDNmfExFBRPgdTU+wtFYKq4JfwFRv7sYVgWvmgJg",

@@ -109,10 +109,7 @@ class RoomMemberHandler(metaclass=abc.ABCMeta):
         self.account_data_handler = hs.get_account_data_handler()
         self.event_auth_handler = hs.get_event_auth_handler()
         self._worker_lock_handler = hs.get_worker_locks_handler()
-        self.enable_restricted_media = hs.config.experimental.msc3911.enabled
-        self.allow_legacy_media = (
-            not hs.config.experimental.msc3911.block_unrestricted_media_upload
-        )
+        self.msc3911_config = hs.config.experimental.msc3911
 
         self._membership_types_to_include_profile_data_in = {
             Membership.JOIN,
@@ -865,7 +862,7 @@ class RoomMemberHandler(metaclass=abc.ABCMeta):
             except Exception as e:
                 logger.info("Failed to get profile information for %r: %s", target, e)
 
-            if self.enable_restricted_media and not media_info_for_attachment:
+            if self.msc3911_config.enabled and not media_info_for_attachment:
                 # This code path should only be taken for memberships updating an
                 # avatar url
                 avatar_url = content.get(EventContentFields.MEMBERSHIP_AVATAR_URL)
@@ -898,7 +895,7 @@ class RoomMemberHandler(metaclass=abc.ABCMeta):
                         # hope that it is not restricted when it finally shows up.
                         # Guard against other potentials escaping by raising if it
                         # should occur when unrestricted media begins to be disallowed.
-                        if self.allow_legacy_media:
+                        if not self.msc3911_config.block_unrestricted_media_upload:
                             logger.debug(
                                 "Ignoring media copy request; the media is unknown and "
                                 "will not be treated as restricted"

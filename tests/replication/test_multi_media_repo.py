@@ -63,6 +63,7 @@ class MediaRepoShardTestCase(BaseMultiWorkerStreamTestCase):
         admin.register_servlets_for_client_rest_resource,
         login.register_servlets,
     ]
+    use_isolated_media_paths = True
 
     def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
         self.user_id = self.register_user("user", "pass")
@@ -276,6 +277,7 @@ class AuthenticatedMediaRepoShardTestCase(BaseMultiWorkerStreamTestCase):
         login.register_servlets,
         media.register_servlets,
     ]
+    use_isolated_media_paths = True
 
     file_data = b"\r\n\r\n--6067d4698f8d40a0a794ea7d7379d53a\r\nContent-Type: application/json\r\n\r\n{}\r\n--6067d4698f8d40a0a794ea7d7379d53a\r\nContent-Type: text/plain\r\nContent-Disposition: inline; filename=test_upload\r\n\r\nfile_to_stream\r\n--6067d4698f8d40a0a794ea7d7379d53a--\r\n\r\n"
 
@@ -510,6 +512,7 @@ class CopyRestrictedResourceReplicationTestCase(BaseMultiWorkerStreamTestCase):
         admin.register_servlets,
         room.register_servlets,
     ]
+    use_isolated_media_paths = True
 
     def default_config(self) -> Dict[str, Any]:
         config = super().default_config()

@@ -80,10 +80,7 @@ class ProfileHandler:
 
         self._third_party_rules = hs.get_module_api_callbacks().third_party_event_rules
 
-        self.enable_restricted_media = hs.config.experimental.msc3911.enabled
-        self.block_unrestricted_media = (
-            hs.config.experimental.msc3911.block_unrestricted_media_upload
-        )
+        self.msc3911_config = hs.config.experimental.msc3911
 
     async def get_profile(self, user_id: str, ignore_backoff: bool = True) -> JsonDict:
         """
@@ -334,7 +331,7 @@ class ProfileHandler:
             # event, it will either be copied/passed along/dropped depending on the
             # above circumstances
             if not media_info:
-                if self.block_unrestricted_media:
+                if self.msc3911_config.block_unrestricted_media_upload:
                     # The user should have done a COPY on this media previous to this
                     # attempt to set
                     raise SynapseError(
@@ -345,7 +342,10 @@ class ProfileHandler:
                 # For backwards compatible behavior, treat the media as unrestricted
                 return
 
-        if self.block_unrestricted_media and not media_info.restricted:
+        if (
+            self.msc3911_config.block_unrestricted_media_upload
+            and not media_info.restricted
+        ):
             raise SynapseError(
                 HTTPStatus.BAD_REQUEST,
                 f"The media attachment request is invalid as the media '{mxc_uri.media_id}' is not restricted",
@@ -424,7 +424,7 @@ class ProfileHandler:
             )
 
         # msc3911: Update the media restrictions to include the profile user ID
-        if self.enable_restricted_media and avatar_url_to_set:
+        if self.msc3911_config.enabled and avatar_url_to_set:
             await self.validate_avatar_url(avatar_url_to_set, requester)
             await self.hs.get_datastores().main.set_media_restricted_to_user_profile(
                 self.hs.config.server.server_name,
