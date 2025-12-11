@@ -136,8 +136,8 @@ def install_gc_manager() -> None:
 
                 _last_gc[i] = end
 
-                gc_time.labels(i).observe(end - start)
-                gc_unreachable.labels(i).set(unreachable)
+                gc_time.record(end - start, {"gen": i})
+                gc_unreachable.set(unreachable, {"gen": i})
 
     # We can ignore the lint here since this looping call does not hold a `HomeServer`
     # reference so can be cleaned up by other means on shutdown.

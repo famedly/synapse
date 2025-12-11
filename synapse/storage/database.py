@@ -521,9 +521,9 @@ class LoggingTransaction:
         finally:
             secs = time.time() - start
             sql_logger.debug("[SQL time] {%s} %f sec", self.name, secs)
-            sql_query_timer.labels(
-                verb=sql.split()[0], **{SERVER_NAME_LABEL: self.server_name}
-            ).observe(secs)
+            sql_query_timer.record(
+                secs, {"verb": sql.split()[0], SERVER_NAME_LABEL: self.server_name}
+            )
 
     def close(self) -> None:
         self.txn.close()
@@ -1043,9 +1043,9 @@ class DatabasePool:
                     operation_name="db.connection",
                 ):
                     sched_duration_sec = monotonic_time() - start_time
-                    sql_scheduling_timer.labels(
-                        **{SERVER_NAME_LABEL: self.server_name}
-                    ).observe(sched_duration_sec)
+                    sql_scheduling_timer.record(
+                        sched_duration_sec, {SERVER_NAME_LABEL: self.server_name}
+                    )
                     context.add_database_scheduled(sched_duration_sec)
 
                     if self._txn_limit > 0:

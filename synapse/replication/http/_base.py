@@ -47,7 +47,7 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-_pending_outgoing_requests = meter.create_gauge(
+_pending_outgoing_requests = meter.create_up_down_counter(
     "synapse_pending_outgoing_replication_requests",
     description="Number of active outgoing replication requests, by replication method name",
 )

@@ -20,6 +20,7 @@
 #
 
 import logging
+import time
 from typing import TYPE_CHECKING, Any, Optional
 
 from synapse.logging import opentracing
@@ -126,12 +127,14 @@ class ExternalCache:
             "ExternalCache.get",
             tags={opentracing.SynapseTags.CACHE_NAME: cache_name},
         ):
-            with response_timer.labels(
-                method="get", **{SERVER_NAME_LABEL: self.server_name}
-            ).time():
-                result = await make_deferred_yieldable(
-                    self._redis_connection.get(self._get_redis_key(cache_name, key))
-                )
+            start = time.perf_counter()
+            result = await make_deferred_yieldable(
+                self._redis_connection.get(self._get_redis_key(cache_name, key))
+            )
+            response_timer.record(
+                time.perf_counter() - start,
+                {"method": "get", SERVER_NAME_LABEL: self.server_name},
+            )
 
         logger.debug("Got cache result %s %s: %r", cache_name, key, result)
 

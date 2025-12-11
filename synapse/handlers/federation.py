@@ -527,9 +527,10 @@ class FederationHandler:
         # backfill points regardless of `current_depth`.
         if processing_start_time is not None:
             processing_end_time = self.clock.time_msec()
-            backfill_processing_before_timer.labels(
-                **{SERVER_NAME_LABEL: self.server_name}
-            ).observe((processing_end_time - processing_start_time) / 1000)
+            backfill_processing_before_timer.record(
+                (processing_end_time - processing_start_time) / 1000,
+                {SERVER_NAME_LABEL: self.server_name},
+            )
 
         # TODO: we could also try servers which were previously in the room, but
         #   are no longer.

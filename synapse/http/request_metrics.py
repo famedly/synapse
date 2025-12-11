@@ -216,10 +216,13 @@ class RequestMetrics:
 
         response_count.add(1, response_base_labels)
 
-        response_timer.labels(
-            code=response_code_str,
-            **response_base_labels,
-        ).observe(time_sec - self.start_ts)
+        response_timer.record(
+            time_sec - self.start_ts,
+            {
+                "code": response_code_str,
+                **response_base_labels,
+            },
+        )
 
         resource_usage = context.get_resource_usage()
 

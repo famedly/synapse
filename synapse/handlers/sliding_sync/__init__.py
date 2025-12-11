@@ -376,9 +376,10 @@ class SlidingSyncHandler:
         set_tag(SynapseTags.FUNC_ARG_PREFIX + "sync_config.user", user_id)
 
         end_time_s = self.clock.time()
-        sync_processing_time.labels(
-            initial=from_token is not None, **{SERVER_NAME_LABEL: self.server_name}
-        ).observe(end_time_s - start_time_s)
+        sync_processing_time.record(
+            end_time_s - start_time_s,
+            {"initial": from_token is not None, SERVER_NAME_LABEL: self.server_name},
+        )
 
         return sliding_sync_result
 

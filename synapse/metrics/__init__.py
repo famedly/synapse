@@ -657,11 +657,16 @@ event_processing_lag_by_event = meter.create_histogram(
 build_info = meter.create_gauge(  # type: ignore[missing-server-name-label]
     "synapse_build_info", description="Build information"
 )
-build_info.labels(
-    " ".join([platform.python_implementation(), platform.python_version()]),
-    SYNAPSE_VERSION,
-    " ".join([platform.system(), platform.release()]),
-).set(1)
+build_info.set(
+    1,
+    {
+        "pythonversion": " ".join(
+            [platform.python_implementation(), platform.python_version()]
+        ),
+        "version": SYNAPSE_VERSION,
+        "osversion": " ".join([platform.system(), platform.release()]),
+    },
+)
 
 # Loaded modules info
 module_instances_info = meter.create_gauge(
@@ -721,19 +726,19 @@ def register_threadpool(*, name: str, server_name: str, threadpool: ThreadPool) 
         threadpool: The threadpool to register metrics for.
     """
 
-    threadpool_total_min_threads.labels(
-        name=name, **{SERVER_NAME_LABEL: server_name}
-    ).set(threadpool.min)
-    threadpool_total_max_threads.labels(
-        name=name, **{SERVER_NAME_LABEL: server_name}
-    ).set(threadpool.max)
+    threadpool_total_min_threads.set(
+        threadpool.min, {"name": name, SERVER_NAME_LABEL: server_name}
+    )
+    threadpool_total_max_threads.set(
+        threadpool.max, {"name": name, SERVER_NAME_LABEL: server_name}
+    )
 
-    threadpool_total_threads.labels(
-        name=name, **{SERVER_NAME_LABEL: server_name}
-    ).set_function(lambda: len(threadpool.threads))
-    threadpool_total_working_threads.labels(
-        name=name, **{SERVER_NAME_LABEL: server_name}
-    ).set_function(lambda: len(threadpool.working))
+    threadpool_total_threads.set(
+        len(threadpool.threads), {"name": name, SERVER_NAME_LABEL: server_name}
+    )
+    threadpool_total_working_threads.set(
+        len(threadpool.working), {"name": name, SERVER_NAME_LABEL: server_name}
+    )
 
 
 class MetricsResource(Resource):

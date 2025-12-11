@@ -112,9 +112,10 @@ class DeferredCache(Generic[KT, VT]):
         ] = cache_type()
 
         def metrics_cb() -> None:
-            cache_pending_metric.labels(
-                name=name, **{SERVER_NAME_LABEL: server_name}
-            ).set(len(self._pending_deferred_cache))
+            cache_pending_metric.set(
+                len(self._pending_deferred_cache),
+                {"name": name, SERVER_NAME_LABEL: server_name},
+            )
 
         # cache is used for completed results and maps to the result itself, rather than
         # a Deferred.

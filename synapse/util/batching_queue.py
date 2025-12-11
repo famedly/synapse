@@ -116,13 +116,15 @@ class BatchingQueue(Generic[V, R]):
         # The function to call with batches of values.
         self._process_batch_callback = process_batch_callback
 
-        number_queued.labels(
-            name=self._name, **{SERVER_NAME_LABEL: self.server_name}
-        ).set_function(lambda: sum(len(q) for q in self._next_values.values()))
+        number_queued.set(
+            sum(len(q) for q in self._next_values.values()),
+            {"name": self._name, SERVER_NAME_LABEL: self.server_name},
+        )
 
-        number_of_keys.labels(
-            name=self._name, **{SERVER_NAME_LABEL: self.server_name}
-        ).set_function(lambda: len(self._next_values))
+        number_of_keys.set(
+            len(self._next_values),
+            {"name": self._name, SERVER_NAME_LABEL: self.server_name},
+        )
 
         self._number_in_flight_metric: Gauge = number_in_flight.labels(
             name=self._name, **{SERVER_NAME_LABEL: self.server_name}

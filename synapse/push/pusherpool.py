@@ -44,7 +44,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-synapse_pushers = meter.create_gauge(
+synapse_pushers = meter.create_up_down_counter(
     "synapse_pushers",
     description="Number of active synapse pushers",
 )
@@ -421,18 +421,24 @@ class PusherPool:
             previous_pusher = byuser[appid_pushkey]
             previous_pusher.on_stop()
 
-            synapse_pushers.labels(
-                kind=type(previous_pusher).__name__,
-                app_id=previous_pusher.app_id,
-                **{SERVER_NAME_LABEL: self.server_name},
-            ).dec()
+            synapse_pushers.add(
+                -1,
+                {
+                    "kind": type(previous_pusher).__name__,
+                    "app_id": previous_pusher.app_id,
+                    SERVER_NAME_LABEL: self.server_name,
+                },
+            )
         byuser[appid_pushkey] = pusher
 
-        synapse_pushers.labels(
-            kind=type(pusher).__name__,
-            app_id=pusher.app_id,
-            **{SERVER_NAME_LABEL: self.server_name},
-        ).inc()
+        synapse_pushers.add(
+            1,
+            {
+                "kind": type(pusher).__name__,
+                "app_id": pusher.app_id,
+                SERVER_NAME_LABEL: self.server_name,
+            },
+        )
 
         logger.info("Starting pusher %s / %s", pusher.user_id, appid_pushkey)
 
@@ -491,8 +497,11 @@ class PusherPool:
             pusher = byuser.pop(appid_pushkey)
             pusher.on_stop()
 
-            synapse_pushers.labels(
-                kind=type(pusher).__name__,
-                app_id=pusher.app_id,
-                **{SERVER_NAME_LABEL: self.server_name},
-            ).dec()
+            synapse_pushers.add(
+                -1,
+                {
+                    "kind": type(pusher).__name__,
+                    "app_id": pusher.app_id,
+                    SERVER_NAME_LABEL: self.server_name,
+                },
+            )
