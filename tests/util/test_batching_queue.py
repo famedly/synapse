@@ -68,7 +68,7 @@ class BatchingQueueTestCase(HomeserverTestCase):
         """
         for metric_family in REGISTRY.collect():
             for sample in metric_family.samples:
-                if sample.labels.get("name") == name:
+                if sample.labels.get("name") == name and sample.name == metric.name:
                     return sample.value
 
         self.fail("Found no matching sample")

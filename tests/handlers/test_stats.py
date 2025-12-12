@@ -20,7 +20,7 @@
 
 from typing import Any, Dict, List, Optional, Tuple, cast
 
-from prometheus_client import REGISTRY, Gauge
+from prometheus_client import REGISTRY
 
 from twisted.internet.testing import MemoryReactor
 
@@ -57,12 +57,16 @@ class StatsRoomTests(unittest.HomeserverTestCase):
         This method resets the metrics to zero before each test to ensure
         that each test starts with a clean slate.
         """
-        metrics = ["synapse_known_rooms_total", "synapse_locally_joined_rooms_total"]
-        for metric_name in metrics:
-            gauge = REGISTRY._names_to_collectors.get(metric_name)
-            if gauge is not None and isinstance(gauge, Gauge):
-                for labels in gauge._metrics:
-                    gauge.labels(*labels).set(0)
+        from opentelemetry import metrics
+        from opentelemetry.sdk.metrics import MeterProvider
+        from opentelemetry.sdk.metrics.export import InMemoryMetricReader
+
+        # Create a fresh reader and provider
+        self.reader = InMemoryMetricReader()
+        provider = MeterProvider(metric_readers=[self.reader])
+        # Set the global provider
+        # Any new metric instruments created after this will use the clean state.
+        metrics.set_meter_provider(provider)
 
     def _add_background_updates(self) -> None:
         """
