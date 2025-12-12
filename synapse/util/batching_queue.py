@@ -33,6 +33,8 @@ from typing import (
     TypeVar,
 )
 
+from opentelemetry.metrics._internal.observation import Observation
+
 from twisted.internet import defer
 
 from synapse.logging.context import PreserveLoggingContext, make_deferred_yieldable
@@ -48,19 +50,14 @@ logger = logging.getLogger(__name__)
 V = TypeVar("V")
 R = TypeVar("R")
 
-number_queued = meter.create_gauge(
-    "synapse_util_batching_queue_number_queued",
-    description="The number of items waiting in the queue across all keys",
-)
+# number_queued = meter.create_observable_gauge(
+#     "synapse_util_batching_queue_number_queued",
+#     description="The number of items waiting in the queue across all keys",
+# )
 
-number_in_flight = meter.create_gauge(
+number_in_flight = meter.create_observable_gauge(
     "synapse_util_batching_queue_number_pending",
     description="The number of items across all keys either being processed or waiting in a queue",
-)
-
-number_of_keys = meter.create_gauge(
-    "synapse_util_batching_queue_number_of_keys",
-    description="The number of distinct keys that have items queued",
 )
 
 
@@ -114,14 +111,30 @@ class BatchingQueue(Generic[V, R]):
         # The function to call with batches of values.
         self._process_batch_callback = process_batch_callback
 
-        number_queued.set(
-            sum(len(q) for q in self._next_values.values()),
-            {"name": self._name, SERVER_NAME_LABEL: self.server_name},
+        self.number_queued = meter.create_observable_gauge(
+            "synapse_util_batching_queue_number_queued",
+            callbacks=[
+                lambda options: [
+                    Observation(
+                        sum(len(q) for q in self._next_values.values()),
+                        {"name": self._name, SERVER_NAME_LABEL: self.server_name},
+                    )
+                ]
+            ],
+            description="The number of items waiting in the queue across all keys",
         )
 
-        number_of_keys.set(
-            len(self._next_values),
-            {"name": self._name, SERVER_NAME_LABEL: self.server_name},
+        self.number_of_keys = meter.create_observable_gauge(
+            "synapse_util_batching_queue_number_of_keys",
+            description="The number of distinct keys that have items queued",
+            callbacks=[
+                lambda options: [
+                    Observation(
+                        len(self._next_values),
+                        {"name": self._name, SERVER_NAME_LABEL: self.server_name},
+                    )
+                ]
+            ],
         )
 
         self._number_in_flight_metric = meter.create_up_down_counter(

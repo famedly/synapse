@@ -47,6 +47,7 @@ from opentelemetry import metrics
 from opentelemetry.exporter.prometheus import PrometheusMetricReader
 from opentelemetry.metrics import get_meter_provider
 from opentelemetry.metrics._internal import Meter
+from opentelemetry.metrics._internal.observation import Observation
 from opentelemetry.sdk.metrics._internal import MeterProvider
 from opentelemetry.sdk.resources import SERVICE_NAME, Resource as OtelResource
 from packaging.version import parse as parse_version
@@ -691,16 +692,6 @@ threepid_send_requests = meter.create_histogram(
     explicit_bucket_boundaries_advisory=[1, 2, 3, 4, 5, 10],
 )
 
-threadpool_total_threads = meter.create_gauge(
-    "synapse_threadpool_total_threads",
-    description="Total number of threads currently in the threadpool",
-)
-
-threadpool_total_working_threads = meter.create_gauge(
-    "synapse_threadpool_working_threads",
-    description="Number of threads currently working in the threadpool",
-)
-
 threadpool_total_min_threads = meter.create_gauge(
     "synapse_threadpool_min_threads",
     description="Minimum number of threads configured in the threadpool",
@@ -740,11 +731,29 @@ def register_threadpool(*, name: str, server_name: str, threadpool: ThreadPool) 
         threadpool.max, {"name": name, SERVER_NAME_LABEL: server_name}
     )
 
-    threadpool_total_threads.set(
-        len(threadpool.threads), {"name": name, SERVER_NAME_LABEL: server_name}
+    meter.create_observable_gauge(
+        "synapse_threadpool_total_threads",
+        description="Total number of threads currently in the threadpool",
+        callbacks=[
+            lambda options: [
+                Observation(
+                    len(threadpool.threads),
+                    {"name": name, SERVER_NAME_LABEL: server_name},
+                )
+            ]
+        ],
     )
-    threadpool_total_working_threads.set(
-        len(threadpool.working), {"name": name, SERVER_NAME_LABEL: server_name}
+    meter.create_observable_gauge(
+        "synapse_threadpool_working_threads",
+        description="Number of threads currently working in the threadpool",
+        callbacks=[
+            lambda options: [
+                Observation(
+                    len(threadpool.working),
+                    {"name": name, SERVER_NAME_LABEL: server_name},
+                )
+            ]
+        ],
     )
 
 
