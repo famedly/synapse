@@ -40,6 +40,7 @@ from synapse.http.server import (
 )
 from synapse.http.servlet import (
     RestServlet,
+    parse_boolean,
     parse_integer,
     parse_json_object_from_request,
     parse_string,
@@ -277,9 +278,18 @@ class DownloadResource(RestServlet):
         )
         max_timeout_ms = min(max_timeout_ms, MAXIMUM_ALLOWED_MAX_TIMEOUT_MS)
 
+        allow_media_linked_to_redacted_event = parse_boolean(
+            request, "admin_bypass_redacted", default=False
+        )
+
         if self._is_mine_server_name(server_name):
             await self.media_repo.get_local_media(
-                request, media_id, file_name, max_timeout_ms, requester
+                request,
+                media_id,
+                file_name,
+                max_timeout_ms,
+                allow_media_linked_to_redacted_event=allow_media_linked_to_redacted_event,
+                requester=requester,
             )
         else:
             ip_address = request.getClientAddress().host
@@ -292,6 +302,7 @@ class DownloadResource(RestServlet):
                 ip_address,
                 True,
                 requester,
+                allow_media_linked_to_redacted_event=allow_media_linked_to_redacted_event,
             )
 
 
