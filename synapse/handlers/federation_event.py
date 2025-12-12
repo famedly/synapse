@@ -28,13 +28,9 @@ from typing import (
     TYPE_CHECKING,
     Collection,
     Container,
-    Dict,
     Iterable,
-    List,
     Optional,
     Sequence,
-    Set,
-    Tuple,
 )
 
 from synapse import event_auth
@@ -186,7 +182,7 @@ class FederationEventHandler:
         # For each room, a list of (pdu, origin) tuples.
         # TODO: replace this with something more elegant, probably based around the
         # federation event staging area.
-        self.room_queues: Dict[str, List[Tuple[EventBase, str]]] = {}
+        self.room_queues: dict[str, list[tuple[EventBase, str]]] = {}
 
         self._room_pdu_linearizer = Linearizer(name="fed_room_pdu", clock=self._clock)
 
@@ -507,8 +503,8 @@ class FederationEventHandler:
         self,
         origin: str,
         room_id: str,
-        auth_events: List[EventBase],
-        state: List[EventBase],
+        auth_events: list[EventBase],
+        state: list[EventBase],
         event: EventBase,
         room_version: RoomVersion,
         partial_state: bool,
@@ -591,7 +587,7 @@ class FederationEventHandler:
                 )
                 missing_event_ids = prev_event_ids - seen_event_ids
 
-                state_maps_to_resolve: List[StateMap[str]] = []
+                state_maps_to_resolve: list[StateMap[str]] = []
 
                 # Fetch the state after the prev events that we know about.
                 state_maps_to_resolve.extend(
@@ -752,7 +748,7 @@ class FederationEventHandler:
 
     @trace
     async def _get_missing_events_for_pdu(
-        self, origin: str, pdu: EventBase, prevs: Set[str], min_depth: int
+        self, origin: str, pdu: EventBase, prevs: set[str], min_depth: int
     ) -> None:
         """
         Args:
@@ -899,7 +895,7 @@ class FederationEventHandler:
             [event.event_id for event in events]
         )
 
-        new_events: List[EventBase] = []
+        new_events: list[EventBase] = []
         for event in events:
             event_id = event.event_id
 
@@ -1183,7 +1179,7 @@ class FederationEventHandler:
             partial_state = any(partial_state_flags.values())
 
             # state_maps is a list of mappings from (type, state_key) to event_id
-            state_maps: List[StateMap[str]] = []
+            state_maps: list[StateMap[str]] = []
 
             # Ask the remote server for the states we don't
             # know about
@@ -1644,7 +1640,7 @@ class FederationEventHandler:
 
         room_version = await self._store.get_room_version(room_id)
 
-        events: List[EventBase] = []
+        events: list[EventBase] = []
 
         async def get_event(event_id: str) -> None:
             with nested_logging_context(event_id):
@@ -1750,7 +1746,7 @@ class FederationEventHandler:
             )
             auth_map.update(persisted_events)
 
-        events_and_contexts_to_persist: List[EventPersistencePair] = []
+        events_and_contexts_to_persist: list[EventPersistencePair] = []
 
         async def prep(event: EventBase) -> None:
             with nested_logging_context(suffix=event.event_id):
@@ -2047,7 +2043,7 @@ class FederationEventHandler:
             state_sets_d = await self._state_storage_controller.get_state_groups_ids(
                 event.room_id, extrem_ids
             )
-            state_sets: List[StateMap[str]] = list(state_sets_d.values())
+            state_sets: list[StateMap[str]] = list(state_sets_d.values())
             state_ids = await context.get_prev_state_ids()
             state_sets.append(state_ids)
             current_state_ids = (

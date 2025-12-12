@@ -28,15 +28,11 @@ import threading
 from importlib import metadata
 from typing import (
     Callable,
-    Dict,
     Generic,
     Iterable,
     Mapping,
     Optional,
     Sequence,
-    Set,
-    Tuple,
-    Type,
     TypeVar,
     Union,
     cast,
@@ -175,10 +171,10 @@ class LaterGauge(Collector):
     name: str
     desc: str
     labelnames: Optional[StrSequence] = attr.ib(hash=False)
-    _instance_id_to_hook_map: Dict[
+    _instance_id_to_hook_map: dict[
         Optional[str],  # instance_id
         Callable[
-            [], Union[Mapping[Tuple[str, ...], Union[int, float]], Union[int, float]]
+            [], Union[Mapping[tuple[str, ...], Union[int, float]], Union[int, float]]
         ],
     ] = attr.ib(factory=dict, hash=False)
     """
@@ -220,7 +216,7 @@ class LaterGauge(Collector):
         *,
         homeserver_instance_id: Optional[str],
         hook: Callable[
-            [], Union[Mapping[Tuple[str, ...], Union[int, float]], Union[int, float]]
+            [], Union[Mapping[tuple[str, ...], Union[int, float]], Union[int, float]]
         ],
     ) -> None:
         """
@@ -274,7 +270,7 @@ class LaterGauge(Collector):
         all_later_gauges_to_clean_up_on_shutdown[self.name] = self
 
 
-all_later_gauges_to_clean_up_on_shutdown: Dict[str, LaterGauge] = {}
+all_later_gauges_to_clean_up_on_shutdown: dict[str, LaterGauge] = {}
 """
 Track all `LaterGauge` instances so we can remove any associated hooks during homeserver
 shutdown.
@@ -316,15 +312,15 @@ class InFlightGauge(Generic[MetricsEntry], Collector):
 
         # Create a class which have the sub_metrics values as attributes, which
         # default to 0 on initialization. Used to pass to registered callbacks.
-        self._metrics_class: Type[MetricsEntry] = attr.make_class(
+        self._metrics_class: type[MetricsEntry] = attr.make_class(
             "_MetricsEntry",
             attrs={x: attr.ib(default=0) for x in sub_metrics},
             slots=True,
         )
 
         # Counts number of in flight blocks for a given set of label values
-        self._registrations: Dict[
-            Tuple[str, ...], Set[Callable[[MetricsEntry], None]]
+        self._registrations: dict[
+            tuple[str, ...], set[Callable[[MetricsEntry], None]]
         ] = {}
 
         # Protects access to _registrations
@@ -334,7 +330,7 @@ class InFlightGauge(Generic[MetricsEntry], Collector):
 
     def register(
         self,
-        key: Tuple[str, ...],
+        key: tuple[str, ...],
         callback: Callable[[MetricsEntry], None],
     ) -> None:
         """Registers that we've entered a new block with labels `key`.
@@ -363,7 +359,7 @@ class InFlightGauge(Generic[MetricsEntry], Collector):
 
     def unregister(
         self,
-        key: Tuple[str, ...],
+        key: tuple[str, ...],
         callback: Callable[[MetricsEntry], None],
     ) -> None:
         """
@@ -438,7 +434,7 @@ class GaugeHistogramMetricFamilyWithLabels(GaugeHistogramMetricFamily):
         name: str,
         documentation: str,
         gsum_value: float,
-        buckets: Optional[Sequence[Tuple[str, float]]] = None,
+        buckets: Optional[Sequence[tuple[str, float]]] = None,
         labelnames: StrSequence = (),
         labelvalues: StrSequence = (),
         unit: str = "",

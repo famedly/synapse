@@ -23,7 +23,7 @@ import logging
 import re
 import urllib.parse
 from inspect import signature
-from typing import TYPE_CHECKING, Any, Awaitable, Callable, ClassVar, Dict, List, Tuple
+from typing import TYPE_CHECKING, Any, Awaitable, Callable, ClassVar
 
 from twisted.internet.error import ConnectError, DNSLookupError
 from twisted.web.server import Request
@@ -108,7 +108,7 @@ class ReplicationEndpoint(metaclass=abc.ABCMeta):
     """
 
     NAME: str = abc.abstractproperty()  # type: ignore
-    PATH_ARGS: Tuple[str, ...] = abc.abstractproperty()  # type: ignore
+    PATH_ARGS: tuple[str, ...] = abc.abstractproperty()  # type: ignore
     METHOD = "POST"
     CACHE = True
     RETRY_ON_TIMEOUT = True
@@ -183,7 +183,7 @@ class ReplicationEndpoint(metaclass=abc.ABCMeta):
     @abc.abstractmethod
     async def _handle_request(
         self, request: Request, content: JsonDict, **kwargs: Any
-    ) -> Tuple[int, JsonDict]:
+    ) -> tuple[int, JsonDict]:
         """Handle incoming request.
 
         This is called with the request object and PATH_ARGS.
@@ -366,17 +366,83 @@ class ReplicationEndpoint(metaclass=abc.ABCMeta):
                 },
             )
 
-            # Wait on any streams that the remote may have written to.
-            for stream_name, position in result.pop(_STREAM_POSITION_KEY, {}).items():
-                await replication.wait_for_stream_position(
-                    instance_name=instance_name,
-                    stream_name=stream_name,
-                    position=position,
-                )
-            outgoing_gauge.add(
-                -1,
-                {"name": cls.NAME, SERVER_NAME_LABEL: server_name},
-            )
+                headers: dict[bytes, list[bytes]] = {}
+                # Add an authorization header, if configured.
+                if replication_secret:
+                    headers[b"Authorization"] = [b"Bearer " + replication_secret]
+                opentracing.inject_header_dict(headers, check_destination=False)
+
+                try:
+                    # Keep track of attempts made so we can bail if we don't manage to
+                    # connect to the target after N tries.
+                    attempts = 0
+                    # We keep retrying the same request for timeouts. This is so that we
+                    # have a good idea that the request has either succeeded or failed
+                    # on the master, and so whether we should clean up or not.
+                    while True:
+                        try:
+                            result = await request_func(uri, data, headers=headers)
+                            break
+                        except RequestTimedOutError:
+                            if not cls.RETRY_ON_TIMEOUT:
+                                raise
+
+                            logger.warning("%s request timed out; retrying", cls.NAME)
+
+                            # If we timed out we probably don't need to worry about backing
+                            # off too much, but lets just wait a little anyway.
+                            await clock.sleep(1)
+                        except (ConnectError, DNSLookupError) as e:
+                            if not cls.RETRY_ON_CONNECT_ERROR:
+                                raise
+                            if attempts > cls.RETRY_ON_CONNECT_ERROR_ATTEMPTS:
+                                raise
+
+                            delay = 2**attempts
+                            logger.warning(
+                                "%s request connection failed; retrying in %ds: %r",
+                                cls.NAME,
+                                delay,
+                                e,
+                            )
+
+                            await clock.sleep(delay)
+                            attempts += 1
+                except HttpResponseException as e:
+                    # We convert to SynapseError as we know that it was a SynapseError
+                    # on the main process that we should send to the client. (And
+                    # importantly, not stack traces everywhere)
+                    _outgoing_request_counter.labels(
+                        name=cls.NAME,
+                        code=e.code,
+                        **{SERVER_NAME_LABEL: server_name},
+                    ).inc()
+                    raise e.to_synapse_error()
+                except Exception as e:
+                    _outgoing_request_counter.labels(
+                        name=cls.NAME,
+                        code="ERR",
+                        **{SERVER_NAME_LABEL: server_name},
+                    ).inc()
+                    raise SynapseError(
+                        502, f"Failed to talk to {instance_name} process"
+                    ) from e
+
+                _outgoing_request_counter.labels(
+                    name=cls.NAME,
+                    code=200,
+                    **{SERVER_NAME_LABEL: server_name},
+                ).inc()
+
+                # Wait on any streams that the remote may have written to.
+                for stream_name, position in result.pop(
+                    _STREAM_POSITION_KEY, {}
+                ).items():
+                    await replication.wait_for_stream_position(
+                        instance_name=instance_name,
+                        stream_name=stream_name,
+                        position=position,
+                    )
 
             return result
 
@@ -411,7 +477,7 @@ class ReplicationEndpoint(metaclass=abc.ABCMeta):
 
     async def _check_auth_and_handle(
         self, request: SynapseRequest, **kwargs: Any
-    ) -> Tuple[int, JsonDict]:
+    ) -> tuple[int, JsonDict]:
         """Called on new incoming requests when caching is enabled. Checks
         if there is a cached response for the request and returns that,
         otherwise calls `_handle_request` and caches its response.

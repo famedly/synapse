@@ -18,7 +18,7 @@
 #
 #
 import logging
-from typing import TYPE_CHECKING, List
+from typing import TYPE_CHECKING
 
 from synapse.api.constants import EduTypes
 from synapse.api.errors import HttpResponseException
@@ -79,8 +79,8 @@ class TransactionManager:
     async def send_new_transaction(
         self,
         destination: str,
-        pdus: List[EventBase],
-        edus: List[Edu],
+        pdus: list[EventBase],
+        edus: list[Edu],
     ) -> None:
         """
         Args:

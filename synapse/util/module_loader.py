@@ -22,7 +22,7 @@ import importlib
 import importlib.util
 from importlib.metadata import PackageNotFoundError, packages_distributions, version
 from types import ModuleType
-from typing import Any, Tuple, Type
+from typing import Any
 
 import jsonschema
 
@@ -31,7 +31,7 @@ from synapse.config._util import json_error_to_config_error
 from synapse.types import StrSequence
 
 
-def load_module(provider: dict, config_path: StrSequence) -> Tuple[Type, Any]:
+def load_module(provider: dict, config_path: StrSequence) -> tuple[type, Any]:
     """Loads a synapse module with its config
 
     Args:
@@ -117,7 +117,7 @@ def _wrap_config_error(msg: str, prefix: StrSequence, e: ConfigError) -> "Config
     return e1
 
 
-def get_loaded_module_information(module: Type) -> Tuple[str, str, str]:
+def get_loaded_module_information(module: type) -> tuple[str, str, str]:
     """Extract the module name and version from a loaded module.
 
     Args:

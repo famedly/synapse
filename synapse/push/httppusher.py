@@ -21,7 +21,7 @@
 import logging
 import random
 import urllib.parse
-from typing import TYPE_CHECKING, Dict, List, Optional, Union
+from typing import TYPE_CHECKING, Optional, Union
 
 from twisted.internet.error import AlreadyCalled, AlreadyCancelled
 from twisted.internet.interfaces import IDelayedCall
@@ -62,7 +62,7 @@ http_badges_failed_counter = meter.create_counter(
 )
 
 
-def tweaks_for_actions(actions: List[Union[str, Dict]]) -> JsonMapping:
+def tweaks_for_actions(actions: list[Union[str, dict]]) -> JsonMapping:
     """
     Converts a list of actions into a `tweaks` dict (which can then be passed to
         the push gateway).
@@ -388,7 +388,7 @@ class HttpPusher(Pusher):
         content: JsonDict,
         tweaks: Optional[JsonMapping] = None,
         default_payload: Optional[JsonMapping] = None,
-    ) -> Union[bool, List[str]]:
+    ) -> Union[bool, list[str]]:
         """Send a notification to the registered push gateway, with `content` being
         the content of the `notification` top property specified in the spec.
         Note that the `devices` property will be added with device-specific
@@ -445,7 +445,7 @@ class HttpPusher(Pusher):
         event: EventBase,
         tweaks: JsonMapping,
         badge: int,
-    ) -> Union[bool, List[str]]:
+    ) -> Union[bool, list[str]]:
         """Send a notification to the registered push gateway by building it
         from an event.
 

@@ -22,7 +22,7 @@ import logging
 import math
 import resource
 import sys
-from typing import TYPE_CHECKING, List, Mapping, Sized, Tuple
+from typing import TYPE_CHECKING, Mapping, Sized
 
 from twisted.internet import defer
 
@@ -52,7 +52,7 @@ Phone home stats are sent every 3 hours
 
 # Contains the list of processes we will be monitoring
 # currently either 0 or 1
-_stats_process: List[Tuple[int, "resource.struct_rusage"]] = []
+_stats_process: list[tuple[int, "resource.struct_rusage"]] = []
 
 # Gauges to expose monthly active user control metrics
 current_mau_gauge = meter.create_gauge(
@@ -76,12 +76,12 @@ registered_reserved_users_mau_gauge = meter.create_gauge(
 def phone_stats_home(
     hs: "HomeServer",
     stats: JsonDict,
-    stats_process: List[Tuple[int, "resource.struct_rusage"]] = _stats_process,
+    stats_process: list[tuple[int, "resource.struct_rusage"]] = _stats_process,
 ) -> "defer.Deferred[None]":
     async def _phone_stats_home(
         hs: "HomeServer",
         stats: JsonDict,
-        stats_process: List[Tuple[int, "resource.struct_rusage"]] = _stats_process,
+        stats_process: list[tuple[int, "resource.struct_rusage"]] = _stats_process,
     ) -> None:
         """Collect usage statistics and send them to the configured endpoint.
 

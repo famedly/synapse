@@ -22,7 +22,7 @@
 
 import logging
 import random
-from typing import TYPE_CHECKING, List, Optional, Tuple
+from typing import TYPE_CHECKING, Optional
 
 from twisted.internet.interfaces import IAddress
 from twisted.internet.protocol import ServerFactory
@@ -319,8 +319,8 @@ class ReplicationStreamer:
 
 
 def _batch_updates(
-    updates: List[Tuple[Token, StreamRow]],
-) -> List[Tuple[Optional[Token], StreamRow]]:
+    updates: list[tuple[Token, StreamRow]],
+) -> list[tuple[Optional[Token], StreamRow]]:
     """Takes a list of updates of form [(token, row)] and sets the token to
     None for all rows where the next row has the same token. This is used to
     implement batching.
@@ -336,7 +336,7 @@ def _batch_updates(
     if not updates:
         return []
 
-    new_updates: List[Tuple[Optional[Token], StreamRow]] = []
+    new_updates: list[tuple[Optional[Token], StreamRow]] = []
     for i, update in enumerate(updates[:-1]):
         if update[0] == updates[i + 1][0]:
             new_updates.append((None, update[1]))

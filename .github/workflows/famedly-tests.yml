@@ -115,21 +115,6 @@ jobs:
       - name: Check line endings
         run: scripts-dev/check_line_terminators.sh
 
-  lint-pydantic:
-    runs-on: ubuntu-latest
-
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: ${{ github.event.pull_request.head.sha }}
-      - uses: Swatinem/rust-cache@68b3cb7503c78e67dae8373749990a220eb65352
-      - uses: matrix-org/setup-python-poetry@v2
-        with:
-          poetry-version: "2.1.1"
-          python-version: "3.13"
-          extras: "all"
-      - run: poetry run scripts-dev/check_pydantic_models.py
-
   #lint-clippy:
   #  runs-on: ubuntu-latest
 
@@ -175,7 +160,6 @@ jobs:
       - lint
       - lint-mypy
       - lint-crlf
-      - lint-pydantic
       - check-sampleconfig
       #- check-schema-delta
       - check-lockfile

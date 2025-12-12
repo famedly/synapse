@@ -29,13 +29,10 @@ from typing import (
     Awaitable,
     Callable,
     ContextManager,
-    Dict,
     Generator,
     Iterable,
     Optional,
     Protocol,
-    Set,
-    Type,
     TypeVar,
     Union,
 )
@@ -122,7 +119,7 @@ _background_process_db_sched_duration = meter.create_counter(
 # map from description to a counter, so that we can name our logcontexts
 # incrementally. (It actually duplicates _background_process_start_count, but
 # it's much simpler to do so than to try to combine them.)
-_background_process_counts: Dict[str, int] = {}
+_background_process_counts: dict[str, int] = {}
 
 # Set of all running background processes that became active active since the
 # last time metrics were scraped (i.e. background processes that performed some
@@ -132,7 +129,7 @@ _background_process_counts: Dict[str, int] = {}
 # background processes stacking up behind a lock or linearizer, where we then
 # only need to iterate over and update metrics for the process that have
 # actually been active and can ignore the idle ones.
-_background_processes_active_since_last_scrape: "Set[_BackgroundProcess]" = set()
+_background_processes_active_since_last_scrape: "set[_BackgroundProcess]" = set()
 
 # A lock that covers the above set and dict
 _bg_metrics_lock = threading.Lock()
@@ -514,7 +511,7 @@ class BackgroundProcessLoggingContext(LoggingContext):
 
     def __exit__(
         self,
-        type: Optional[Type[BaseException]],
+        type: Optional[type[BaseException]],
         value: Optional[BaseException],
         traceback: Optional[TracebackType],
     ) -> None:

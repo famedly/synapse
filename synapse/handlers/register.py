@@ -26,9 +26,7 @@ import logging
 from typing import (
     TYPE_CHECKING,
     Iterable,
-    List,
     Optional,
-    Tuple,
     TypedDict,
 )
 
@@ -225,7 +223,7 @@ class RegistrationHandler:
         address: Optional[str] = None,
         bind_emails: Optional[Iterable[str]] = None,
         by_admin: bool = False,
-        user_agent_ips: Optional[List[Tuple[str, str]]] = None,
+        user_agent_ips: Optional[list[tuple[str, str]]] = None,
         auth_provider_id: Optional[str] = None,
         approved: bool = False,
     ) -> str:
@@ -642,7 +640,7 @@ class RegistrationHandler:
 
     async def appservice_register(
         self, user_localpart: str, as_token: str
-    ) -> Tuple[str, ApplicationService]:
+    ) -> tuple[str, ApplicationService]:
         user = UserID(user_localpart, self.hs.hostname)
         user_id = user.to_string()
         service = self.store.get_app_service_by_token(as_token)
@@ -767,7 +765,7 @@ class RegistrationHandler:
         auth_provider_id: Optional[str] = None,
         should_issue_refresh_token: bool = False,
         auth_provider_session_id: Optional[str] = None,
-    ) -> Tuple[str, str, Optional[int], Optional[str]]:
+    ) -> tuple[str, str, Optional[int], Optional[str]]:
         """Register a device for a user and generate an access token.
 
         The access token will be limited by the homeserver's session_lifetime config.

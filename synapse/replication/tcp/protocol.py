@@ -28,7 +28,7 @@ import fcntl
 import logging
 import struct
 from inspect import isawaitable
-from typing import TYPE_CHECKING, Any, Collection, List, Optional
+from typing import TYPE_CHECKING, Any, Collection, Optional
 
 from zope.interface import Interface, implementer
 
@@ -77,7 +77,7 @@ tcp_outbound_commands_counter = meter.create_counter(
 
 # A list of all connected protocols. This allows us to send metrics about the
 # connections.
-connected_connections: "List[BaseReplicationStreamProtocol]" = []
+connected_connections: "list[BaseReplicationStreamProtocol]" = []
 
 
 logger = logging.getLogger(__name__)
@@ -158,7 +158,7 @@ class BaseReplicationStreamProtocol(LineOnlyReceiver):
         self.conn_id = random_string(5)  # To dedupe in case of name clashes.
 
         # List of pending commands to send once we've established the connection
-        self.pending_commands: List[Command] = []
+        self.pending_commands: list[Command] = []
 
         # The LoopingCall for sending pings.
         self._send_ping_loop: Optional[task.LoopingCall] = None
