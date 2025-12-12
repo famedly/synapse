@@ -668,10 +668,10 @@ class FederationServer(FederationBase):
     async def on_query_request(
         self, query_type: str, args: dict[str, str]
     ) -> tuple[int, dict[str, Any]]:
-        received_queries_counter.labels(
-            type=query_type,
-            **{SERVER_NAME_LABEL: self.server_name},
-        ).inc()
+        received_queries_counter.add(
+            1,
+            {"type": query_type, SERVER_NAME_LABEL: self.server_name},
+        )
         resp = await self.registry.on_query(query_type, args)
         return 200, resp
 

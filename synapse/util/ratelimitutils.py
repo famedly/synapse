@@ -28,7 +28,6 @@ import typing
 from typing import (
     Any,
     Callable,
-    ContextManager,
     Iterator,
     Mapping,
     MutableSet,
