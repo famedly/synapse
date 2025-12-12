@@ -32,11 +32,9 @@ from typing import (
     Union,
 )
 
-from prometheus_client import Counter
-
 from twisted.internet.protocol import ReconnectingClientFactory
 
-from synapse.metrics import SERVER_NAME_LABEL, LaterGauge
+from synapse.metrics import SERVER_NAME_LABEL, LaterGauge, meter
 from synapse.replication.tcp.commands import (
     ClearUserSyncsCommand,
     Command,
@@ -79,26 +77,20 @@ logger = logging.getLogger(__name__)
 
 
 # number of updates received for each RDATA stream
-inbound_rdata_count = Counter(
+inbound_rdata_count = meter.create_counter(
     "synapse_replication_tcp_protocol_inbound_rdata_count",
-    "",
-    labelnames=["stream_name", SERVER_NAME_LABEL],
 )
-user_sync_counter = Counter(
-    "synapse_replication_tcp_resource_user_sync", "", labelnames=[SERVER_NAME_LABEL]
-)
-federation_ack_counter = Counter(
+user_sync_counter = meter.create_counter("synapse_replication_tcp_resource_user_sync")
+federation_ack_counter = meter.create_counter(
     "synapse_replication_tcp_resource_federation_ack",
-    "",
-    labelnames=[SERVER_NAME_LABEL],
 )
 # FIXME: Unused metric, remove if not needed.
-remove_pusher_counter = Counter(
-    "synapse_replication_tcp_resource_remove_pusher", "", labelnames=[SERVER_NAME_LABEL]
+remove_pusher_counter = meter.create_counter(
+    "synapse_replication_tcp_resource_remove_pusher"
 )
 
-user_ip_cache_counter = Counter(
-    "synapse_replication_tcp_resource_user_ip_cache", "", labelnames=[SERVER_NAME_LABEL]
+user_ip_cache_counter = meter.create_counter(
+    "synapse_replication_tcp_resource_user_ip_cache"
 )
 
 tcp_resource_total_connections_gauge = LaterGauge(
@@ -476,7 +468,7 @@ class ReplicationCommandHandler:
     def on_USER_SYNC(
         self, conn: IReplicationConnection, cmd: UserSyncCommand
     ) -> Optional[Awaitable[None]]:
-        user_sync_counter.labels(**{SERVER_NAME_LABEL: self.server_name}).inc()
+        user_sync_counter.add(1, {SERVER_NAME_LABEL: self.server_name})
 
         if self._is_presence_writer:
             return self._presence_handler.update_external_syncs_row(
@@ -500,7 +492,7 @@ class ReplicationCommandHandler:
     def on_FEDERATION_ACK(
         self, conn: IReplicationConnection, cmd: FederationAckCommand
     ) -> None:
-        federation_ack_counter.labels(**{SERVER_NAME_LABEL: self.server_name}).inc()
+        federation_ack_counter.add(1, {SERVER_NAME_LABEL: self.server_name})
 
         if self._federation_sender:
             self._federation_sender.federation_ack(cmd.instance_name, cmd.token)
@@ -508,7 +500,7 @@ class ReplicationCommandHandler:
     def on_USER_IP(
         self, conn: IReplicationConnection, cmd: UserIpCommand
     ) -> Optional[Awaitable[None]]:
-        user_ip_cache_counter.labels(**{SERVER_NAME_LABEL: self.server_name}).inc()
+        user_ip_cache_counter.add(1, {SERVER_NAME_LABEL: self.server_name})
 
         if self._is_master or self._should_insert_client_ips:
             # We make a point of only returning an awaitable if there's actually
@@ -548,9 +540,9 @@ class ReplicationCommandHandler:
             return
 
         stream_name = cmd.stream_name
-        inbound_rdata_count.labels(
-            stream_name=stream_name, **{SERVER_NAME_LABEL: self.server_name}
-        ).inc()
+        inbound_rdata_count.add(
+            1, {"stream_name": stream_name, SERVER_NAME_LABEL: self.server_name}
+        )
 
         # We put the received command into a queue here for two reasons:
         #   1. so we don't try and concurrently handle multiple rows for the

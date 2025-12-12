@@ -23,19 +23,17 @@ import collections
 import contextlib
 import logging
 import threading
+import time
 import typing
 from typing import (
     Any,
     Callable,
-    ContextManager,
     Iterator,
     Mapping,
     MutableSet,
     Optional,
 )
 from weakref import WeakSet
-
-from prometheus_client.core import Counter
 
 from twisted.internet import defer
 
@@ -47,7 +45,7 @@ from synapse.logging.context import (
     run_in_background,
 )
 from synapse.logging.opentracing import start_active_span
-from synapse.metrics import SERVER_NAME_LABEL, Histogram, LaterGauge
+from synapse.metrics import SERVER_NAME_LABEL, LaterGauge, meter
 from synapse.util.clock import Clock
 
 if typing.TYPE_CHECKING:
@@ -57,21 +55,18 @@ logger = logging.getLogger(__name__)
 
 
 # Track how much the ratelimiter is affecting requests
-rate_limit_sleep_counter = Counter(
+rate_limit_sleep_counter = meter.create_counter(
     "synapse_rate_limit_sleep",
-    "Number of requests slept by the rate limiter",
-    labelnames=["rate_limiter_name", SERVER_NAME_LABEL],
+    description="Number of requests slept by the rate limiter",
 )
-rate_limit_reject_counter = Counter(
+rate_limit_reject_counter = meter.create_counter(
     "synapse_rate_limit_reject",
-    "Number of requests rejected by the rate limiter",
-    labelnames=["rate_limiter_name", SERVER_NAME_LABEL],
+    description="Number of requests rejected by the rate limiter",
 )
-queue_wait_timer = Histogram(
+queue_wait_timer = meter.create_histogram(
     "synapse_rate_limit_queue_wait_time_seconds",
-    "Amount of time spent waiting for the rate limiter to let our request through.",
-    labelnames=["rate_limiter_name", SERVER_NAME_LABEL],
-    buckets=(
+    description="Amount of time spent waiting for the rate limiter to let our request through.",
+    explicit_bucket_boundaries_advisory=[
         0.005,
         0.01,
         0.025,
@@ -85,8 +80,7 @@ queue_wait_timer = Histogram(
         5.0,
         10.0,
         20.0,
-        "+Inf",
-    ),
+    ],
 )
 
 
@@ -288,14 +282,18 @@ class _PerHostRatelimiter:
         return len(self.request_times) > self.sleep_limit
 
     async def _on_enter_with_tracing(self, request_id: object) -> None:
-        maybe_metrics_cm: ContextManager = contextlib.nullcontext()
-        if self.metrics_name:
-            maybe_metrics_cm = queue_wait_timer.labels(
-                rate_limiter_name=self.metrics_name,
-                **{SERVER_NAME_LABEL: self.our_server_name},
-            ).time()
-        with start_active_span("ratelimit wait"), maybe_metrics_cm:
+        with start_active_span("ratelimit wait"):
+            start = time.perf_counter()
             await self._on_enter(request_id)
+
+            if self.metrics_name:
+                queue_wait_timer.record(
+                    time.perf_counter() - start,
+                    {
+                        "rate_limiter_name": self.metrics_name,
+                        SERVER_NAME_LABEL: self.our_server_name,
+                    },
+                )
 
     def _on_enter(self, request_id: object) -> "defer.Deferred[None]":
         time_now = self.clock.time_msec()
@@ -310,10 +308,13 @@ class _PerHostRatelimiter:
         if self.should_reject():
             logger.debug("Ratelimiter(%s): rejecting request", self.host)
             if self.metrics_name:
-                rate_limit_reject_counter.labels(
-                    rate_limiter_name=self.metrics_name,
-                    **{SERVER_NAME_LABEL: self.our_server_name},
-                ).inc()
+                rate_limit_reject_counter.add(
+                    1,
+                    {
+                        "rate_limiter_name": self.metrics_name,
+                        SERVER_NAME_LABEL: self.our_server_name,
+                    },
+                )
             raise LimitExceededError(
                 limiter_name="rc_federation",
                 retry_after_ms=int(self.window_size / self.sleep_limit),
@@ -350,10 +351,13 @@ class _PerHostRatelimiter:
                 self.sleep_sec,
             )
             if self.metrics_name:
-                rate_limit_sleep_counter.labels(
-                    rate_limiter_name=self.metrics_name,
-                    **{SERVER_NAME_LABEL: self.our_server_name},
-                ).inc()
+                rate_limit_sleep_counter.add(
+                    1,
+                    {
+                        "rate_limiter_name": self.metrics_name,
+                        SERVER_NAME_LABEL: self.our_server_name,
+                    },
+                )
             ret_defer = run_in_background(self.clock.sleep, self.sleep_sec)
 
             self.sleeping_requests.add(request_id)

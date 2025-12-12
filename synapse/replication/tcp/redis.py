@@ -192,11 +192,14 @@ class RedisSubscriber(SubscriberProtocol):
 
         # We use "redis" as the name here as we don't have 1:1 connections to
         # remote instances.
-        tcp_inbound_commands_counter.labels(
-            command=cmd.NAME,
-            name="redis",
-            **{SERVER_NAME_LABEL: self.server_name},
-        ).inc()
+        tcp_inbound_commands_counter.add(
+            1,
+            {
+                "command": cmd.NAME,
+                "name": "redis",
+                SERVER_NAME_LABEL: self.server_name,
+            },
+        )
 
         self.handle_command(cmd)
 
@@ -267,11 +270,14 @@ class RedisSubscriber(SubscriberProtocol):
 
         # We use "redis" as the name here as we don't have 1:1 connections to
         # remote instances.
-        tcp_outbound_commands_counter.labels(
-            command=cmd.NAME,
-            name="redis",
-            **{SERVER_NAME_LABEL: self.server_name},
-        ).inc()
+        tcp_outbound_commands_counter.add(
+            1,
+            {
+                "command": cmd.NAME,
+                "name": "redis",
+                SERVER_NAME_LABEL: self.server_name,
+            },
+        )
 
         channel_name = cmd.redis_channel_name(self.synapse_stream_prefix)
 

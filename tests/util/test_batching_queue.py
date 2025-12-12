@@ -19,7 +19,8 @@
 #
 #
 
-from prometheus_client import Gauge
+from opentelemetry.metrics._internal.instrument import ObservableGauge
+from prometheus_client.core import REGISTRY
 
 from twisted.internet import defer
 
@@ -27,8 +28,6 @@ from synapse.logging.context import make_deferred_yieldable
 from synapse.util.batching_queue import (
     BatchingQueue,
     number_in_flight,
-    number_of_keys,
-    number_queued,
 )
 
 from tests.unittest import HomeserverTestCase
@@ -39,12 +38,13 @@ class BatchingQueueTestCase(HomeserverTestCase):
         super().setUp()
 
         # We ensure that we remove any existing metrics for "test_queue".
-        try:
-            number_queued.remove("test_queue", "test_server")
-            number_of_keys.remove("test_queue", "test_server")
-            number_in_flight.remove("test_queue", "test_server")
-        except KeyError:
-            pass
+        # there doesn't seem to be an equivalent for otel
+        # try:
+        #     number_queued.remove("test_queue", "test_server")
+        #     number_of_keys.remove("test_queue", "test_server")
+        #     number_in_flight.remove("test_queue", "test_server")
+        # except KeyError:
+        #     pass
 
         self._pending_calls: list[tuple[list[str], defer.Deferred]] = []
         self.queue: BatchingQueue[str, str] = BatchingQueue(
@@ -59,27 +59,29 @@ class BatchingQueueTestCase(HomeserverTestCase):
         self._pending_calls.append((values, d))
         return await make_deferred_yieldable(d)
 
-    def _get_sample_with_name(self, metric: Gauge, name: str) -> float:
+    def _get_sample_with_name(self, metric: ObservableGauge, name: str) -> float:
         """For a prometheus metric get the value of the sample that has a
         matching "name" label.
         """
-        for sample in next(iter(metric.collect())).samples:
-            if sample.labels.get("name") == name:
-                return sample.value
+        print(vars(metric))
+        for metric_family in REGISTRY.collect():
+            for sample in metric_family.samples:
+                if sample.labels.get("name") == name:  # and sample.name == metric.name:
+                    return sample.value
 
         self.fail("Found no matching sample")
 
     def _assert_metrics(self, queued: int, keys: int, in_flight: int) -> None:
         """Assert that the metrics are correct"""
 
-        sample = self._get_sample_with_name(number_queued, self.queue._name)
+        sample = self._get_sample_with_name(self.queue.number_queued, self.queue._name)
         self.assertEqual(
             sample,
             queued,
             "number_queued",
         )
 
-        sample = self._get_sample_with_name(number_of_keys, self.queue._name)
+        sample = self._get_sample_with_name(self.queue.number_of_keys, self.queue._name)
         self.assertEqual(sample, keys, "number_of_keys")
 
         sample = self._get_sample_with_name(number_in_flight, self.queue._name)

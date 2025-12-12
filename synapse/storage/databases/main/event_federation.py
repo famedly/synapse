@@ -33,14 +33,13 @@ from typing import (
 )
 
 import attr
-from prometheus_client import Counter, Gauge
 
 from synapse.api.constants import MAX_DEPTH
 from synapse.api.errors import StoreError
 from synapse.api.room_versions import EventFormatVersions, RoomVersion
 from synapse.events import EventBase, make_event_from_dict
 from synapse.logging.opentracing import tag_args, trace
-from synapse.metrics import SERVER_NAME_LABEL
+from synapse.metrics import SERVER_NAME_LABEL, meter
 from synapse.metrics.background_process_metrics import wrap_as_background_process
 from synapse.storage._base import db_to_json, make_in_list_sql_clause
 from synapse.storage.background_updates import ForeignKeyConstraint
@@ -63,23 +62,20 @@ from synapse.util.json import json_encoder
 if TYPE_CHECKING:
     from synapse.server import HomeServer
 
-oldest_pdu_in_federation_staging = Gauge(
+oldest_pdu_in_federation_staging = meter.create_gauge(
     "synapse_federation_server_oldest_inbound_pdu_in_staging",
-    "The age in seconds since we received the oldest pdu in the federation staging area",
-    labelnames=[SERVER_NAME_LABEL],
+    description="The age in seconds since we received the oldest pdu in the federation staging area",
 )
 
-number_pdus_in_federation_queue = Gauge(
+number_pdus_in_federation_queue = meter.create_gauge(
     "synapse_federation_server_number_inbound_pdu_in_staging",
-    "The total number of events in the inbound federation staging",
-    labelnames=[SERVER_NAME_LABEL],
+    description="The total number of events in the inbound federation staging",
 )
 
-pdus_pruned_from_federation_queue = Counter(
+pdus_pruned_from_federation_queue = meter.create_counter(
     "synapse_federation_server_number_inbound_pdu_pruned",
-    "The number of events in the inbound federation staging that have been "
+    description="The number of events in the inbound federation staging that have been "
     "pruned due to the queue getting too long",
-    labelnames=[SERVER_NAME_LABEL],
 )
 
 logger = logging.getLogger(__name__)
@@ -2216,9 +2212,9 @@ class EventFederationWorkerStore(
         if not to_delete:
             return False
 
-        pdus_pruned_from_federation_queue.labels(
-            **{SERVER_NAME_LABEL: self.server_name}
-        ).inc(len(to_delete))
+        pdus_pruned_from_federation_queue.add(
+            len(to_delete), {SERVER_NAME_LABEL: self.server_name}
+        )
         logger.info(
             "Pruning %d events in room %s from federation queue",
             len(to_delete),
@@ -2271,12 +2267,10 @@ class EventFederationWorkerStore(
             "_get_stats_for_federation_staging", _get_stats_for_federation_staging_txn
         )
 
-        number_pdus_in_federation_queue.labels(
-            **{SERVER_NAME_LABEL: self.server_name}
-        ).set(count)
-        oldest_pdu_in_federation_staging.labels(
-            **{SERVER_NAME_LABEL: self.server_name}
-        ).set(age)
+        number_pdus_in_federation_queue.set(
+            count, {SERVER_NAME_LABEL: self.server_name}
+        )
+        oldest_pdu_in_federation_staging.set(age, {SERVER_NAME_LABEL: self.server_name})
 
     async def clean_room_for_join(self, room_id: str) -> None:
         await self.db_pool.runInteraction(

@@ -26,13 +26,12 @@ from typing import TYPE_CHECKING, Iterable, Optional, TypeVar
 import bleach
 import jinja2
 from markupsafe import Markup
-from prometheus_client import Counter
 
 from synapse.api.constants import EventContentFields, EventTypes, Membership, RoomTypes
 from synapse.api.errors import StoreError
 from synapse.config.emailconfig import EmailSubjectConfig
 from synapse.events import EventBase
-from synapse.metrics import SERVER_NAME_LABEL
+from synapse.metrics import SERVER_NAME_LABEL, meter
 from synapse.push.presentable_names import (
     calculate_room_name,
     descriptor_from_member_events,
@@ -58,10 +57,8 @@ logger = logging.getLogger(__name__)
 
 T = TypeVar("T")
 
-emails_sent_counter = Counter(
-    "synapse_emails_sent_total",
-    "Emails sent by type",
-    labelnames=["type", SERVER_NAME_LABEL],
+emails_sent_counter = meter.create_counter(
+    "synapse_emails_sent_total", description="Emails sent by type"
 )
 
 
@@ -162,10 +159,9 @@ class Mailer:
 
         template_vars: TemplateVars = {"link": link}
 
-        emails_sent_counter.labels(
-            type="password_reset",
-            **{SERVER_NAME_LABEL: self.server_name},
-        ).inc()
+        emails_sent_counter.add(
+            1, {"type": "password_reset", SERVER_NAME_LABEL: self.server_name}
+        )
 
         await self.send_email(
             email_address,
@@ -197,10 +193,9 @@ class Mailer:
 
         template_vars: TemplateVars = {"link": link}
 
-        emails_sent_counter.labels(
-            type="registration",
-            **{SERVER_NAME_LABEL: self.server_name},
-        ).inc()
+        emails_sent_counter.add(
+            1, {"type": "registration", SERVER_NAME_LABEL: self.server_name}
+        )
 
         await self.send_email(
             email_address,
@@ -216,10 +211,9 @@ class Mailer:
             email_address: Email address we're sending to the "already in use" mail
         """
 
-        emails_sent_counter.labels(
-            type="already_in_use",
-            **{SERVER_NAME_LABEL: self.server_name},
-        ).inc()
+        emails_sent_counter.add(
+            1, {"type": "already_in_use", SERVER_NAME_LABEL: self.server_name}
+        )
 
         await self.send_email(
             email_address,
@@ -252,10 +246,9 @@ class Mailer:
 
         template_vars: TemplateVars = {"link": link}
 
-        emails_sent_counter.labels(
-            type="add_threepid",
-            **{SERVER_NAME_LABEL: self.server_name},
-        ).inc()
+        emails_sent_counter.add(
+            1, {"type": "add_threepid", SERVER_NAME_LABEL: self.server_name}
+        )
 
         await self.send_email(
             email_address,
@@ -358,10 +351,9 @@ class Mailer:
             "reason": reason,
         }
 
-        emails_sent_counter.labels(
-            type="notification",
-            **{SERVER_NAME_LABEL: self.server_name},
-        ).inc()
+        emails_sent_counter.add(
+            1, {"type": "notification", SERVER_NAME_LABEL: self.server_name}
+        )
 
         await self.send_email(
             email_address, summary_text, template_vars, unsubscribe_link

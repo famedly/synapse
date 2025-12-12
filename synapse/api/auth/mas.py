@@ -236,23 +236,25 @@ class MasDelegatedAuth(BaseAuth):
                 )
         except HttpResponseException as e:
             end_time = self._clock.time()
-            introspection_response_timer.labels(
-                code=e.code, **{SERVER_NAME_LABEL: self.server_name}
-            ).observe(end_time - start_time)
+            introspection_response_timer.record(
+                end_time - start_time,
+                {"code": e.code, SERVER_NAME_LABEL: self.server_name},
+            )
             raise
         except Exception:
             end_time = self._clock.time()
-            introspection_response_timer.labels(
-                code="ERR", **{SERVER_NAME_LABEL: self.server_name}
-            ).observe(end_time - start_time)
+            introspection_response_timer.record(
+                end_time - start_time,
+                {"code": "ERR", SERVER_NAME_LABEL: self.server_name},
+            )
             raise
 
         logger.debug("Fetched token from MAS")
 
         end_time = self._clock.time()
-        introspection_response_timer.labels(
-            code=200, **{SERVER_NAME_LABEL: self.server_name}
-        ).observe(end_time - start_time)
+        introspection_response_timer.record(
+            end_time - start_time, {"code": 200, SERVER_NAME_LABEL: self.server_name}
+        )
 
         raw_response = json_decoder.decode(resp_body.decode("utf-8"))
         try:

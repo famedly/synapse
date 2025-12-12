@@ -24,113 +24,84 @@ import threading
 import traceback
 from typing import Mapping
 
-from prometheus_client.core import Counter, Histogram
-
 from synapse.logging.context import current_context
-from synapse.metrics import SERVER_NAME_LABEL, LaterGauge
+from synapse.metrics import SERVER_NAME_LABEL, LaterGauge, meter
 
 logger = logging.getLogger(__name__)
 
 
 # total number of responses served, split by method/servlet/tag
-response_count = Counter(
+response_count = meter.create_counter(
     "synapse_http_server_response_count",
-    "",
-    labelnames=["method", "servlet", "tag", SERVER_NAME_LABEL],
 )
 
-requests_counter = Counter(
+requests_counter = meter.create_counter(
     "synapse_http_server_requests_received",
-    "",
-    labelnames=["method", "servlet", SERVER_NAME_LABEL],
 )
 
-outgoing_responses_counter = Counter(
+outgoing_responses_counter = meter.create_counter(
     "synapse_http_server_responses",
-    "",
-    labelnames=["method", "code", SERVER_NAME_LABEL],
 )
 
-response_timer = Histogram(
+response_timer = meter.create_histogram(
     "synapse_http_server_response_time_seconds",
-    "sec",
-    labelnames=["method", "servlet", "tag", "code", SERVER_NAME_LABEL],
+    unit="sec",
 )
 
-response_ru_utime = Counter(
+response_ru_utime = meter.create_counter(
     "synapse_http_server_response_ru_utime_seconds",
-    "sec",
-    labelnames=["method", "servlet", "tag", SERVER_NAME_LABEL],
+    description="sec",
 )
 
-response_ru_stime = Counter(
+response_ru_stime = meter.create_counter(
     "synapse_http_server_response_ru_stime_seconds",
-    "sec",
-    labelnames=["method", "servlet", "tag", SERVER_NAME_LABEL],
+    description="sec",
 )
 
-response_db_txn_count = Counter(
+response_db_txn_count = meter.create_counter(
     "synapse_http_server_response_db_txn_count",
-    "",
-    labelnames=["method", "servlet", "tag", SERVER_NAME_LABEL],
 )
 
 # seconds spent waiting for db txns, excluding scheduling time, when processing
 # this request
-response_db_txn_duration = Counter(
+response_db_txn_duration = meter.create_counter(
     "synapse_http_server_response_db_txn_duration_seconds",
-    "",
-    labelnames=["method", "servlet", "tag", SERVER_NAME_LABEL],
 )
 
 # seconds spent waiting for a db connection, when processing this request
-response_db_sched_duration = Counter(
+response_db_sched_duration = meter.create_counter(
     "synapse_http_server_response_db_sched_duration_seconds",
-    "",
-    labelnames=["method", "servlet", "tag", SERVER_NAME_LABEL],
 )
 
 # size in bytes of the response written
-response_size = Counter(
+response_size = meter.create_counter(
     "synapse_http_server_response_size",
-    "",
-    labelnames=["method", "servlet", "tag", SERVER_NAME_LABEL],
 )
 
 # In flight metrics are incremented while the requests are in flight, rather
 # than when the response was written.
 
-in_flight_requests_ru_utime = Counter(
+in_flight_requests_ru_utime = meter.create_counter(
     "synapse_http_server_in_flight_requests_ru_utime_seconds",
-    "",
-    labelnames=["method", "servlet", SERVER_NAME_LABEL],
 )
 
-in_flight_requests_ru_stime = Counter(
+in_flight_requests_ru_stime = meter.create_counter(
     "synapse_http_server_in_flight_requests_ru_stime_seconds",
-    "",
-    labelnames=["method", "servlet", SERVER_NAME_LABEL],
 )
 
-in_flight_requests_db_txn_count = Counter(
+in_flight_requests_db_txn_count = meter.create_counter(
     "synapse_http_server_in_flight_requests_db_txn_count",
-    "",
-    labelnames=["method", "servlet", SERVER_NAME_LABEL],
 )
 
 # seconds spent waiting for db txns, excluding scheduling time, when processing
 # this request
-in_flight_requests_db_txn_duration = Counter(
+in_flight_requests_db_txn_duration = meter.create_counter(
     "synapse_http_server_in_flight_requests_db_txn_duration_seconds",
-    "",
-    labelnames=["method", "servlet", SERVER_NAME_LABEL],
 )
 
 # seconds spent waiting for a db connection, when processing this request
-in_flight_requests_db_sched_duration = Counter(
+in_flight_requests_db_sched_duration = meter.create_counter(
     "synapse_http_server_in_flight_requests_db_sched_duration_seconds",
-    "",
-    labelnames=["method", "servlet", SERVER_NAME_LABEL],
 )
 
 _in_flight_requests: set["RequestMetrics"] = set()
@@ -227,11 +198,14 @@ class RequestMetrics:
 
         response_code_str = str(response_code)
 
-        outgoing_responses_counter.labels(
-            method=self.method,
-            code=response_code_str,
-            **{SERVER_NAME_LABEL: self.our_server_name},
-        ).inc()
+        outgoing_responses_counter.add(
+            1,
+            {
+                "method": self.method,
+                "code": response_code_str,
+                SERVER_NAME_LABEL: self.our_server_name,
+            },
+        )
 
         response_base_labels = {
             "method": self.method,
@@ -240,27 +214,28 @@ class RequestMetrics:
             SERVER_NAME_LABEL: self.our_server_name,
         }
 
-        response_count.labels(**response_base_labels).inc()
+        response_count.add(1, response_base_labels)
 
-        response_timer.labels(
-            code=response_code_str,
-            **response_base_labels,
-        ).observe(time_sec - self.start_ts)
+        response_timer.record(
+            time_sec - self.start_ts,
+            {
+                "code": response_code_str,
+                **response_base_labels,
+            },
+        )
 
         resource_usage = context.get_resource_usage()
 
-        response_ru_utime.labels(**response_base_labels).inc(resource_usage.ru_utime)
-        response_ru_stime.labels(**response_base_labels).inc(resource_usage.ru_stime)
-        response_db_txn_count.labels(**response_base_labels).inc(
-            resource_usage.db_txn_count
+        response_ru_utime.add(resource_usage.ru_utime, response_base_labels)
+        response_ru_stime.add(resource_usage.ru_stime, response_base_labels)
+        response_db_txn_count.add(resource_usage.db_txn_count, response_base_labels)
+        response_db_txn_duration.add(
+            resource_usage.db_txn_duration_sec, response_base_labels
         )
-        response_db_txn_duration.labels(**response_base_labels).inc(
-            resource_usage.db_txn_duration_sec
+        response_db_sched_duration.add(
+            resource_usage.db_sched_duration_sec, response_base_labels
         )
-        response_db_sched_duration.labels(**response_base_labels).inc(
-            resource_usage.db_sched_duration_sec
-        )
-        response_size.labels(**response_base_labels).inc(sent_bytes)
+        response_size.add(sent_bytes, response_base_labels)
 
         # We always call this at the end to ensure that we update the metrics
         # regardless of whether a call to /metrics while the request was in
@@ -289,21 +264,15 @@ class RequestMetrics:
         # max() is used since rapid use of ru_stime/ru_utime can end up with the
         # count going backwards due to NTP, time smearing, fine-grained
         # correction, or floating points. Who knows, really?
-        in_flight_requests_ru_utime.labels(**in_flight_labels).inc(
-            max(diff.ru_utime, 0)
-        )
-        in_flight_requests_ru_stime.labels(**in_flight_labels).inc(
-            max(diff.ru_stime, 0)
+        in_flight_requests_ru_utime.add(max(diff.ru_utime, 0), in_flight_labels)
+        in_flight_requests_ru_stime.add(max(diff.ru_stime, 0), in_flight_labels)
+
+        in_flight_requests_db_txn_count.add(diff.db_txn_count, in_flight_labels)
+
+        in_flight_requests_db_txn_duration.add(
+            diff.db_txn_duration_sec, in_flight_labels
         )
 
-        in_flight_requests_db_txn_count.labels(**in_flight_labels).inc(
-            diff.db_txn_count
-        )
-
-        in_flight_requests_db_txn_duration.labels(**in_flight_labels).inc(
-            diff.db_txn_duration_sec
-        )
-
-        in_flight_requests_db_sched_duration.labels(**in_flight_labels).inc(
-            diff.db_sched_duration_sec
+        in_flight_requests_db_sched_duration.add(
+            diff.db_sched_duration_sec, in_flight_labels
         )

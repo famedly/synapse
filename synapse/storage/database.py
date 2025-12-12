@@ -43,7 +43,6 @@ from typing import (
 )
 
 import attr
-from prometheus_client import Counter, Histogram
 from typing_extensions import Concatenate, ParamSpec
 
 from twisted.enterprise import adbapi
@@ -57,7 +56,7 @@ from synapse.logging.context import (
     current_context,
     make_deferred_yieldable,
 )
-from synapse.metrics import SERVER_NAME_LABEL, register_threadpool
+from synapse.metrics import SERVER_NAME_LABEL, meter, register_threadpool
 from synapse.storage.background_updates import BackgroundUpdater
 from synapse.storage.engines import BaseDatabaseEngine, PostgresEngine, Sqlite3Engine
 from synapse.storage.types import Connection, Cursor, SQLQueryParameters
@@ -77,22 +76,16 @@ sql_logger = logging.getLogger("synapse.storage.SQL")
 transaction_logger = logging.getLogger("synapse.storage.txn")
 perf_logger = logging.getLogger("synapse.storage.TIME")
 
-sql_scheduling_timer = Histogram(
-    "synapse_storage_schedule_time", "sec", labelnames=[SERVER_NAME_LABEL]
+sql_scheduling_timer = meter.create_histogram(
+    "synapse_storage_schedule_time", unit="sec"
 )
 
-sql_query_timer = Histogram(
-    "synapse_storage_query_time", "sec", labelnames=["verb", SERVER_NAME_LABEL]
+sql_query_timer = meter.create_histogram("synapse_storage_query_time", unit="sec")
+sql_txn_count = meter.create_counter(
+    "synapse_storage_transaction_time_count", description="sec"
 )
-sql_txn_count = Counter(
-    "synapse_storage_transaction_time_count",
-    "sec",
-    labelnames=["desc", SERVER_NAME_LABEL],
-)
-sql_txn_duration = Counter(
-    "synapse_storage_transaction_time_sum",
-    "sec",
-    labelnames=["desc", SERVER_NAME_LABEL],
+sql_txn_duration = meter.create_counter(
+    "synapse_storage_transaction_time_sum", description="sec"
 )
 
 
@@ -524,9 +517,9 @@ class LoggingTransaction:
         finally:
             secs = time.time() - start
             sql_logger.debug("[SQL time] {%s} %f sec", self.name, secs)
-            sql_query_timer.labels(
-                verb=sql.split()[0], **{SERVER_NAME_LABEL: self.server_name}
-            ).observe(secs)
+            sql_query_timer.record(
+                secs, {"verb": sql.split()[0], SERVER_NAME_LABEL: self.server_name}
+            )
 
     def close(self) -> None:
         self.txn.close()
@@ -905,14 +898,10 @@ class DatabasePool:
 
             self._current_txn_total_time += duration
             self._txn_perf_counters.update(desc, duration)
-            sql_txn_count.labels(
-                desc=desc,
-                **{SERVER_NAME_LABEL: self.server_name},
-            ).inc(1)
-            sql_txn_duration.labels(
-                desc=desc,
-                **{SERVER_NAME_LABEL: self.server_name},
-            ).inc(duration)
+            sql_txn_count.add(1, {"desc": desc, SERVER_NAME_LABEL: self.server_name})
+            sql_txn_duration.add(
+                duration, {"desc": desc, SERVER_NAME_LABEL: self.server_name}
+            )
 
     async def runInteraction(
         self,
@@ -1050,9 +1039,9 @@ class DatabasePool:
                     operation_name="db.connection",
                 ):
                     sched_duration_sec = monotonic_time() - start_time
-                    sql_scheduling_timer.labels(
-                        **{SERVER_NAME_LABEL: self.server_name}
-                    ).observe(sched_duration_sec)
+                    sql_scheduling_timer.record(
+                        sched_duration_sec, {SERVER_NAME_LABEL: self.server_name}
+                    )
                     context.add_database_scheduled(sched_duration_sec)
 
                     if self._txn_limit > 0:

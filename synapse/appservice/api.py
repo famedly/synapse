@@ -31,7 +31,6 @@ from typing import (
     Union,
 )
 
-from prometheus_client import Counter
 from typing_extensions import ParamSpec, TypeGuard
 
 from synapse.api.constants import EventTypes, Membership, ThirdPartyEntityKind
@@ -45,7 +44,7 @@ from synapse.events import EventBase
 from synapse.events.utils import SerializeEventConfig, serialize_event
 from synapse.http.client import SimpleHttpClient, is_unknown_endpoint
 from synapse.logging import opentracing
-from synapse.metrics import SERVER_NAME_LABEL
+from synapse.metrics import SERVER_NAME_LABEL, meter
 from synapse.types import DeviceListUpdates, JsonDict, JsonMapping, ThirdPartyInstanceID
 from synapse.util.caches.response_cache import ResponseCache
 
@@ -54,34 +53,29 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-sent_transactions_counter = Counter(
+sent_transactions_counter = meter.create_counter(
     "synapse_appservice_api_sent_transactions",
-    "Number of /transactions/ requests sent",
-    labelnames=["service", SERVER_NAME_LABEL],
+    description="Number of /transactions/ requests sent",
 )
 
-failed_transactions_counter = Counter(
+failed_transactions_counter = meter.create_counter(
     "synapse_appservice_api_failed_transactions",
-    "Number of /transactions/ requests that failed to send",
-    labelnames=["service", SERVER_NAME_LABEL],
+    description="Number of /transactions/ requests that failed to send",
 )
 
-sent_events_counter = Counter(
+sent_events_counter = meter.create_counter(
     "synapse_appservice_api_sent_events",
-    "Number of events sent to the AS",
-    labelnames=["service", SERVER_NAME_LABEL],
+    description="Number of events sent to the AS",
 )
 
-sent_ephemeral_counter = Counter(
+sent_ephemeral_counter = meter.create_counter(
     "synapse_appservice_api_sent_ephemeral",
-    "Number of ephemeral events sent to the AS",
-    labelnames=["service", SERVER_NAME_LABEL],
+    description="Number of ephemeral events sent to the AS",
 )
 
-sent_todevice_counter = Counter(
+sent_todevice_counter = meter.create_counter(
     "synapse_appservice_api_sent_todevice",
-    "Number of todevice messages sent to the AS",
-    labelnames=["service", SERVER_NAME_LABEL],
+    description="Number of todevice messages sent to the AS",
 )
 
 HOUR_IN_MS = 60 * 60 * 1000
@@ -400,10 +394,10 @@ class ApplicationServiceApi(SimpleHttpClient):
                     service.url,
                     [event.get("event_id") for event in events],
                 )
-            sent_transactions_counter.labels(**labels).inc()
-            sent_events_counter.labels(**labels).inc(len(serialized_events))
-            sent_ephemeral_counter.labels(**labels).inc(len(ephemeral))
-            sent_todevice_counter.labels(**labels).inc(len(to_device_messages))
+            sent_transactions_counter.add(1, labels)
+            sent_events_counter.add(len(serialized_events), labels)
+            sent_ephemeral_counter.add(len(ephemeral), labels)
+            sent_todevice_counter.add(len(to_device_messages), labels)
             return True
         except CodeMessageException as e:
             logger.warning(
@@ -422,7 +416,7 @@ class ApplicationServiceApi(SimpleHttpClient):
                 ex.args,
                 exc_info=logger.isEnabledFor(logging.DEBUG),
             )
-        failed_transactions_counter.labels(**labels).inc()
+        failed_transactions_counter.add(1, labels)
         return False
 
     async def claim_client_keys(

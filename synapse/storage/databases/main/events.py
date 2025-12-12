@@ -36,7 +36,6 @@ from typing import (
 )
 
 import attr
-from prometheus_client import Counter
 
 import synapse.metrics
 from synapse.api.constants import (
@@ -56,7 +55,7 @@ from synapse.events import (
 from synapse.events.snapshot import EventPersistencePair
 from synapse.events.utils import parse_stripped_state_event
 from synapse.logging.opentracing import trace
-from synapse.metrics import SERVER_NAME_LABEL
+from synapse.metrics import SERVER_NAME_LABEL, meter
 from synapse.storage._base import db_to_json, make_in_list_sql_clause
 from synapse.storage.database import (
     DatabasePool,
@@ -91,14 +90,8 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-persist_event_counter = Counter(
-    "synapse_storage_events_persisted_events", "", labelnames=[SERVER_NAME_LABEL]
-)
-event_counter = Counter(
-    "synapse_storage_events_persisted_events_sep",
-    "",
-    labelnames=["type", "origin_type", "origin_entity", SERVER_NAME_LABEL],
-)
+persist_event_counter = meter.create_counter("synapse_storage_events_persisted_events")
+event_counter = meter.create_counter("synapse_storage_events_persisted_events_sep")
 
 # State event type/key pairs that we need to gather to fill in the
 # `sliding_sync_joined_rooms`/`sliding_sync_membership_snapshots` tables.
@@ -362,16 +355,16 @@ class PersistEventsStore:
                 new_event_links=new_event_links,
                 sliding_sync_table_changes=sliding_sync_table_changes,
             )
-            persist_event_counter.labels(**{SERVER_NAME_LABEL: self.server_name}).inc(
-                len(events_and_contexts)
+            persist_event_counter.add(
+                len(events_and_contexts), {SERVER_NAME_LABEL: self.server_name}
             )
 
             if not use_negative_stream_ordering:
                 # we don't want to set the event_persisted_position to a negative
                 # stream_ordering.
-                synapse.metrics.event_persisted_position.labels(
-                    **{SERVER_NAME_LABEL: self.server_name}
-                ).set(stream)
+                synapse.metrics.event_persisted_position.set(
+                    stream, {SERVER_NAME_LABEL: self.server_name}
+                )
 
             for event, context in events_and_contexts:
                 if context.app_service:
@@ -384,12 +377,15 @@ class PersistEventsStore:
                     origin_type = "remote"
                     origin_entity = get_domain_from_id(event.sender)
 
-                event_counter.labels(
-                    type=event.type,
-                    origin_type=origin_type,
-                    origin_entity=origin_entity,
-                    **{SERVER_NAME_LABEL: self.server_name},
-                ).inc()
+                event_counter.add(
+                    1,
+                    {
+                        "type": event.type,
+                        "origin_type": origin_type,
+                        "origin_entity": origin_entity,
+                        SERVER_NAME_LABEL: self.server_name,
+                    },
+                )
 
                 if (
                     not self.hs.config.experimental.msc4293_enabled

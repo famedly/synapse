@@ -238,6 +238,7 @@ pydantic = [
     { version = "~=2.8", python = "<3.14" },
     { version = "~=2.12", python = ">=3.14" },
 ]
+opentelemetry-exporter-prometheus = "0.55b1"
 
 # This is for building the rust components during "poetry install", which
 # currently ignores the `build-system.requires` directive (c.f.

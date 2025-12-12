@@ -343,11 +343,14 @@ class SynapseRequest(Request):
             # dispatching to the handler, so that the handler
             # can update the servlet name in the request
             # metrics
-            requests_counter.labels(
-                method=self.get_method(),
-                servlet=self.request_metrics.name,
-                **{SERVER_NAME_LABEL: self.our_server_name},
-            ).inc()
+            requests_counter.add(
+                1,
+                {
+                    "method": self.get_method(),
+                    "servlet": self.request_metrics.name,
+                    SERVER_NAME_LABEL: self.our_server_name,
+                },
+            )
 
     @contextlib.contextmanager
     def processing(self) -> Generator[None, None, None]:

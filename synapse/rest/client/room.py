@@ -28,8 +28,6 @@ from http import HTTPStatus
 from typing import TYPE_CHECKING, Awaitable, Optional
 from urllib import parse as urlparse
 
-from prometheus_client.core import Histogram
-
 from twisted.web.server import Request
 
 from synapse import event_auth
@@ -65,7 +63,7 @@ from synapse.http.servlet import (
 from synapse.http.site import SynapseRequest
 from synapse.logging.context import make_deferred_yieldable, run_in_background
 from synapse.logging.opentracing import set_tag
-from synapse.metrics import SERVER_NAME_LABEL
+from synapse.metrics import SERVER_NAME_LABEL, meter
 from synapse.rest.client._base import client_patterns
 from synapse.rest.client.transactions import HttpTransactionCache
 from synapse.state import CREATE_KEY, POWER_KEY
@@ -113,15 +111,16 @@ class _RoomSize(Enum):
 # greater than 10s. We use a separate dedicated histogram with its own buckets
 # so that we don't increase the cardinality of the general one because it's
 # multiplied across hundreds of servlets.
-messsages_response_timer = Histogram(
+messsages_response_timer = meter.create_histogram(
     "synapse_room_message_list_rest_servlet_response_time_seconds",
-    "sec",
+    unit="sec",
     # We have a label for room size so we can try to see a more realistic
     # picture of /messages response time for bigger rooms. We don't want the
     # tiny rooms that can always respond fast skewing our results when we're trying
     # to optimize the bigger cases.
-    labelnames=["room_size", SERVER_NAME_LABEL],
-    buckets=(
+    # labelnames=["room_size", SERVER_NAME_LABEL],
+    # ^ not needed to be initialized with otel, keeping this here for the comment above
+    explicit_bucket_boundaries_advisory=[
         0.005,
         0.01,
         0.025,
@@ -141,8 +140,7 @@ messsages_response_timer = Histogram(
         120.0,
         150.0,
         180.0,
-        "+Inf",
-    ),
+    ],
 )
 
 
@@ -849,10 +847,13 @@ class RoomMessageListRestServlet(RestServlet):
 
         processing_end_time = self.clock.time_msec()
         room_member_count = await make_deferred_yieldable(room_member_count_deferred)
-        messsages_response_timer.labels(
-            room_size=_RoomSize.from_member_count(room_member_count),
-            **{SERVER_NAME_LABEL: self.server_name},
-        ).observe((processing_end_time - processing_start_time) / 1000)
+        messsages_response_timer.record(
+            (processing_end_time - processing_start_time) / 1000,
+            {
+                "room_size": str(_RoomSize.from_member_count(room_member_count)),
+                SERVER_NAME_LABEL: self.server_name,
+            },
+        )
 
         return 200, msgs
 

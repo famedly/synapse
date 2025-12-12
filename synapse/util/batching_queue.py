@@ -29,12 +29,12 @@ from typing import (
     TypeVar,
 )
 
-from prometheus_client import Gauge
+from opentelemetry.metrics._internal.observation import Observation
 
 from twisted.internet import defer
 
 from synapse.logging.context import PreserveLoggingContext, make_deferred_yieldable
-from synapse.metrics import SERVER_NAME_LABEL
+from synapse.metrics import SERVER_NAME_LABEL, meter
 from synapse.util.clock import Clock
 
 if TYPE_CHECKING:
@@ -46,22 +46,14 @@ logger = logging.getLogger(__name__)
 V = TypeVar("V")
 R = TypeVar("R")
 
-number_queued = Gauge(
-    "synapse_util_batching_queue_number_queued",
-    "The number of items waiting in the queue across all keys",
-    labelnames=("name", SERVER_NAME_LABEL),
-)
+# number_queued = meter.create_observable_gauge(
+#     "synapse_util_batching_queue_number_queued",
+#     description="The number of items waiting in the queue across all keys",
+# )
 
-number_in_flight = Gauge(
+number_in_flight = meter.create_observable_gauge(
     "synapse_util_batching_queue_number_pending",
-    "The number of items across all keys either being processed or waiting in a queue",
-    labelnames=("name", SERVER_NAME_LABEL),
-)
-
-number_of_keys = Gauge(
-    "synapse_util_batching_queue_number_of_keys",
-    "The number of distinct keys that have items queued",
-    labelnames=("name", SERVER_NAME_LABEL),
+    description="The number of items across all keys either being processed or waiting in a queue",
 )
 
 
@@ -115,16 +107,35 @@ class BatchingQueue(Generic[V, R]):
         # The function to call with batches of values.
         self._process_batch_callback = process_batch_callback
 
-        number_queued.labels(
-            name=self._name, **{SERVER_NAME_LABEL: self.server_name}
-        ).set_function(lambda: sum(len(q) for q in self._next_values.values()))
+        self.number_queued = meter.create_observable_gauge(
+            "synapse_util_batching_queue_number_queued",
+            callbacks=[
+                lambda options: [
+                    Observation(
+                        sum(len(q) for q in self._next_values.values()),
+                        {"name": self._name, SERVER_NAME_LABEL: self.server_name},
+                    )
+                ]
+            ],
+            description="The number of items waiting in the queue across all keys",
+        )
 
-        number_of_keys.labels(
-            name=self._name, **{SERVER_NAME_LABEL: self.server_name}
-        ).set_function(lambda: len(self._next_values))
+        self.number_of_keys = meter.create_observable_gauge(
+            "synapse_util_batching_queue_number_of_keys",
+            description="The number of distinct keys that have items queued",
+            callbacks=[
+                lambda options: [
+                    Observation(
+                        len(self._next_values),
+                        {"name": self._name, SERVER_NAME_LABEL: self.server_name},
+                    )
+                ]
+            ],
+        )
 
-        self._number_in_flight_metric: Gauge = number_in_flight.labels(
-            name=self._name, **{SERVER_NAME_LABEL: self.server_name}
+        self._number_in_flight_metric = meter.create_up_down_counter(
+            "synapse_util_batching_queue_number_pending",
+            description="The number of items across all keys either being processed or waiting in a queue",
         )
 
     def shutdown(self) -> None:
@@ -132,8 +143,9 @@ class BatchingQueue(Generic[V, R]):
         Prepares the object for garbage collection by removing any handed out
         references.
         """
-        number_queued.remove(self._name, self.server_name)
-        number_of_keys.remove(self._name, self.server_name)
+        # there doesn't seem to be an otel equivalent for those
+        # number_queued.remove(self._name, self.server_name)
+        # number_of_keys.remove(self._name, self.server_name)
 
     async def add_to_queue(self, value: V, key: Hashable = ()) -> R:
         """Adds the value to the queue with the given key, returning the result
@@ -155,8 +167,14 @@ class BatchingQueue(Generic[V, R]):
         if key not in self._processing_keys:
             self.hs.run_as_background_process(self._name, self._process_queue, key)
 
-        with self._number_in_flight_metric.track_inprogress():
-            return await make_deferred_yieldable(d)
+        self._number_in_flight_metric.add(
+            1, {"name": self._name, SERVER_NAME_LABEL: self.server_name}
+        )
+        res = await make_deferred_yieldable(d)
+        self._number_in_flight_metric.add(
+            -1, {"name": self._name, SERVER_NAME_LABEL: self.server_name}
+        )
+        return res
 
     async def _process_queue(self, key: Hashable) -> None:
         """A background task to repeatedly pull things off the queue for the

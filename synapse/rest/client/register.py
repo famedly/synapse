@@ -164,11 +164,14 @@ class EmailRegisterRequestTokenRestServlet(RestServlet):
             next_link,
         )
 
-        threepid_send_requests.labels(
-            type="email",
-            reason="register",
-            **{SERVER_NAME_LABEL: self.server_name},
-        ).observe(send_attempt)
+        threepid_send_requests.record(
+            send_attempt,
+            {
+                "type": "email",
+                "reason": "register",
+                SERVER_NAME_LABEL: self.server_name,
+            },
+        )
 
         # Wrap the session id in a JSON object
         return 200, {"sid": sid}
@@ -244,11 +247,14 @@ class MsisdnRegisterRequestTokenRestServlet(RestServlet):
             next_link,
         )
 
-        threepid_send_requests.labels(
-            type="msisdn",
-            reason="register",
-            **{SERVER_NAME_LABEL: self.server_name},
-        ).observe(send_attempt)
+        threepid_send_requests.record(
+            send_attempt,
+            {
+                "type": "msisdn",
+                "reason": "register",
+                SERVER_NAME_LABEL: self.server_name,
+            },
+        )
 
         return 200, ret
 

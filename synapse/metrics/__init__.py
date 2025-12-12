@@ -39,12 +39,16 @@ from typing import (
 )
 
 import attr
+from opentelemetry import metrics
+from opentelemetry.exporter.prometheus import PrometheusMetricReader
+from opentelemetry.metrics import get_meter_provider
+from opentelemetry.metrics._internal import Meter
+from opentelemetry.metrics._internal.observation import Observation
+from opentelemetry.sdk.metrics._internal import MeterProvider
+from opentelemetry.sdk.resources import SERVICE_NAME, Resource as OtelResource
 from packaging.version import parse as parse_version
 from prometheus_client import (
     CollectorRegistry,
-    Counter,
-    Gauge,
-    Histogram,
     Metric,
     generate_latest,
 )
@@ -58,9 +62,6 @@ from twisted.python.threadpool import ThreadPool
 from twisted.web.resource import Resource
 from twisted.web.server import Request
 
-# This module is imported for its side effects; flake8 needn't warn that it's unused.
-import synapse.metrics._reactor_metrics  # noqa: F401
-from synapse.metrics._gc import MIN_TIME_BETWEEN_GCS, install_gc_manager
 from synapse.metrics._types import Collector
 from synapse.types import StrSequence
 from synapse.util import SYNAPSE_VERSION
@@ -133,6 +134,19 @@ def _set_prometheus_client_use_created_metrics(new_value: bool) -> None:
 
 # Set this globally so it applies wherever we generate/collect metrics
 _set_prometheus_client_use_created_metrics(False)
+
+
+# Global meter for registering otel metrics
+resource = OtelResource(attributes={SERVICE_NAME: "synapse"})
+reader = PrometheusMetricReader()
+provider = MeterProvider(resource=resource, metric_readers=[reader])
+metrics.set_meter_provider(provider)
+meter: Meter = get_meter_provider().get_meter("synapse")
+
+# Import after meter is defined to avoid circular import
+# This module is imported for its side effects; flake8 needn't warn that it's unused.
+import synapse.metrics._reactor_metrics  # noqa: F401, E402
+from synapse.metrics._gc import MIN_TIME_BETWEEN_GCS, install_gc_manager  # noqa: E402
 
 
 class _RegistryProxy:
@@ -600,55 +614,46 @@ REGISTRY.register(CPUMetrics())  # type: ignore[missing-server-name-label]
 # Federation Metrics
 #
 
-sent_transactions_counter = Counter(
-    "synapse_federation_client_sent_transactions", "", labelnames=[SERVER_NAME_LABEL]
+sent_transactions_counter = meter.create_counter(
+    "synapse_federation_client_sent_transactions"
 )
 
-events_processed_counter = Counter(
-    "synapse_federation_client_events_processed", "", labelnames=[SERVER_NAME_LABEL]
+events_processed_counter = meter.create_counter(
+    "synapse_federation_client_events_processed"
 )
 
-event_processing_loop_counter = Counter(
+event_processing_loop_counter = meter.create_counter(
     "synapse_event_processing_loop_count",
-    "Event processing loop iterations",
-    labelnames=["name", SERVER_NAME_LABEL],
+    description="Event processing loop iterations",
 )
 
-event_processing_loop_room_count = Counter(
+event_processing_loop_room_count = meter.create_counter(
     "synapse_event_processing_loop_room_count",
-    "Rooms seen per event processing loop iteration",
-    labelnames=["name", SERVER_NAME_LABEL],
+    description="Rooms seen per event processing loop iteration",
 )
 
 
 # Used to track where various components have processed in the event stream,
 # e.g. federation sending, appservice sending, etc.
-event_processing_positions = Gauge(
-    "synapse_event_processing_positions", "", labelnames=["name", SERVER_NAME_LABEL]
+event_processing_positions = meter.create_gauge(
+    "synapse_event_processing_positions",
 )
 
 # Used to track the current max events stream position
-event_persisted_position = Gauge(
-    "synapse_event_persisted_position", "", labelnames=[SERVER_NAME_LABEL]
-)
+event_persisted_position = meter.create_gauge("synapse_event_persisted_position")
 
 # Used to track the received_ts of the last event processed by various
 # components
-event_processing_last_ts = Gauge(
-    "synapse_event_processing_last_ts", "", labelnames=["name", SERVER_NAME_LABEL]
-)
+event_processing_last_ts = meter.create_gauge("synapse_event_processing_last_ts")
 
 # Used to track the lag processing events. This is the time difference
 # between the last processed event's received_ts and the time it was
 # finished being processed.
-event_processing_lag = Gauge(
-    "synapse_event_processing_lag", "", labelnames=["name", SERVER_NAME_LABEL]
-)
+event_processing_lag = meter.create_gauge("synapse_event_processing_lag")
 
-event_processing_lag_by_event = Histogram(
+event_processing_lag_by_event = meter.create_histogram(
     "synapse_event_processing_lag_by_event",
-    "Time between an event being persisted and it being queued up to be sent to the relevant remote servers",
-    labelnames=["name", SERVER_NAME_LABEL],
+    description="Time between an event being persisted and it being queued up to be sent to the relevant remote servers",
 )
 
 # Build info of the running server.
@@ -656,67 +661,52 @@ event_processing_lag_by_event = Histogram(
 # This is a process-level metric, so it does not have the `SERVER_NAME_LABEL`. We
 # consider this process-level because all Synapse homeservers running in the process
 # will use the same Synapse version.
-build_info = Gauge(  # type: ignore[missing-server-name-label]
-    "synapse_build_info", "Build information", ["pythonversion", "version", "osversion"]
+build_info = meter.create_gauge("synapse_build_info", description="Build information")
+build_info.set(
+    1,
+    {
+        "pythonversion": " ".join(
+            [platform.python_implementation(), platform.python_version()]
+        ),
+        "version": SYNAPSE_VERSION,
+        "osversion": " ".join([platform.system(), platform.release()]),
+    },
 )
-build_info.labels(
-    " ".join([platform.python_implementation(), platform.python_version()]),
-    SYNAPSE_VERSION,
-    " ".join([platform.system(), platform.release()]),
-).set(1)
 
 # Loaded modules info
-module_instances_info = Gauge(
+module_instances_info = meter.create_gauge(
     "synapse_module_info",
-    "Information about loaded modules",
-    labelnames=["package_name", "module_name", "module_version", SERVER_NAME_LABEL],
+    description="Information about loaded modules",
 )
 
 # 3PID send info
-threepid_send_requests = Histogram(
+threepid_send_requests = meter.create_histogram(
     "synapse_threepid_send_requests_with_tries",
-    documentation="Number of requests for a 3pid token by try count. Note if"
+    description="Number of requests for a 3pid token by try count. Note if"
     " there is a request with try count of 4, then there would have been one"
     " each for 1, 2 and 3",
-    buckets=(1, 2, 3, 4, 5, 10),
-    labelnames=("type", "reason", SERVER_NAME_LABEL),
+    explicit_bucket_boundaries_advisory=[1, 2, 3, 4, 5, 10],
 )
 
-threadpool_total_threads = Gauge(
-    "synapse_threadpool_total_threads",
-    "Total number of threads currently in the threadpool",
-    labelnames=["name", SERVER_NAME_LABEL],
-)
-
-threadpool_total_working_threads = Gauge(
-    "synapse_threadpool_working_threads",
-    "Number of threads currently working in the threadpool",
-    labelnames=["name", SERVER_NAME_LABEL],
-)
-
-threadpool_total_min_threads = Gauge(
+threadpool_total_min_threads = meter.create_gauge(
     "synapse_threadpool_min_threads",
-    "Minimum number of threads configured in the threadpool",
-    labelnames=["name", SERVER_NAME_LABEL],
+    description="Minimum number of threads configured in the threadpool",
 )
 
-threadpool_total_max_threads = Gauge(
+threadpool_total_max_threads = meter.create_gauge(
     "synapse_threadpool_max_threads",
-    "Maximum number of threads configured in the threadpool",
-    labelnames=["name", SERVER_NAME_LABEL],
+    description="Maximum number of threads configured in the threadpool",
 )
 
 # Gauges for room counts
-known_rooms_gauge = Gauge(
+known_rooms_gauge = meter.create_gauge(
     "synapse_known_rooms_total",
-    "Total number of rooms",
-    labelnames=[SERVER_NAME_LABEL],
+    description="Total number of rooms",
 )
 
-locally_joined_rooms_gauge = Gauge(
+locally_joined_rooms_gauge = meter.create_gauge(
     "synapse_locally_joined_rooms_total",
-    "Total number of locally joined rooms",
-    labelnames=[SERVER_NAME_LABEL],
+    description="Total number of locally joined rooms",
 )
 
 
@@ -730,19 +720,37 @@ def register_threadpool(*, name: str, server_name: str, threadpool: ThreadPool) 
         threadpool: The threadpool to register metrics for.
     """
 
-    threadpool_total_min_threads.labels(
-        name=name, **{SERVER_NAME_LABEL: server_name}
-    ).set(threadpool.min)
-    threadpool_total_max_threads.labels(
-        name=name, **{SERVER_NAME_LABEL: server_name}
-    ).set(threadpool.max)
+    threadpool_total_min_threads.set(
+        threadpool.min, {"name": name, SERVER_NAME_LABEL: server_name}
+    )
+    threadpool_total_max_threads.set(
+        threadpool.max, {"name": name, SERVER_NAME_LABEL: server_name}
+    )
 
-    threadpool_total_threads.labels(
-        name=name, **{SERVER_NAME_LABEL: server_name}
-    ).set_function(lambda: len(threadpool.threads))
-    threadpool_total_working_threads.labels(
-        name=name, **{SERVER_NAME_LABEL: server_name}
-    ).set_function(lambda: len(threadpool.working))
+    meter.create_observable_gauge(
+        "synapse_threadpool_total_threads",
+        description="Total number of threads currently in the threadpool",
+        callbacks=[
+            lambda options: [
+                Observation(
+                    len(threadpool.threads),
+                    {"name": name, SERVER_NAME_LABEL: server_name},
+                )
+            ]
+        ],
+    )
+    meter.create_observable_gauge(
+        "synapse_threadpool_working_threads",
+        description="Number of threads currently working in the threadpool",
+        callbacks=[
+            lambda options: [
+                Observation(
+                    len(threadpool.working),
+                    {"name": name, SERVER_NAME_LABEL: server_name},
+                )
+            ]
+        ],
+    )
 
 
 class MetricsResource(Resource):
@@ -771,4 +779,5 @@ __all__ = [
     "GaugeBucketCollector",
     "MIN_TIME_BETWEEN_GCS",
     "install_gc_manager",
+    "meter",
 ]

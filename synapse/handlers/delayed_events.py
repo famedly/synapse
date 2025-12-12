@@ -170,9 +170,10 @@ class DelayedEventsHandler:
 
             await self._store.update_delayed_events_stream_pos(room_max_stream_ordering)
 
-            event_processing_positions.labels(
-                name="delayed_events", **{SERVER_NAME_LABEL: self.server_name}
-            ).set(room_max_stream_ordering)
+            event_processing_positions.set(
+                room_max_stream_ordering,
+                {"name": "delayed_events", SERVER_NAME_LABEL: self.server_name},
+            )
 
             return
 
@@ -220,9 +221,10 @@ class DelayedEventsHandler:
                 self._event_pos = max_pos
 
                 # Expose current event processing position to prometheus
-                event_processing_positions.labels(
-                    name="delayed_events", **{SERVER_NAME_LABEL: self.server_name}
-                ).set(max_pos)
+                event_processing_positions.set(
+                    max_pos,
+                    {"name": "delayed_events", SERVER_NAME_LABEL: self.server_name},
+                )
 
                 await self._store.update_delayed_events_stream_pos(max_pos)
 

@@ -264,9 +264,9 @@ class UserDirectoryHandler(StateDeltasHandler):
                 self.pos = max_pos
 
                 # Expose current event processing position to prometheus
-                synapse.metrics.event_processing_positions.labels(
-                    name="user_dir", **{SERVER_NAME_LABEL: self.server_name}
-                ).set(max_pos)
+                synapse.metrics.event_processing_positions.set(
+                    max_pos, {"name": "user_dir", SERVER_NAME_LABEL: self.server_name}
+                )
 
                 await self.store.update_user_directory_stream_pos(max_pos)
 

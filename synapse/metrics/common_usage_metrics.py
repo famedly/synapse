@@ -23,38 +23,33 @@ from typing import TYPE_CHECKING
 
 import attr
 
-from synapse.metrics import SERVER_NAME_LABEL
+from synapse.metrics import SERVER_NAME_LABEL, meter
 
 if TYPE_CHECKING:
     from synapse.server import HomeServer
 
-from prometheus_client import Gauge
 
 # Gauge to expose daily active users metrics
-current_dau_gauge = Gauge(
+current_dau_gauge = meter.create_gauge(
     "synapse_admin_daily_active_users",
-    "Current daily active users count",
-    labelnames=[SERVER_NAME_LABEL],
+    description="Current daily active users count",
 )
 
 # Gauge for users
-users_in_status_gauge = Gauge(
+users_in_status_gauge = meter.create_gauge(
     "synapse_user_count",
-    "Number of users in active, deactivated, suspended, and locked status",
-    ["status", SERVER_NAME_LABEL],
+    description="Number of users in active, deactivated, suspended, and locked status",
 )
 
-users_in_time_ranges_gauge = Gauge(
+users_in_time_ranges_gauge = meter.create_gauge(
     "synapse_active_users",
-    "Number of active users in time ranges in 24h, 7d, and 30d",
-    ["time_range", SERVER_NAME_LABEL],
+    description="Number of active users in time ranges in 24h, 7d, and 30d",
 )
 
 # We may want to add additional ranges in the future.
-retained_users_gauge = Gauge(
+retained_users_gauge = meter.create_gauge(
     "synapse_retained_users",
-    "Number of retained users in 30d",
-    ["time_range", SERVER_NAME_LABEL],
+    description="Number of retained users in 30d",
 )
 
 
@@ -142,9 +137,10 @@ class CommonUsageMetricsManager:
         """Update the Prometheus gauges."""
         metrics = await self._collect()
 
-        current_dau_gauge.labels(
-            **{SERVER_NAME_LABEL: self.server_name},
-        ).set(float(metrics.daily_active_users))
+        current_dau_gauge.set(
+            float(metrics.daily_active_users),
+            {SERVER_NAME_LABEL: self.server_name},
+        )
 
         time_range_to_metric = {
             "24h": metrics.daily_active_users,
@@ -152,9 +148,10 @@ class CommonUsageMetricsManager:
             "30d": metrics.monthly_active_users,
         }
         for time_range, _metric in time_range_to_metric.items():
-            users_in_time_ranges_gauge.labels(
-                time_range=time_range, **{SERVER_NAME_LABEL: self.server_name}
-            ).set(float(_metric))
+            users_in_time_ranges_gauge.set(
+                float(_metric),
+                {"time_range": time_range, SERVER_NAME_LABEL: self.server_name},
+            )
 
         status_to_metric = {
             "active": metrics.active_users,
@@ -163,10 +160,11 @@ class CommonUsageMetricsManager:
             "locked": metrics.locked_users,
         }
         for status, _metric in status_to_metric.items():
-            users_in_status_gauge.labels(
-                status=status, **{SERVER_NAME_LABEL: self.server_name}
-            ).set(float(_metric))
+            users_in_status_gauge.set(
+                float(_metric), {"status": status, SERVER_NAME_LABEL: self.server_name}
+            )
 
-        retained_users_gauge.labels(
-            time_range="30d", **{SERVER_NAME_LABEL: self.server_name}
-        ).set(float(metrics.monthly_retained_users))
+        retained_users_gauge.set(
+            float(metrics.monthly_retained_users),
+            {"time_range": "30d", SERVER_NAME_LABEL: self.server_name},
+        )

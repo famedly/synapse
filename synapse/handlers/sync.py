@@ -30,7 +30,6 @@ from typing import (
 )
 
 import attr
-from prometheus_client import Counter
 
 from synapse.api.constants import (
     AccountDataTypes,
@@ -54,7 +53,7 @@ from synapse.logging.opentracing import (
     start_active_span,
     trace,
 )
-from synapse.metrics import SERVER_NAME_LABEL
+from synapse.metrics import SERVER_NAME_LABEL, meter
 from synapse.storage.databases.main.event_push_actions import RoomNotifCounts
 from synapse.storage.databases.main.roommember import extract_heroes_from_room_summary
 from synapse.storage.databases.main.stream import PaginateFunction
@@ -91,12 +90,11 @@ logger = logging.getLogger(__name__)
 # "initial_sync", "full_state_sync" or "incremental_sync", `lazy_loaded` is
 # "true" or "false" depending on if the request asked for lazy loaded members or
 # not.
-non_empty_sync_counter = Counter(
+non_empty_sync_counter = meter.create_counter(
     "synapse_handlers_sync_nonempty_total",
-    "Count of non empty sync responses. type is initial_sync/full_state_sync"
+    description="Count of non empty sync responses. type is initial_sync/full_state_sync"
     "/incremental_sync. lazy_loaded indicates if lazy loaded members were "
     "enabled for that request.",
-    labelnames=["type", "lazy_loaded", SERVER_NAME_LABEL],
 )
 
 # Store the cache that tracks which lazy-loaded members have been sent to a given
@@ -491,11 +489,14 @@ class SyncHandler:
                 lazy_loaded = "true"
             else:
                 lazy_loaded = "false"
-            non_empty_sync_counter.labels(
-                type=sync_label,
-                lazy_loaded=lazy_loaded,
-                **{SERVER_NAME_LABEL: self.server_name},
-            ).inc()
+            non_empty_sync_counter.add(
+                1,
+                {
+                    "type": sync_label,
+                    "lazy_loaded": lazy_loaded,
+                    SERVER_NAME_LABEL: self.server_name,
+                },
+            )
 
         return result
 

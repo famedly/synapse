@@ -33,7 +33,7 @@ from typing import (
 
 import attr
 from immutabledict import immutabledict
-from prometheus_client import Counter, Histogram
+from opentelemetry.metrics import Counter
 
 from synapse.api.constants import EventTypes
 from synapse.api.room_versions import KNOWN_ROOM_VERSIONS, StateResolutionVersions
@@ -45,7 +45,7 @@ from synapse.events.snapshot import (
 )
 from synapse.logging.context import ContextResourceUsage
 from synapse.logging.opentracing import tag_args, trace
-from synapse.metrics import SERVER_NAME_LABEL
+from synapse.metrics import SERVER_NAME_LABEL, meter
 from synapse.replication.http.state import ReplicationUpdateCurrentStateRestServlet
 from synapse.state import v1, v2
 from synapse.storage.databases.main.event_federation import StateDifference
@@ -67,11 +67,10 @@ logger = logging.getLogger(__name__)
 metrics_logger = logging.getLogger("synapse.state.metrics")
 
 # Metrics for number of state groups involved in a resolution.
-state_groups_histogram = Histogram(
+state_groups_histogram = meter.create_histogram(
     "synapse_state_number_state_groups_in_resolution",
-    "Number of state groups used when performing a state resolution",
-    labelnames=[SERVER_NAME_LABEL],
-    buckets=(1, 2, 3, 5, 7, 10, 15, 20, 50, 100, 200, 500, "+Inf"),
+    description="Number of state groups used when performing a state resolution",
+    explicit_bucket_boundaries_advisory=[1, 2, 3, 5, 7, 10, 15, 20, 50, 100, 200, 500],
 )
 
 
@@ -600,28 +599,24 @@ class _StateResMetrics:
     db_events: int = 0
 
 
-_biggest_room_by_cpu_counter = Counter(
+_biggest_room_by_cpu_counter = meter.create_counter(
     "synapse_state_res_cpu_for_biggest_room_seconds",
-    "CPU time spent performing state resolution for the single most expensive "
+    description="CPU time spent performing state resolution for the single most expensive "
     "room for state resolution",
-    labelnames=[SERVER_NAME_LABEL],
 )
-_biggest_room_by_db_counter = Counter(
+_biggest_room_by_db_counter = meter.create_counter(
     "synapse_state_res_db_for_biggest_room_seconds",
-    "Database time spent performing state resolution for the single most "
+    description="Database time spent performing state resolution for the single most "
     "expensive room for state resolution",
-    labelnames=[SERVER_NAME_LABEL],
 )
 
-_cpu_times = Histogram(
+_cpu_times = meter.create_histogram(
     "synapse_state_res_cpu_for_all_rooms_seconds",
-    "CPU time (utime+stime) spent computing a single state resolution",
-    labelnames=[SERVER_NAME_LABEL],
+    description="CPU time (utime+stime) spent computing a single state resolution",
 )
-_db_times = Histogram(
+_db_times = meter.create_histogram(
     "synapse_state_res_db_for_all_rooms_seconds",
-    "Database time spent computing a single state resolution",
-    labelnames=[SERVER_NAME_LABEL],
+    description="Database time spent computing a single state resolution",
 )
 
 
@@ -739,9 +734,9 @@ class StateResolutionHandler:
                     f"State groups have been deleted: {shortstr(missing_state_groups)}"
                 )
 
-            state_groups_histogram.labels(
-                **{SERVER_NAME_LABEL: self.server_name}
-            ).observe(len(state_groups_ids))
+            state_groups_histogram.record(
+                len(state_groups_ids), {SERVER_NAME_LABEL: self.server_name}
+            )
 
             new_state = await self.resolve_events_with_store(
                 room_id,
@@ -828,11 +823,11 @@ class StateResolutionHandler:
         room_metrics.db_time += rusage.db_txn_duration_sec
         room_metrics.db_events += rusage.evt_db_fetch_count
 
-        _cpu_times.labels(**{SERVER_NAME_LABEL: self.server_name}).observe(
-            rusage.ru_utime + rusage.ru_stime
+        _cpu_times.record(
+            rusage.ru_utime + rusage.ru_stime, {SERVER_NAME_LABEL: self.server_name}
         )
-        _db_times.labels(**{SERVER_NAME_LABEL: self.server_name}).observe(
-            rusage.db_txn_duration_sec
+        _db_times.record(
+            rusage.db_txn_duration_sec, {SERVER_NAME_LABEL: self.server_name}
         )
 
     def _report_metrics(self) -> None:
@@ -890,8 +885,8 @@ class StateResolutionHandler:
 
         # report info on the single biggest to prometheus
         _, biggest_metrics = biggest[0]
-        prometheus_counter_metric.labels(**{SERVER_NAME_LABEL: self.server_name}).inc(
-            extract_key(biggest_metrics)
+        prometheus_counter_metric.add(
+            extract_key(biggest_metrics), {SERVER_NAME_LABEL: self.server_name}
         )
 
 

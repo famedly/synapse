@@ -22,6 +22,7 @@
 import collections
 import itertools
 import logging
+import time
 from http import HTTPStatus
 from typing import (
     TYPE_CHECKING,
@@ -31,8 +32,6 @@ from typing import (
     Optional,
     Sequence,
 )
-
-from prometheus_client import Counter, Histogram
 
 from synapse import event_auth
 from synapse.api.constants import (
@@ -76,7 +75,7 @@ from synapse.logging.opentracing import (
     tag_args,
     trace,
 )
-from synapse.metrics import SERVER_NAME_LABEL
+from synapse.metrics import SERVER_NAME_LABEL, meter
 from synapse.replication.http.federation import (
     ReplicationFederationSendEventsRestServlet,
 )
@@ -102,18 +101,16 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-soft_failed_event_counter = Counter(
+soft_failed_event_counter = meter.create_counter(
     "synapse_federation_soft_failed_events_total",
-    "Events received over federation that we marked as soft_failed",
-    labelnames=[SERVER_NAME_LABEL],
+    description="Events received over federation that we marked as soft_failed",
 )
 
 # Added to debug performance and track progress on optimizations
-backfill_processing_after_timer = Histogram(
+backfill_processing_after_timer = meter.create_histogram(
     "synapse_federation_backfill_processing_after_time_seconds",
-    "sec",
-    labelnames=[SERVER_NAME_LABEL],
-    buckets=(
+    unit="sec",
+    explicit_bucket_boundaries_advisory=[
         0.1,
         0.25,
         0.5,
@@ -134,8 +131,7 @@ backfill_processing_after_timer = Histogram(
         120.0,
         150.0,
         180.0,
-        "+Inf",
-    ),
+    ],
 )
 
 
@@ -731,23 +727,24 @@ class FederationEventHandler:
         if not events:
             return
 
-        with backfill_processing_after_timer.labels(
-            **{SERVER_NAME_LABEL: self.server_name}
-        ).time():
-            # if there are any events in the wrong room, the remote server is buggy and
-            # should not be trusted.
-            for ev in events:
-                if ev.room_id != room_id:
-                    raise InvalidResponseError(
-                        f"Remote server {dest} returned event {ev.event_id} which is in "
-                        f"room {ev.room_id}, when we were backfilling in {room_id}"
-                    )
+        start = time.perf_counter()
+        # if there are any events in the wrong room, the remote server is buggy and
+        # should not be trusted.
+        for ev in events:
+            if ev.room_id != room_id:
+                raise InvalidResponseError(
+                    f"Remote server {dest} returned event {ev.event_id} which is in "
+                    f"room {ev.room_id}, when we were backfilling in {room_id}"
+                )
 
-            await self._process_pulled_events(
-                dest,
-                events,
-                backfilled=True,
-            )
+        await self._process_pulled_events(
+            dest,
+            events,
+            backfilled=True,
+        )
+        backfill_processing_after_timer.record(
+            time.perf_counter() - start, {SERVER_NAME_LABEL: self.server_name}
+        )
 
     @trace
     async def _get_missing_events_for_pdu(
@@ -2095,9 +2092,7 @@ class FederationEventHandler:
                     "hs": origin,
                 },
             )
-            soft_failed_event_counter.labels(
-                **{SERVER_NAME_LABEL: self.server_name}
-            ).inc()
+            soft_failed_event_counter.add(1, {SERVER_NAME_LABEL: self.server_name})
             event.internal_metadata.soft_failed = True
 
     async def _load_or_fetch_auth_events_for_event(

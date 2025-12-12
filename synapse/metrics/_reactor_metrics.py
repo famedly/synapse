@@ -24,13 +24,15 @@ import time
 from selectors import SelectSelector, _PollLikeSelector  # type: ignore[attr-defined]
 from typing import Any, Callable, Iterable
 
-from prometheus_client import Histogram, Metric
+from prometheus_client import Metric
 from prometheus_client.core import REGISTRY, GaugeMetricFamily
 
 from twisted.internet import reactor, selectreactor
 from twisted.internet.asyncioreactor import AsyncioSelectorReactor
 
 from synapse.metrics._types import Collector
+
+from . import meter
 
 try:
     from selectors import KqueueSelector  # type: ignore[attr-defined]
@@ -63,10 +65,23 @@ logger = logging.getLogger(__name__)
 #
 
 # This is a process-level metric, so it does not have the `SERVER_NAME_LABEL`.
-tick_time = Histogram(  # type: ignore[missing-server-name-label]
+tick_time = meter.create_histogram(  # type: ignore[missing-server-name-label]
     "python_twisted_reactor_tick_time",
-    "Tick time of the Twisted reactor (sec)",
-    buckets=[0.001, 0.002, 0.005, 0.01, 0.025, 0.05, 0.1, 0.2, 0.5, 1, 2, 5],
+    description="Tick time of the Twisted reactor (sec)",
+    explicit_bucket_boundaries_advisory=[
+        0.001,
+        0.002,
+        0.005,
+        0.01,
+        0.025,
+        0.05,
+        0.1,
+        0.2,
+        0.5,
+        1,
+        2,
+        5,
+    ],
 )
 
 
@@ -81,7 +96,7 @@ class CallWrapper:
         # record the time since this was last called. This gives a good proxy for
         # how long it takes to run everything in the reactor - ie, how long anything
         # waiting for the next tick will have to wait.
-        tick_time.observe(time.time() - self.last_polled)
+        tick_time.record(time.time() - self.last_polled)
 
         ret = self._wrapped(*args, **kwargs)
 
