@@ -43,8 +43,12 @@ from typing import (
 )
 
 import attr
+from opentelemetry import metrics
+from opentelemetry.exporter.prometheus import PrometheusMetricReader
 from opentelemetry.metrics import get_meter_provider
 from opentelemetry.metrics._internal import Meter
+from opentelemetry.sdk.metrics._internal import MeterProvider
+from opentelemetry.sdk.resources import SERVICE_NAME, Resource as OtelResource
 from packaging.version import parse as parse_version
 from prometheus_client import (
     CollectorRegistry,
@@ -136,6 +140,10 @@ _set_prometheus_client_use_created_metrics(False)
 
 
 # Global meter for registering otel metrics
+resource = OtelResource(attributes={SERVICE_NAME: "synapse"})
+reader = PrometheusMetricReader()
+provider = MeterProvider(resource=resource, metric_readers=[reader])
+metrics.set_meter_provider(provider)
 meter: Meter = get_meter_provider().get_meter("synapse")
 
 # Import after meter is defined to avoid circular import
