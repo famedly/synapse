@@ -531,7 +531,7 @@ A response body like the following is returned:
 
 which is a list of room membership states for the given user. This endpoint can
 be used with both local and remote users, with the caveat that the homeserver will
-only be aware of the memberships for rooms one of its local users has joined.
+only be aware of the memberships for rooms that one of its local users has joined.
 
 Remote user memberships may also be out of date if all local users have since left
 a room. The homeserver will thus no longer receive membership updates about it.
