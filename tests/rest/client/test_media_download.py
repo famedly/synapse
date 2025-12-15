@@ -371,8 +371,54 @@ class RestrictedResourceDownloadTestCase(unittest.HomeserverTestCase):
         self.assertEqual(channel.code, expect_code)
         return channel.json_body
 
-    def test_local_media_download_attached_to_redacted_event(self) -> None:
-        """Test that can local media attached to image event can be restricted if redacted"""
+    def test_local_media_download_attached_to_redacted_event_normal(self) -> None:
+        """
+        Test that can local media attached to image event can be restricted if redacted
+        """
+        mxc_uri = self._create_restricted_media(self.creator)
+        room_id = self.helper.create_room_as(self.creator, tok=self.creator_tok)
+
+        # set room history_visibility to joined, otherwise it will be 'shared'
+        self.helper.send_state(
+            room_id=room_id,
+            event_type=EventTypes.RoomHistoryVisibility,
+            body={"history_visibility": HistoryVisibility.JOINED},
+            tok=self.creator_tok,
+        )
+
+        self.helper.join(room_id, self.other_user, tok=self.other_user_tok)
+
+        image = {
+            "body": "test_png_upload",
+            "info": {"h": 1, "mimetype": "image/png", "size": 67, "w": 1},
+            "msgtype": "m.image",
+            "url": str(mxc_uri),
+        }
+        json_body = self.helper.send_event(
+            room_id,
+            "m.room.message",
+            content=image,
+            tok=self.creator_tok,
+            expect_code=200,
+            attach_media_mxc=str(mxc_uri),
+        )
+        assert "event_id" in json_body
+
+        # Both users should be able to see the event
+        self.fetch_media(mxc_uri)
+        self.fetch_media(mxc_uri, access_token=self.other_user_tok)
+
+        # now, redact that event, and try and retrieve the media again
+        self._redact_event(self.creator_tok, room_id, json_body["event_id"])
+
+        self.fetch_media(mxc_uri, expected_code=404)
+        self.fetch_media(mxc_uri, access_token=self.other_user_tok, expected_code=404)
+
+    def test_local_media_download_attached_to_redacted_event_admin(self) -> None:
+        """
+        Test that can local media attached to image event can be restricted if redacted.
+        Specifically, test that a system administrator can bypass that if requested
+        """
         mxc_uri = self._create_restricted_media(self.creator)
         room_id = self.helper.create_room_as(self.creator, tok=self.creator_tok)
 
@@ -418,8 +464,115 @@ class RestrictedResourceDownloadTestCase(unittest.HomeserverTestCase):
         # Let's see if the bypass works
         self.fetch_media(mxc_uri, access_token=self.admin_tok, attempt_bypass=True)
 
-    def test_local_media_download_attached_to_redacted_state_event(self) -> None:
+    def test_local_media_download_attached_to_redacted_event_room_moderator(
+        self,
+    ) -> None:
+        """
+        Test that can local media attached to image event can be restricted if redacted.
+        Specifically, test that a room moderator can bypass that if requested and
+        empowered to
+        """
+        mxc_uri = self._create_restricted_media(self.creator)
+        room_id = self.helper.create_room_as(self.creator, tok=self.creator_tok)
+
+        # set room history_visibility to joined, otherwise it will be 'shared'
+        self.helper.send_state(
+            room_id=room_id,
+            event_type=EventTypes.RoomHistoryVisibility,
+            body={"history_visibility": HistoryVisibility.JOINED},
+            tok=self.creator_tok,
+        )
+
+        # Adjust power levels in the room. Redacting is defaulted to 50, so let's bump
+        # the other user. "user_default" dictates this was at "0"
+        pl = self.helper.get_state(
+            room_id, EventTypes.PowerLevels, tok=self.creator_tok
+        )
+        pl["users"][self.other_user] = 50
+        self.helper.send_state(
+            room_id, EventTypes.PowerLevels, body=pl, tok=self.creator_tok
+        )
+
+        self.helper.join(room_id, self.other_user, tok=self.other_user_tok)
+        self.helper.join(room_id, self.admin_user, tok=self.admin_tok)
+
+        image = {
+            "body": "test_png_upload",
+            "info": {"h": 1, "mimetype": "image/png", "size": 67, "w": 1},
+            "msgtype": "m.image",
+            "url": str(mxc_uri),
+        }
+        json_body = self.helper.send_event(
+            room_id,
+            "m.room.message",
+            content=image,
+            tok=self.creator_tok,
+            expect_code=200,
+            attach_media_mxc=str(mxc_uri),
+        )
+        assert "event_id" in json_body
+
+        # Both users should be able to see the event
+        self.fetch_media(mxc_uri)
+        self.fetch_media(mxc_uri, access_token=self.other_user_tok)
+        self.fetch_media(mxc_uri, access_token=self.admin_tok)
+
+        # now, redact that event, and try and retrieve the media again
+        self._redact_event(self.creator_tok, room_id, json_body["event_id"])
+
+        self.fetch_media(mxc_uri, expected_code=404)
+        self.fetch_media(mxc_uri, access_token=self.other_user_tok, expected_code=404)
+        self.fetch_media(mxc_uri, access_token=self.admin_tok, expected_code=404)
+
+        # Let's see if the bypass works
+        self.fetch_media(mxc_uri, access_token=self.other_user_tok, attempt_bypass=True)
+
+    def test_local_media_download_attached_to_redacted_state_event_normal(self) -> None:
         """Test that a simple membership avatar is viewable when appropriate"""
+        mxc_uri = self._create_restricted_media(self.creator)
+        room_id = self.helper.create_room_as(self.creator, tok=self.creator_tok)
+
+        # set room history_visibility to joined
+        self.helper.send_state(
+            room_id=room_id,
+            event_type=EventTypes.RoomHistoryVisibility,
+            body={"history_visibility": HistoryVisibility.JOINED},
+            tok=self.creator_tok,
+        )
+
+        self.helper.join(room_id, self.other_user, tok=self.other_user_tok)
+
+        membership_content = {
+            EventContentFields.MEMBERSHIP: Membership.JOIN,
+            "avatar_url": str(mxc_uri),
+        }
+        json_body = self.helper.send_state(
+            room_id,
+            EventTypes.Member,
+            body=membership_content,
+            tok=self.creator_tok,
+            expect_code=200,
+            state_key=self.creator,
+            attach_media_mxc=str(mxc_uri),
+        )
+        assert "event_id" in json_body
+
+        # Both users should be able to see the media
+        self.fetch_media(mxc_uri)
+        self.fetch_media(mxc_uri, access_token=self.other_user_tok)
+
+        # now, redact that event, and try and retrieve the media again
+        self._redact_event(self.creator_tok, room_id, json_body["event_id"])
+
+        self.fetch_media(mxc_uri, expected_code=404)
+        self.fetch_media(mxc_uri, access_token=self.other_user_tok, expected_code=404)
+
+    def test_local_media_download_attached_to_redacted_state_event_admin(self) -> None:
+        """
+        Test that a simple membership avatar is viewable when appropriate. Specifically,
+        test that a system administrator can bypass that if requested
+
+        """
         mxc_uri = self._create_restricted_media(self.creator)
         room_id = self.helper.create_room_as(self.creator, tok=self.creator_tok)
 
@@ -463,3 +616,65 @@ class RestrictedResourceDownloadTestCase(unittest.HomeserverTestCase):
 
         # Let's see if the bypass works
         self.fetch_media(mxc_uri, access_token=self.admin_tok, attempt_bypass=True)
+
+    def test_local_media_download_attached_to_redacted_state_event_room_moderator(
+        self,
+    ) -> None:
+        """
+        Test that a simple membership avatar is viewable when appropriate.
+        Specifically, test that a room moderator can bypass that if requested and
+        empowered to
+        """
+        mxc_uri = self._create_restricted_media(self.creator)
+        room_id = self.helper.create_room_as(self.creator, tok=self.creator_tok)
+
+        # set room history_visibility to joined
+        self.helper.send_state(
+            room_id=room_id,
+            event_type=EventTypes.RoomHistoryVisibility,
+            body={"history_visibility": HistoryVisibility.JOINED},
+            tok=self.creator_tok,
+        )
+
+        # Adjust power levels in the room. Redacting is defaulted to 50, so let's bump
+        # the other user. "user_default" dictates this was at "0"
+        pl = self.helper.get_state(
+            room_id, EventTypes.PowerLevels, tok=self.creator_tok
+        )
+        pl["users"][self.other_user] = 50
+        self.helper.send_state(
+            room_id, EventTypes.PowerLevels, body=pl, tok=self.creator_tok
+        )
+
+        self.helper.join(room_id, self.other_user, tok=self.other_user_tok)
+        self.helper.join(room_id, self.admin_user, tok=self.admin_tok)
+
+        membership_content = {
+            EventContentFields.MEMBERSHIP: Membership.JOIN,
+            "avatar_url": str(mxc_uri),
+        }
+        json_body = self.helper.send_state(
+            room_id,
+            EventTypes.Member,
+            body=membership_content,
+            tok=self.creator_tok,
+            expect_code=200,
+            state_key=self.creator,
+            attach_media_mxc=str(mxc_uri),
+        )
+        assert "event_id" in json_body
+
+        # Both users should be able to see the media
+        self.fetch_media(mxc_uri)
+        self.fetch_media(mxc_uri, access_token=self.other_user_tok)
+        self.fetch_media(mxc_uri, access_token=self.admin_tok)
+
+        # now, redact that event, and try and retrieve the media again
+        self._redact_event(self.creator_tok, room_id, json_body["event_id"])
+
+        self.fetch_media(mxc_uri, expected_code=404)
+        self.fetch_media(mxc_uri, access_token=self.other_user_tok, expected_code=404)
+        self.fetch_media(mxc_uri, access_token=self.admin_tok, expected_code=404)
+
+        # Let's see if the bypass works
+        self.fetch_media(mxc_uri, access_token=self.other_user_tok, attempt_bypass=True)
