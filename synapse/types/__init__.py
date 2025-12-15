@@ -23,6 +23,7 @@ import abc
 import logging
 import re
 import string
+from collections import namedtuple
 from enum import Enum
 from typing import (
     TYPE_CHECKING,
@@ -1530,3 +1531,8 @@ class ScheduledTask:
     result: Optional[JsonMapping]
     # Optional error that should be assigned a value when the status is FAILED
     error: Optional[str]
+
+
+RedactedMediaBypass = namedtuple(
+    "RedactedMediaBypass", ["requesting_bypass", "is_admin"]
+)
