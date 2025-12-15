@@ -241,6 +241,7 @@ class AbstractMediaRepository:
         requester: Optional[Requester] = None,
         allow_authenticated: bool = True,
         federation: bool = False,
+        allow_redacted_media: bool = False,
     ) -> None:
         raise NotImplementedError(
             "Sorry Mario, your MediaRepository related function is in another castle"
@@ -312,7 +313,10 @@ class AbstractMediaRepository:
         return attachments
 
     async def is_media_visible(
-        self, requesting_user: UserID, media_info_object: Union[LocalMedia, RemoteMedia]
+        self,
+        requesting_user: UserID,
+        media_info_object: Union[LocalMedia, RemoteMedia],
+        allow_redacted_media: bool = False,
     ) -> None:
         """
         Verify that media requested for download should be visible to the user making
@@ -349,11 +353,10 @@ class AbstractMediaRepository:
 
         if attached_event_id:
             event_base = await self.store.get_event(attached_event_id)
-            if event_base.internal_metadata.is_redacted():
-                # If the event the media is attached to is redacted, don't server that
+            if event_base.internal_metadata.is_redacted() and not allow_redacted_media:
+                # If the event the media is attached to is redacted, don't serve that
                 # media to the user. Moderators and admins should probably be excluded
                 # from this restriction
-                # XXX: better error code?
                 raise NotFoundError()
 
             if event_base.is_state():
@@ -951,7 +954,11 @@ class MediaRepository(AbstractMediaRepository):
         )
 
     async def get_local_media_info(
-        self, request: SynapseRequest, media_id: str, max_timeout_ms: int
+        self,
+        request: SynapseRequest,
+        media_id: str,
+        max_timeout_ms: int,
+        allow_redacted_media: bool = False,
     ) -> Optional[LocalMedia]:
         """Gets the info dictionary for given local media ID. If the media has
         not been uploaded yet, this function will wait up to ``max_timeout_ms``
@@ -963,6 +970,7 @@ class MediaRepository(AbstractMediaRepository):
                 the file_id for local content.)
             max_timeout_ms: the maximum number of milliseconds to wait for the
                 media to be uploaded.
+            allow_redacted_media:
 
         Returns:
             Either the info dictionary for the given local media ID or
@@ -986,7 +994,11 @@ class MediaRepository(AbstractMediaRepository):
             # The file has been uploaded, so stop looping
             if media_info.media_length is not None:
                 if isinstance(request.requester, Requester):
-                    await self.is_media_visible(request.requester.user, media_info)
+                    await self.is_media_visible(
+                        request.requester.user,
+                        media_info,
+                        allow_redacted_media,
+                    )
                 return media_info
 
             # Check if the media ID has expired and still hasn't been uploaded to.
@@ -1015,6 +1027,7 @@ class MediaRepository(AbstractMediaRepository):
         requester: Optional[Requester] = None,
         allow_authenticated: bool = True,
         federation: bool = False,
+        allow_redacted_media: bool = False,
     ) -> None:
         """Responds to requests for local media, if exists, or returns 404.
 
@@ -1026,6 +1039,7 @@ class MediaRepository(AbstractMediaRepository):
                 the filename in the Content-Disposition header of the response.
             max_timeout_ms: the maximum number of milliseconds to wait for the
                 media to be uploaded.
+            allow_redacted_media:
             requester: The user making the request, to verify restricted media. Only
                 used for local users, not over federation
             allow_authenticated: whether media marked as authenticated may be served to this request
@@ -1034,7 +1048,9 @@ class MediaRepository(AbstractMediaRepository):
         Returns:
             Resolves once a response has successfully been written to request
         """
-        media_info = await self.get_local_media_info(request, media_id, max_timeout_ms)
+        media_info = await self.get_local_media_info(
+            request, media_id, max_timeout_ms, allow_redacted_media
+        )
         if not media_info:
             return
 
@@ -1049,7 +1065,9 @@ class MediaRepository(AbstractMediaRepository):
             if requester is not None:
                 # Only check media visibility if this is for a local request. This will
                 # raise directly back to the client if not visible
-                await self.is_media_visible(requester.user, media_info)
+                await self.is_media_visible(
+                    requester.user, media_info, allow_redacted_media
+                )
             restrictions = await self.validate_media_restriction(
                 request, media_info, None, federation
             )
@@ -1103,6 +1121,7 @@ class MediaRepository(AbstractMediaRepository):
         use_federation_endpoint: bool,
         requester: Optional[Requester] = None,
         allow_authenticated: bool = True,
+        allow_redacted_media: bool = False,
     ) -> None:
         """Respond to requests for remote media.
 
@@ -1121,6 +1140,7 @@ class MediaRepository(AbstractMediaRepository):
                 used for local users, not over federation
             allow_authenticated: whether media marked as authenticated may be served to this
                 request
+            allow_redacted_media:
 
         Returns:
             Resolves once a response has successfully been written to request
@@ -1153,7 +1173,8 @@ class MediaRepository(AbstractMediaRepository):
                 ip_address,
                 use_federation_endpoint,
                 allow_authenticated,
-                requester,
+                allow_redacted_media=allow_redacted_media,
+                requester=requester,
             )
 
         # Check if the media is cached on the client, if so return 304. We need
@@ -1189,6 +1210,7 @@ class MediaRepository(AbstractMediaRepository):
         use_federation: bool,
         allow_authenticated: bool,
         requester: Optional[Requester] = None,
+        allow_redacted_media: bool = False,
     ) -> RemoteMedia:
         """Gets the media info associated with the remote file, downloading
         if necessary.
@@ -1205,6 +1227,7 @@ class MediaRepository(AbstractMediaRepository):
                 request
             requester: The user making the request, to verify restricted media. Only
                 used for local users, not over federation
+            allow_redacted_media:
 
         Returns:
             The media info of the file
@@ -1227,7 +1250,8 @@ class MediaRepository(AbstractMediaRepository):
                 ip_address,
                 use_federation,
                 allow_authenticated,
-                requester,
+                allow_redacted_media=allow_redacted_media,
+                requester=requester,
             )
 
         # Ensure we actually use the responder so that it releases resources
@@ -1246,6 +1270,7 @@ class MediaRepository(AbstractMediaRepository):
         ip_address: str,
         use_federation_endpoint: bool,
         allow_authenticated: bool,
+        allow_redacted_media: bool = False,
         requester: Optional[Requester] = None,
     ) -> Tuple[Optional[Responder], RemoteMedia]:
         """Looks for media in local cache, if not there then attempt to
@@ -1263,6 +1288,7 @@ class MediaRepository(AbstractMediaRepository):
             use_federation_endpoint: whether to request the remote media over the new federation
             /download endpoint
             allow_authenticated:
+            allow_redacted_media:
             requester: The user making the request, to verify restricted media. Only
                 used for local users, not over federation
 
@@ -1284,7 +1310,9 @@ class MediaRepository(AbstractMediaRepository):
             # retrieved from the remote.
             if self.msc3911_config.enabled and requester is not None:
                 # This will raise directly back to the client if not visible
-                await self.is_media_visible(requester.user, media_info)
+                await self.is_media_visible(
+                    requester.user, media_info, allow_redacted_media
+                )
 
             # file_id is the ID we use to track the file locally. If we've already
             # seen the file then reuse the existing ID, otherwise generate a new
@@ -1344,7 +1372,9 @@ class MediaRepository(AbstractMediaRepository):
             and requester is not None
         ):
             # This will raise directly back to the client if not visible
-            await self.is_media_visible(requester.user, media_info)
+            await self.is_media_visible(
+                requester.user, media_info, allow_redacted_media
+            )
 
         file_id = media_info.filesystem_id
 

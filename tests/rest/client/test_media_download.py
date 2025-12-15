@@ -72,6 +72,8 @@ class RestrictedResourceDownloadTestCase(unittest.HomeserverTestCase):
             "profile_test_user", "testpass"
         )
         self.other_profile_test_user_tok = self.login("profile_test_user", "testpass")
+        self.admin_user = self.register_user("bossman", "testpass", admin=True)
+        self.admin_tok = self.login("bossman", "testpass")
 
     def _create_restricted_media(self, user: str) -> MXCUri:
         mxc_uri = self.get_success(
@@ -91,17 +93,22 @@ class RestrictedResourceDownloadTestCase(unittest.HomeserverTestCase):
         mxc_uri: MXCUri,
         access_token: Optional[str] = None,
         expected_code: int = 200,
+        attempt_bypass: bool = False,
     ) -> None:
         """
         Test retrieving the media. We do not care about the content of the media, just
         that the response is correct
         """
+        path = f"/_matrix/client/v1/media/download/{mxc_uri.server_name}/{mxc_uri.media_id}"
+        if attempt_bypass:
+            path += "?allow_redacted_media=true"
         channel = self.make_request(
             "GET",
-            f"/_matrix/client/v1/media/download/{mxc_uri.server_name}/{mxc_uri.media_id}",
+            path,
             access_token=access_token or self.creator_tok,
+            shorthand=False,
         )
-        assert channel.code == expected_code, channel.code
+        assert channel.code == expected_code, channel.json_body
 
     def test_local_media_download_unrestricted(self) -> None:
         """Test that unrestricted media is not affected"""
@@ -377,7 +384,8 @@ class RestrictedResourceDownloadTestCase(unittest.HomeserverTestCase):
             tok=self.creator_tok,
         )
 
-        _ = self.helper.join(room_id, self.other_user, tok=self.other_user_tok)
+        self.helper.join(room_id, self.other_user, tok=self.other_user_tok)
+        self.helper.join(room_id, self.admin_user, tok=self.admin_tok)
 
         image = {
             "body": "test_png_upload",
@@ -398,12 +406,17 @@ class RestrictedResourceDownloadTestCase(unittest.HomeserverTestCase):
         # Both users should be able to see the event
         self.fetch_media(mxc_uri)
         self.fetch_media(mxc_uri, access_token=self.other_user_tok)
+        self.fetch_media(mxc_uri, access_token=self.admin_tok)
 
         # now, redact that event, and try and retrieve the media again
         self._redact_event(self.creator_tok, room_id, json_body["event_id"])
 
         self.fetch_media(mxc_uri, expected_code=404)
         self.fetch_media(mxc_uri, access_token=self.other_user_tok, expected_code=404)
+        self.fetch_media(mxc_uri, access_token=self.admin_tok, expected_code=404)
+
+        # Let's see if the bypass works
+        self.fetch_media(mxc_uri, access_token=self.admin_tok, attempt_bypass=True)
 
     def test_local_media_download_attached_to_redacted_state_event(self) -> None:
         """Test that a simple membership avatar is viewable when appropriate"""
@@ -418,7 +431,8 @@ class RestrictedResourceDownloadTestCase(unittest.HomeserverTestCase):
             tok=self.creator_tok,
         )
 
-        _ = self.helper.join(room_id, self.other_user, tok=self.other_user_tok)
+        self.helper.join(room_id, self.other_user, tok=self.other_user_tok)
+        self.helper.join(room_id, self.admin_user, tok=self.admin_tok)
 
         membership_content = {
             EventContentFields.MEMBERSHIP: Membership.JOIN,
@@ -438,9 +452,14 @@ class RestrictedResourceDownloadTestCase(unittest.HomeserverTestCase):
         # Both users should be able to see the media
         self.fetch_media(mxc_uri)
         self.fetch_media(mxc_uri, access_token=self.other_user_tok)
+        self.fetch_media(mxc_uri, access_token=self.admin_tok)
 
         # now, redact that event, and try and retrieve the media again
         self._redact_event(self.creator_tok, room_id, json_body["event_id"])
 
         self.fetch_media(mxc_uri, expected_code=404)
         self.fetch_media(mxc_uri, access_token=self.other_user_tok, expected_code=404)
+        self.fetch_media(mxc_uri, access_token=self.admin_tok, expected_code=404)
+
+        # Let's see if the bypass works
+        self.fetch_media(mxc_uri, access_token=self.admin_tok, attempt_bypass=True)
