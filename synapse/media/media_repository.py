@@ -76,7 +76,7 @@ from synapse.storage.databases.main.media_repository import (
     MediaRestrictions,
     RemoteMedia,
 )
-from synapse.types import JsonDict, Requester, UserID
+from synapse.types import JsonDict, RedactedMediaBypass, Requester, UserID
 from synapse.types.state import StateFilter
 from synapse.util import json_decoder
 from synapse.util.async_helpers import Linearizer
@@ -316,7 +316,7 @@ class AbstractMediaRepository:
         self,
         requesting_user: UserID,
         media_info_object: Union[LocalMedia, RemoteMedia],
-        allow_redacted_media: bool = False,
+        redacted_media_bypass_config: Optional[RedactedMediaBypass] = None,
     ) -> None:
         """
         Verify that media requested for download should be visible to the user making
@@ -353,11 +353,15 @@ class AbstractMediaRepository:
 
         if attached_event_id:
             event_base = await self.store.get_event(attached_event_id)
-            if event_base.internal_metadata.is_redacted() and not allow_redacted_media:
-                # If the event the media is attached to is redacted, don't serve that
-                # media to the user. Moderators and admins should probably be excluded
-                # from this restriction
-                raise NotFoundError()
+            if event_base.internal_metadata.is_redacted():
+                if (
+                    not redacted_media_bypass_config
+                    or not redacted_media_bypass_config.requesting_bypass
+                ):
+                    # If the event the media is attached to is redacted, don't serve that
+                    # media to the user. Moderators and admins should probably be excluded
+                    # from this restriction
+                    raise NotFoundError()
 
             if event_base.is_state():
                 # The standard event visibility utility, filter_events_for_client(),
@@ -994,10 +998,16 @@ class MediaRepository(AbstractMediaRepository):
             # The file has been uploaded, so stop looping
             if media_info.media_length is not None:
                 if isinstance(request.requester, Requester):
+                    # Only check media visibility if this is for a local request
+                    is_admin = await self.auth.is_server_admin(request.requester)
+                    redacted_media_bypass_config = RedactedMediaBypass(
+                        allow_redacted_media, is_admin
+                    )
+
                     await self.is_media_visible(
                         request.requester.user,
                         media_info,
-                        allow_redacted_media,
+                        redacted_media_bypass_config,
                     )
                 return media_info
 
@@ -1303,9 +1313,13 @@ class MediaRepository(AbstractMediaRepository):
             # exists in the local database and again further down for after it was
             # retrieved from the remote.
             if self.msc3911_config.enabled and requester is not None:
+                is_admin = await self.auth.is_server_admin(requester)
+                redacted_media_bypass_config = RedactedMediaBypass(
+                    allow_redacted_media, is_admin
+                )
                 # This will raise directly back to the client if not visible
                 await self.is_media_visible(
-                    requester.user, media_info, allow_redacted_media
+                    requester.user, media_info, redacted_media_bypass_config
                 )
 
             # file_id is the ID we use to track the file locally. If we've already
@@ -1365,9 +1379,13 @@ class MediaRepository(AbstractMediaRepository):
             and self.msc3911_config.enabled
             and requester is not None
         ):
+            is_admin = await self.auth.is_server_admin(requester)
+            redacted_media_bypass_config = RedactedMediaBypass(
+                allow_redacted_media, is_admin
+            )
             # This will raise directly back to the client if not visible
             await self.is_media_visible(
-                requester.user, media_info, allow_redacted_media
+                requester.user, media_info, redacted_media_bypass_config
             )
 
         file_id = media_info.filesystem_id
