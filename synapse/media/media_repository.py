@@ -33,6 +33,7 @@ from matrix_common.types.mxc_uri import MXCUri
 import twisted.web.http
 from twisted.internet.defer import Deferred
 
+from synapse import event_auth
 from synapse.api.constants import EventTypes, HistoryVisibility, Membership
 from synapse.api.errors import (
     Codes,
@@ -71,6 +72,7 @@ from synapse.media.thumbnailer import Thumbnailer, ThumbnailError
 from synapse.media.url_previewer import UrlPreviewer
 from synapse.metrics.background_process_metrics import run_as_background_process
 from synapse.replication.http.media import ReplicationCopyMediaServlet
+from synapse.state import CREATE_KEY, POWER_KEY
 from synapse.storage.databases.main.media_repository import (
     LocalMedia,
     MediaRestrictions,
@@ -111,6 +113,7 @@ class AbstractMediaRepository:
         self.clock = hs.get_clock()
         self.server_name = hs.hostname
         self.store = hs.get_datastores().main
+        self._storage_controllers = hs.get_storage_controllers()
         self._is_mine_server_name = hs.is_mine_server_name
         self.msc3911_config = hs.config.experimental.msc3911
 
@@ -362,6 +365,32 @@ class AbstractMediaRepository:
                     # media to the user. Moderators and admins should probably be excluded
                     # from this restriction
                     raise NotFoundError()
+
+                # Which means a bypass was requested
+                if not redacted_media_bypass_config.is_admin:
+                    # Lifted this directly from RoomEventServlet for msc2815
+                    auth_events = (
+                        await self._storage_controllers.state.get_current_state(
+                            event_base.room_id,
+                            StateFilter.from_types(
+                                [
+                                    POWER_KEY,
+                                    CREATE_KEY,
+                                ]
+                            ),
+                        )
+                    )
+
+                    redact_level = event_auth.get_named_level(auth_events, "redact", 50)
+                    user_level = event_auth.get_user_power_level(
+                        requesting_user.to_string(), auth_events
+                    )
+                    if user_level < redact_level:
+                        raise SynapseError(
+                            403,
+                            "You don't have permission to view redacted events in this room.",
+                            errcode=Codes.FORBIDDEN,
+                        )
 
             if event_base.is_state():
                 # The standard event visibility utility, filter_events_for_client(),
