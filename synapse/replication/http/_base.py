@@ -25,7 +25,7 @@ import urllib.parse
 from inspect import signature
 from typing import TYPE_CHECKING, Any, Awaitable, Callable, ClassVar
 
-from prometheus_client import Counter, Gauge
+from prometheus_client import Gauge
 
 from twisted.internet.error import ConnectError, DNSLookupError
 from twisted.web.server import Request
@@ -38,7 +38,7 @@ from synapse.http.servlet import parse_json_object_from_request
 from synapse.http.site import SynapseRequest
 from synapse.logging import opentracing
 from synapse.logging.opentracing import trace_with_opname
-from synapse.metrics import SERVER_NAME_LABEL
+from synapse.metrics import SERVER_NAME_LABEL, SynapseCounter
 from synapse.types import JsonDict
 from synapse.util.caches.response_cache import ResponseCache
 from synapse.util.cancellation import is_function_cancellable
@@ -55,7 +55,7 @@ _pending_outgoing_requests = Gauge(
     labelnames=["name", SERVER_NAME_LABEL],
 )
 
-_outgoing_request_counter = Counter(
+_outgoing_request_counter = SynapseCounter(
     "synapse_outgoing_replication_requests",
     "Number of outgoing replication requests, by replication method name and result",
     labelnames=["name", "code", SERVER_NAME_LABEL],

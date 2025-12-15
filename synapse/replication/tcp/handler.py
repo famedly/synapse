@@ -32,11 +32,9 @@ from typing import (
     Union,
 )
 
-from prometheus_client import Counter
-
 from twisted.internet.protocol import ReconnectingClientFactory
 
-from synapse.metrics import SERVER_NAME_LABEL, LaterGauge
+from synapse.metrics import SERVER_NAME_LABEL, LaterGauge, SynapseCounter
 from synapse.replication.tcp.commands import (
     ClearUserSyncsCommand,
     Command,
@@ -79,25 +77,25 @@ logger = logging.getLogger(__name__)
 
 
 # number of updates received for each RDATA stream
-inbound_rdata_count = Counter(
+inbound_rdata_count = SynapseCounter(
     "synapse_replication_tcp_protocol_inbound_rdata_count",
     "",
     labelnames=["stream_name", SERVER_NAME_LABEL],
 )
-user_sync_counter = Counter(
+user_sync_counter = SynapseCounter(
     "synapse_replication_tcp_resource_user_sync", "", labelnames=[SERVER_NAME_LABEL]
 )
-federation_ack_counter = Counter(
+federation_ack_counter = SynapseCounter(
     "synapse_replication_tcp_resource_federation_ack",
     "",
     labelnames=[SERVER_NAME_LABEL],
 )
 # FIXME: Unused metric, remove if not needed.
-remove_pusher_counter = Counter(
+remove_pusher_counter = SynapseCounter(
     "synapse_replication_tcp_resource_remove_pusher", "", labelnames=[SERVER_NAME_LABEL]
 )
 
-user_ip_cache_counter = Counter(
+user_ip_cache_counter = SynapseCounter(
     "synapse_replication_tcp_resource_user_ip_cache", "", labelnames=[SERVER_NAME_LABEL]
 )
 

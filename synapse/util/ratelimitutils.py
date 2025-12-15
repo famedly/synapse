@@ -35,8 +35,6 @@ from typing import (
 )
 from weakref import WeakSet
 
-from prometheus_client.core import Counter
-
 from twisted.internet import defer
 
 from synapse.api.errors import LimitExceededError
@@ -47,7 +45,7 @@ from synapse.logging.context import (
     run_in_background,
 )
 from synapse.logging.opentracing import start_active_span
-from synapse.metrics import SERVER_NAME_LABEL, Histogram, LaterGauge
+from synapse.metrics import SERVER_NAME_LABEL, Histogram, LaterGauge, SynapseCounter
 from synapse.util.clock import Clock
 
 if typing.TYPE_CHECKING:
@@ -57,12 +55,12 @@ logger = logging.getLogger(__name__)
 
 
 # Track how much the ratelimiter is affecting requests
-rate_limit_sleep_counter = Counter(
+rate_limit_sleep_counter = SynapseCounter(
     "synapse_rate_limit_sleep",
     "Number of requests slept by the rate limiter",
     labelnames=["rate_limiter_name", SERVER_NAME_LABEL],
 )
-rate_limit_reject_counter = Counter(
+rate_limit_reject_counter = SynapseCounter(
     "synapse_rate_limit_reject",
     "Number of requests rejected by the rate limiter",
     labelnames=["rate_limiter_name", SERVER_NAME_LABEL],

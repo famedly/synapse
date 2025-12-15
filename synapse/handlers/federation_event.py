@@ -32,7 +32,7 @@ from typing import (
     Sequence,
 )
 
-from prometheus_client import Counter, Histogram
+from prometheus_client import Histogram
 
 from synapse import event_auth
 from synapse.api.constants import (
@@ -76,7 +76,7 @@ from synapse.logging.opentracing import (
     tag_args,
     trace,
 )
-from synapse.metrics import SERVER_NAME_LABEL
+from synapse.metrics import SERVER_NAME_LABEL, SynapseCounter
 from synapse.replication.http.federation import (
     ReplicationFederationSendEventsRestServlet,
 )
@@ -102,7 +102,7 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-soft_failed_event_counter = Counter(
+soft_failed_event_counter = SynapseCounter(
     "synapse_federation_soft_failed_events_total",
     "Events received over federation that we marked as soft_failed",
     labelnames=[SERVER_NAME_LABEL],

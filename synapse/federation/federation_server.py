@@ -32,7 +32,7 @@ from typing import (
     Union,
 )
 
-from prometheus_client import Counter, Gauge, Histogram
+from prometheus_client import Gauge, Histogram
 
 from twisted.python import failure
 
@@ -79,7 +79,7 @@ from synapse.logging.opentracing import (
     tag_args,
     trace,
 )
-from synapse.metrics import SERVER_NAME_LABEL
+from synapse.metrics import SERVER_NAME_LABEL, SynapseCounter
 from synapse.metrics.background_process_metrics import wrap_as_background_process
 from synapse.replication.http.federation import (
     ReplicationFederationSendEduRestServlet,
@@ -102,15 +102,15 @@ TRANSACTION_CONCURRENCY_LIMIT = 10
 
 logger = logging.getLogger(__name__)
 
-received_pdus_counter = Counter(
+received_pdus_counter = SynapseCounter(
     "synapse_federation_server_received_pdus", "", labelnames=[SERVER_NAME_LABEL]
 )
 
-received_edus_counter = Counter(
+received_edus_counter = SynapseCounter(
     "synapse_federation_server_received_edus", "", labelnames=[SERVER_NAME_LABEL]
 )
 
-received_queries_counter = Counter(
+received_queries_counter = SynapseCounter(
     "synapse_federation_server_received_queries",
     "",
     labelnames=["type", SERVER_NAME_LABEL],

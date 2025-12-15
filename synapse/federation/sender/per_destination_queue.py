@@ -26,7 +26,6 @@ from types import TracebackType
 from typing import TYPE_CHECKING, Hashable, Iterable, Optional
 
 import attr
-from prometheus_client import Counter
 
 from twisted.internet import defer
 
@@ -42,7 +41,7 @@ from synapse.federation.units import Edu
 from synapse.handlers.presence import format_user_presence_state
 from synapse.logging import issue9533_logger
 from synapse.logging.opentracing import SynapseTags, set_tag
-from synapse.metrics import SERVER_NAME_LABEL, sent_transactions_counter
+from synapse.metrics import SERVER_NAME_LABEL, SynapseCounter, sent_transactions_counter
 from synapse.types import JsonDict, ReadReceipt
 from synapse.util.retryutils import NotRetryingDestination, get_retry_limiter
 from synapse.visibility import filter_events_for_server
@@ -56,13 +55,13 @@ MAX_EDUS_PER_TRANSACTION = 100
 logger = logging.getLogger(__name__)
 
 
-sent_edus_counter = Counter(
+sent_edus_counter = SynapseCounter(
     "synapse_federation_client_sent_edus",
     "Total number of EDUs successfully sent",
     labelnames=[SERVER_NAME_LABEL],
 )
 
-sent_edus_by_type = Counter(
+sent_edus_by_type = SynapseCounter(
     "synapse_federation_client_sent_edus_by_type",
     "Number of sent EDUs successfully sent, by event type",
     labelnames=["type", SERVER_NAME_LABEL],

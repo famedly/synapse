@@ -30,7 +30,6 @@ import struct
 from inspect import isawaitable
 from typing import TYPE_CHECKING, Any, Collection, Optional
 
-from prometheus_client import Counter
 from zope.interface import Interface, implementer
 
 from twisted.internet import task
@@ -39,7 +38,7 @@ from twisted.protocols.basic import LineOnlyReceiver
 from twisted.python.failure import Failure
 
 from synapse.logging.context import PreserveLoggingContext
-from synapse.metrics import SERVER_NAME_LABEL, LaterGauge
+from synapse.metrics import SERVER_NAME_LABEL, LaterGauge, SynapseCounter
 from synapse.metrics.background_process_metrics import (
     BackgroundProcessLoggingContext,
 )
@@ -62,19 +61,19 @@ if TYPE_CHECKING:
     from synapse.server import HomeServer
 
 
-connection_close_counter = Counter(
+connection_close_counter = SynapseCounter(
     "synapse_replication_tcp_protocol_close_reason",
     "",
     labelnames=["reason_type", SERVER_NAME_LABEL],
 )
 
-tcp_inbound_commands_counter = Counter(
+tcp_inbound_commands_counter = SynapseCounter(
     "synapse_replication_tcp_protocol_inbound_commands",
     "Number of commands received from replication, by command and name of process connected to",
     labelnames=["command", "name", SERVER_NAME_LABEL],
 )
 
-tcp_outbound_commands_counter = Counter(
+tcp_outbound_commands_counter = SynapseCounter(
     "synapse_replication_tcp_protocol_outbound_commands",
     "Number of commands sent to replication, by command and name of process connected to",
     labelnames=["command", "name", SERVER_NAME_LABEL],

@@ -49,7 +49,6 @@ from opentelemetry.sdk.resources import SERVICE_NAME, Resource as OtelResource
 from packaging.version import parse as parse_version
 from prometheus_client import (
     CollectorRegistry,
-    Counter,
     Gauge,
     Histogram,
     Metric,
@@ -59,6 +58,7 @@ from prometheus_client.core import (
     REGISTRY,
     GaugeHistogramMetricFamily,
     GaugeMetricFamily,
+    Sample,
 )
 from typing_extensions import Self
 
@@ -208,6 +208,8 @@ class SynapseCounter:
         # Here is where we grab the global meter to create a FauxCounter
         self._counter = meter.create_counter(name, unit=unit, description=documentation)
         self._name = _build_full_name(self._type, name, namespace, subsystem, unit)
+        self._documentation = documentation
+        self._unit = unit
 
         # prom validates these, should we do that?
         # labelnames provide a simple way to register that a given set of kwargs call
@@ -215,6 +217,7 @@ class SynapseCounter:
         self._labelnames = tuple(labelnames or ())
 
         self._labelvalues = tuple(_labelvalues or ())
+        self._metrics = {}  # type: ignore[var-annotated]
 
         self._current_attributes = ()
         self._lock = threading.Lock()
@@ -229,12 +232,67 @@ class SynapseCounter:
                 raise ValueError("Incorrect label count")
             labelvalues = tuple(str(lv) for lv in labelvalues)
 
-        # The lock needs to block, which means it will wait until it is released for the
-        # next call. May need a timeout later, dunno
-        if self._lock.acquire_lock():
+        with self._lock:
             self._current_attributes = labelvalues
 
         return self
+
+    def _child_samples(self) -> Iterable[Sample]:  # pragma: no cover
+        raise NotImplementedError("_child_samples() must be implemented by %r" % self)
+
+    def _is_parent(self):  # type: ignore[no-untyped-def]
+        return self._labelnames and not self._labelvalues
+
+    def _samples(self) -> Iterable[Sample]:
+        if self._is_parent():
+            return self._multi_samples()
+        else:
+            return self._child_samples()
+
+    def _multi_samples(self) -> Iterable[Sample]:
+        with self._lock:
+            metrics = self._metrics.copy()
+        for labels, metric in metrics.items():
+            series_labels = list(zip(self._labelnames, labels))
+            for (
+                suffix,
+                sample_labels,
+                value,
+                timestamp,
+                exemplar,
+                native_histogram_value,
+            ) in metric._samples():
+                yield Sample(
+                    suffix,
+                    dict(series_labels + list(sample_labels.items())),
+                    value,
+                    timestamp,
+                    exemplar,
+                    native_histogram_value,
+                )
+
+    def _get_metric(self):  # type: ignore[no-untyped-def]
+        return Metric(self._name, self._documentation, self._type, self._unit)
+
+    def collect(self) -> Iterable[Metric]:
+        metric = self._get_metric()
+        for (
+            suffix,
+            labels,
+            value,
+            timestamp,
+            exemplar,
+            native_histogram_value,
+        ) in self._samples():
+            metric.add_sample(
+                self._name + suffix,
+                labels,
+                value,
+                timestamp,
+                exemplar,
+                native_histogram_value,
+            )
+        return [metric]
 
     def inc(self, amount: float = 1.0) -> None:
         # Need to verify what happens with Counters that do not have labels as children,
@@ -696,21 +754,21 @@ REGISTRY.register(CPUMetrics())  # type: ignore[missing-server-name-label]
 # Federation Metrics
 #
 
-sent_transactions_counter = Counter(
+sent_transactions_counter = SynapseCounter(
     "synapse_federation_client_sent_transactions", "", labelnames=[SERVER_NAME_LABEL]
 )
 
-events_processed_counter = Counter(
+events_processed_counter = SynapseCounter(
     "synapse_federation_client_events_processed", "", labelnames=[SERVER_NAME_LABEL]
 )
 
-event_processing_loop_counter = Counter(
+event_processing_loop_counter = SynapseCounter(
     "synapse_event_processing_loop_count",
     "Event processing loop iterations",
     labelnames=["name", SERVER_NAME_LABEL],
 )
 
-event_processing_loop_room_count = Counter(
+event_processing_loop_room_count = SynapseCounter(
     "synapse_event_processing_loop_room_count",
     "Rooms seen per event processing loop iteration",
     labelnames=["name", SERVER_NAME_LABEL],

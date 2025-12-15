@@ -28,8 +28,6 @@ from typing import (
     Union,
 )
 
-from prometheus_client import Counter
-
 from twisted.internet import defer
 
 import synapse
@@ -40,6 +38,7 @@ from synapse.handlers.presence import format_user_presence_state
 from synapse.logging.context import make_deferred_yieldable, run_in_background
 from synapse.metrics import (
     SERVER_NAME_LABEL,
+    SynapseCounter,
     event_processing_loop_counter,
     event_processing_loop_room_count,
 )
@@ -65,7 +64,7 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-events_processed_counter = Counter(
+events_processed_counter = SynapseCounter(
     "synapse_handlers_appservice_events_processed", "", labelnames=[SERVER_NAME_LABEL]
 )
 

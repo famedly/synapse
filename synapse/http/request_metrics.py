@@ -24,28 +24,28 @@ import threading
 import traceback
 from typing import Mapping
 
-from prometheus_client.core import Counter, Histogram
+from prometheus_client.core import Histogram
 
 from synapse.logging.context import current_context
-from synapse.metrics import SERVER_NAME_LABEL, LaterGauge
+from synapse.metrics import SERVER_NAME_LABEL, LaterGauge, SynapseCounter
 
 logger = logging.getLogger(__name__)
 
 
 # total number of responses served, split by method/servlet/tag
-response_count = Counter(
+response_count = SynapseCounter(
     "synapse_http_server_response_count",
     "",
     labelnames=["method", "servlet", "tag", SERVER_NAME_LABEL],
 )
 
-requests_counter = Counter(
+requests_counter = SynapseCounter(
     "synapse_http_server_requests_received",
     "",
     labelnames=["method", "servlet", SERVER_NAME_LABEL],
 )
 
-outgoing_responses_counter = Counter(
+outgoing_responses_counter = SynapseCounter(
     "synapse_http_server_responses",
     "",
     labelnames=["method", "code", SERVER_NAME_LABEL],
@@ -57,19 +57,19 @@ response_timer = Histogram(
     labelnames=["method", "servlet", "tag", "code", SERVER_NAME_LABEL],
 )
 
-response_ru_utime = Counter(
+response_ru_utime = SynapseCounter(
     "synapse_http_server_response_ru_utime_seconds",
     "sec",
     labelnames=["method", "servlet", "tag", SERVER_NAME_LABEL],
 )
 
-response_ru_stime = Counter(
+response_ru_stime = SynapseCounter(
     "synapse_http_server_response_ru_stime_seconds",
     "sec",
     labelnames=["method", "servlet", "tag", SERVER_NAME_LABEL],
 )
 
-response_db_txn_count = Counter(
+response_db_txn_count = SynapseCounter(
     "synapse_http_server_response_db_txn_count",
     "",
     labelnames=["method", "servlet", "tag", SERVER_NAME_LABEL],
@@ -77,21 +77,21 @@ response_db_txn_count = Counter(
 
 # seconds spent waiting for db txns, excluding scheduling time, when processing
 # this request
-response_db_txn_duration = Counter(
+response_db_txn_duration = SynapseCounter(
     "synapse_http_server_response_db_txn_duration_seconds",
     "",
     labelnames=["method", "servlet", "tag", SERVER_NAME_LABEL],
 )
 
 # seconds spent waiting for a db connection, when processing this request
-response_db_sched_duration = Counter(
+response_db_sched_duration = SynapseCounter(
     "synapse_http_server_response_db_sched_duration_seconds",
     "",
     labelnames=["method", "servlet", "tag", SERVER_NAME_LABEL],
 )
 
 # size in bytes of the response written
-response_size = Counter(
+response_size = SynapseCounter(
     "synapse_http_server_response_size",
     "",
     labelnames=["method", "servlet", "tag", SERVER_NAME_LABEL],
@@ -100,19 +100,19 @@ response_size = Counter(
 # In flight metrics are incremented while the requests are in flight, rather
 # than when the response was written.
 
-in_flight_requests_ru_utime = Counter(
+in_flight_requests_ru_utime = SynapseCounter(
     "synapse_http_server_in_flight_requests_ru_utime_seconds",
     "",
     labelnames=["method", "servlet", SERVER_NAME_LABEL],
 )
 
-in_flight_requests_ru_stime = Counter(
+in_flight_requests_ru_stime = SynapseCounter(
     "synapse_http_server_in_flight_requests_ru_stime_seconds",
     "",
     labelnames=["method", "servlet", SERVER_NAME_LABEL],
 )
 
-in_flight_requests_db_txn_count = Counter(
+in_flight_requests_db_txn_count = SynapseCounter(
     "synapse_http_server_in_flight_requests_db_txn_count",
     "",
     labelnames=["method", "servlet", SERVER_NAME_LABEL],
@@ -120,14 +120,14 @@ in_flight_requests_db_txn_count = Counter(
 
 # seconds spent waiting for db txns, excluding scheduling time, when processing
 # this request
-in_flight_requests_db_txn_duration = Counter(
+in_flight_requests_db_txn_duration = SynapseCounter(
     "synapse_http_server_in_flight_requests_db_txn_duration_seconds",
     "",
     labelnames=["method", "servlet", SERVER_NAME_LABEL],
 )
 
 # seconds spent waiting for a db connection, when processing this request
-in_flight_requests_db_sched_duration = Counter(
+in_flight_requests_db_sched_duration = SynapseCounter(
     "synapse_http_server_in_flight_requests_db_sched_duration_seconds",
     "",
     labelnames=["method", "servlet", SERVER_NAME_LABEL],

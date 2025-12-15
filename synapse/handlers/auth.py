@@ -41,7 +41,6 @@ from typing import (
 import attr
 import bcrypt
 import unpaddedbase64
-from prometheus_client import Counter
 
 from twisted.internet.defer import CancelledError
 from twisted.web.server import Request
@@ -66,7 +65,7 @@ from synapse.http import get_request_user_agent
 from synapse.http.server import finish_request, respond_with_html
 from synapse.http.site import SynapseRequest
 from synapse.logging.context import defer_to_thread
-from synapse.metrics import SERVER_NAME_LABEL
+from synapse.metrics import SERVER_NAME_LABEL, SynapseCounter
 from synapse.metrics.background_process_metrics import run_as_background_process
 from synapse.storage.databases.main.registration import (
     LoginTokenExpired,
@@ -89,7 +88,7 @@ logger = logging.getLogger(__name__)
 
 INVALID_USERNAME_OR_PASSWORD = "Invalid username or password"
 
-invalid_login_token_counter = Counter(
+invalid_login_token_counter = SynapseCounter(
     "synapse_user_login_invalid_login_tokens",
     "Counts the number of rejected m.login.token on /login",
     labelnames=["reason", SERVER_NAME_LABEL],

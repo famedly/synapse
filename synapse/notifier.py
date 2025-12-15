@@ -35,7 +35,6 @@ from typing import (
 )
 
 import attr
-from prometheus_client import Counter
 
 from twisted.internet import defer
 from twisted.internet.defer import Deferred
@@ -47,7 +46,7 @@ from synapse.handlers.presence import format_user_presence_state
 from synapse.logging import issue9533_logger
 from synapse.logging.context import PreserveLoggingContext
 from synapse.logging.opentracing import log_kv, start_active_span
-from synapse.metrics import SERVER_NAME_LABEL, LaterGauge
+from synapse.metrics import SERVER_NAME_LABEL, LaterGauge, SynapseCounter
 from synapse.streams.config import PaginationConfig
 from synapse.types import (
     ISynapseReactor,
@@ -72,11 +71,11 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 # FIXME: Unused metric, remove if not needed.
-notified_events_counter = Counter(
+notified_events_counter = SynapseCounter(
     "synapse_notifier_notified_events", "", labelnames=[SERVER_NAME_LABEL]
 )
 
-users_woken_by_stream_counter = Counter(
+users_woken_by_stream_counter = SynapseCounter(
     "synapse_notifier_users_woken_by_stream",
     "",
     labelnames=["stream", SERVER_NAME_LABEL],

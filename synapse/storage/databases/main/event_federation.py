@@ -33,14 +33,14 @@ from typing import (
 )
 
 import attr
-from prometheus_client import Counter, Gauge
+from prometheus_client import Gauge
 
 from synapse.api.constants import MAX_DEPTH
 from synapse.api.errors import StoreError
 from synapse.api.room_versions import EventFormatVersions, RoomVersion
 from synapse.events import EventBase, make_event_from_dict
 from synapse.logging.opentracing import tag_args, trace
-from synapse.metrics import SERVER_NAME_LABEL
+from synapse.metrics import SERVER_NAME_LABEL, SynapseCounter
 from synapse.metrics.background_process_metrics import wrap_as_background_process
 from synapse.storage._base import db_to_json, make_in_list_sql_clause
 from synapse.storage.background_updates import ForeignKeyConstraint
@@ -75,7 +75,7 @@ number_pdus_in_federation_queue = Gauge(
     labelnames=[SERVER_NAME_LABEL],
 )
 
-pdus_pruned_from_federation_queue = Counter(
+pdus_pruned_from_federation_queue = SynapseCounter(
     "synapse_federation_server_number_inbound_pdu_pruned",
     "The number of events in the inbound federation staging that have been "
     "pruned due to the queue getting too long",

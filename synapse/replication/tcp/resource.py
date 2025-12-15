@@ -24,12 +24,10 @@ import logging
 import random
 from typing import TYPE_CHECKING, Optional
 
-from prometheus_client import Counter
-
 from twisted.internet.interfaces import IAddress
 from twisted.internet.protocol import ServerFactory
 
-from synapse.metrics import SERVER_NAME_LABEL
+from synapse.metrics import SERVER_NAME_LABEL, SynapseCounter
 from synapse.replication.tcp.commands import PositionCommand
 from synapse.replication.tcp.protocol import ServerReplicationStreamProtocol
 from synapse.replication.tcp.streams import EventsStream
@@ -39,7 +37,7 @@ from synapse.util.metrics import Measure
 if TYPE_CHECKING:
     from synapse.server import HomeServer
 
-stream_updates_counter = Counter(
+stream_updates_counter = SynapseCounter(
     "synapse_replication_tcp_resource_stream_updates",
     "",
     labelnames=["stream_name", SERVER_NAME_LABEL],
