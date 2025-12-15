@@ -28,6 +28,8 @@ from synapse.logging.context import make_deferred_yieldable
 from synapse.util.batching_queue import (
     BatchingQueue,
     number_in_flight,
+    number_of_keys,
+    number_queued,
 )
 
 from tests.unittest import HomeserverTestCase
@@ -61,27 +63,33 @@ class BatchingQueueTestCase(HomeserverTestCase):
 
     def _get_sample_with_name(self, metric: ObservableGauge, name: str) -> float:
         """For a prometheus metric get the value of the sample that has a
-        matching "name" label.
+        matching "name" label and matching metric name.
         """
-        print(vars(metric))
+        # The metric.name attribute gives us the OTel instrument name
+        metric_name = metric.name
+
         for metric_family in REGISTRY.collect():
+            # Check if this metric family corresponds to our metric
+            # (the family name should match or contain the metric name)
+            if metric_family.name != metric_name:
+                continue
             for sample in metric_family.samples:
-                if sample.labels.get("name") == name:  # and sample.name == metric.name:
+                if sample.labels.get("name") == name:
                     return sample.value
 
-        self.fail("Found no matching sample")
+        self.fail(f"Found no matching sample for metric={metric_name}, name={name}")
 
     def _assert_metrics(self, queued: int, keys: int, in_flight: int) -> None:
         """Assert that the metrics are correct"""
 
-        sample = self._get_sample_with_name(self.queue.number_queued, self.queue._name)
+        sample = self._get_sample_with_name(number_queued, self.queue._name)
         self.assertEqual(
             sample,
             queued,
             "number_queued",
         )
 
-        sample = self._get_sample_with_name(self.queue.number_of_keys, self.queue._name)
+        sample = self._get_sample_with_name(number_of_keys, self.queue._name)
         self.assertEqual(sample, keys, "number_of_keys")
 
         sample = self._get_sample_with_name(number_in_flight, self.queue._name)

@@ -72,6 +72,10 @@ class StatsHandler:
         # Guard to ensure we only process deltas one at a time
         self._is_processing = False
 
+        # Initialize room count metrics to 0
+        known_rooms_gauge.set(0, {SERVER_NAME_LABEL: self.server_name})
+        locally_joined_rooms_gauge.set(0, {SERVER_NAME_LABEL: self.server_name})
+
         if self.stats_enabled and hs.config.worker.run_background_tasks:
             self.notifier.add_replication_callback(self.notify_new_event)
 

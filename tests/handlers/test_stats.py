@@ -57,16 +57,50 @@ class StatsRoomTests(unittest.HomeserverTestCase):
         This method resets the metrics to zero before each test to ensure
         that each test starts with a clean slate.
         """
-        from opentelemetry import metrics
-        from opentelemetry.sdk.metrics import MeterProvider
-        from opentelemetry.sdk.metrics.export import InMemoryMetricReader
+        from synapse.metrics import (
+            SERVER_NAME_LABEL,
+            known_rooms_gauge,
+            locally_joined_rooms_gauge,
+        )
 
-        # Create a fresh reader and provider
-        self.reader = InMemoryMetricReader()
-        provider = MeterProvider(metric_readers=[self.reader])
-        # Set the global provider
-        # Any new metric instruments created after this will use the clean state.
-        metrics.set_meter_provider(provider)
+        # Reset the gauge values to 0 for this server
+        known_rooms_gauge.set(0, {SERVER_NAME_LABEL: self.hs.hostname})
+        locally_joined_rooms_gauge.set(0, {SERVER_NAME_LABEL: self.hs.hostname})
+
+    def _get_gauge_values(
+        self, metrics: list[tuple[str, dict[str, str]]]
+    ) -> list[Optional[float]]:
+        """
+        Get multiple gauge values from the Prometheus registry in a single call.
+
+        The standard REGISTRY.get_sample_value() doesn't work for OpenTelemetry
+        metrics because the OTel exporter doesn't register its metric names.
+        Additionally, the OTel collector only returns data on the first collect()
+        call, so we must collect all data once and then look up all values.
+
+        Args:
+            metrics: List of (metric_name, labels) tuples to look up.
+
+        Returns:
+            List of values in the same order as the input metrics.
+        """
+        # Collect all data from all collectors into a lookup dict
+        all_samples: dict[tuple[str, tuple[tuple[str, str], ...]], float] = {}
+        for collector in REGISTRY._collector_to_names.keys():
+            try:
+                for metric_family in collector.collect():
+                    for sample in metric_family.samples:
+                        key = (metric_family.name, tuple(sorted(sample.labels.items())))
+                        all_samples[key] = sample.value
+            except Exception:
+                continue
+
+        # Look up each requested metric
+        results: list[Optional[float]] = []
+        for metric_name, labels in metrics:
+            key = (metric_name, tuple(sorted(labels.items())))
+            results.append(all_samples.get(key))
+        return results
 
     def _add_background_updates(self) -> None:
         """
@@ -184,19 +218,18 @@ class StatsRoomTests(unittest.HomeserverTestCase):
         When we create a room, it should have statistics already ready.
         """
         self._perform_background_initial_update()
-        self.assertEqual(
-            REGISTRY.get_sample_value(
-                "synapse_known_rooms_total", labels={"server_name": self.hs.hostname}
-            ),
-            0.0,
+        known_rooms, locally_joined = self._get_gauge_values(
+            [
+                ("synapse_known_rooms_total", {"server_name": self.hs.hostname}),
+                (
+                    "synapse_locally_joined_rooms_total",
+                    {"server_name": self.hs.hostname},
+                ),
+            ]
         )
-        self.assertEqual(
-            REGISTRY.get_sample_value(
-                "synapse_locally_joined_rooms_total",
-                labels={"server_name": self.hs.hostname},
-            ),
-            0.0,
-        )
+        self.assertEqual(known_rooms, 0.0)
+        self.assertEqual(locally_joined, 0.0)
+
         u1 = self.register_user("u1", "pass")
         u1token = self.login("u1", "pass")
         r1 = self.helper.create_room_as(u1, tok=u1token)
@@ -223,19 +256,17 @@ class StatsRoomTests(unittest.HomeserverTestCase):
         self.assertEqual(r2stats["banned_members"], 0)
 
         # There are 2 rooms created. Check the room metrics were udpated.
-        self.assertEqual(
-            REGISTRY.get_sample_value(
-                "synapse_known_rooms_total", labels={"server_name": self.hs.hostname}
-            ),
-            2,
+        known_rooms, locally_joined = self._get_gauge_values(
+            [
+                ("synapse_known_rooms_total", {"server_name": self.hs.hostname}),
+                (
+                    "synapse_locally_joined_rooms_total",
+                    {"server_name": self.hs.hostname},
+                ),
+            ]
         )
-        self.assertEqual(
-            REGISTRY.get_sample_value(
-                "synapse_locally_joined_rooms_total",
-                labels={"server_name": self.hs.hostname},
-            ),
-            2,
-        )
+        self.assertEqual(known_rooms, 2)
+        self.assertEqual(locally_joined, 2)
 
     def test_updating_profile_information_does_not_increase_joined_members_count(
         self,
@@ -647,19 +678,17 @@ class StatsRoomTests(unittest.HomeserverTestCase):
         """
 
         self._perform_background_initial_update()
-        self.assertEqual(
-            REGISTRY.get_sample_value(
-                "synapse_known_rooms_total", labels={"server_name": self.hs.hostname}
-            ),
-            0.0,
+        known_rooms, locally_joined = self._get_gauge_values(
+            [
+                ("synapse_known_rooms_total", {"server_name": self.hs.hostname}),
+                (
+                    "synapse_locally_joined_rooms_total",
+                    {"server_name": self.hs.hostname},
+                ),
+            ]
         )
-        self.assertEqual(
-            REGISTRY.get_sample_value(
-                "synapse_locally_joined_rooms_total",
-                labels={"server_name": self.hs.hostname},
-            ),
-            0.0,
-        )
+        self.assertEqual(known_rooms, 0.0)
+        self.assertEqual(locally_joined, 0.0)
 
         u1 = self.register_user("u1", "pass")
         u1token = self.login("u1", "pass")
@@ -670,19 +699,17 @@ class StatsRoomTests(unittest.HomeserverTestCase):
         self.helper.leave(r2, u1, tok=u1token)
 
         # Check the locally joined rooms metric after creating rooms
-        self.assertEqual(
-            REGISTRY.get_sample_value(
-                "synapse_locally_joined_rooms_total",
-                labels={"server_name": self.hs.hostname},
-            ),
-            1,
+        known_rooms, locally_joined = self._get_gauge_values(
+            [
+                ("synapse_known_rooms_total", {"server_name": self.hs.hostname}),
+                (
+                    "synapse_locally_joined_rooms_total",
+                    {"server_name": self.hs.hostname},
+                ),
+            ]
         )
-        self.assertEqual(
-            REGISTRY.get_sample_value(
-                "synapse_known_rooms_total", labels={"server_name": self.hs.hostname}
-            ),
-            2,
-        )
+        self.assertEqual(locally_joined, 1)
+        self.assertEqual(known_rooms, 2)
 
         # Check the stats for both rooms
         r1stats = self._get_current_stats("room", r1)
