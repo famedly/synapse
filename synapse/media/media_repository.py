@@ -367,7 +367,11 @@ class AbstractMediaRepository:
                     raise NotFoundError()
 
                 # Which means a bypass was requested
-                if not redacted_media_bypass_config.is_admin:
+                if redacted_media_bypass_config.is_admin:
+                    # System admins get to bypass the rest of the checks
+                    return
+                else:
+                    # Not an admin, let's check they have a high enough power level.
                     # Lifted this directly from RoomEventServlet for msc2815
                     auth_events = (
                         await self._storage_controllers.state.get_current_state(
