@@ -1062,12 +1062,6 @@ class MediaRepository(AbstractMediaRepository):
         # if MSC3911 is enabled, check visibility of the media for the user and retrieve
         # any restrictions
         if self.msc3911_config.enabled:
-            if requester is not None:
-                # Only check media visibility if this is for a local request. This will
-                # raise directly back to the client if not visible
-                await self.is_media_visible(
-                    requester.user, media_info, allow_redacted_media
-                )
             restrictions = await self.validate_media_restriction(
                 request, media_info, None, federation
             )
