@@ -38,7 +38,7 @@ from typing import (
 )
 
 from prometheus_client import Metric
-from prometheus_client.core import REGISTRY, Gauge
+from prometheus_client.core import REGISTRY
 from typing_extensions import Concatenate, ParamSpec
 
 from twisted.internet import defer
@@ -54,7 +54,7 @@ from synapse.logging.opentracing import (
     start_active_span,
     start_active_span_follows_from,
 )
-from synapse.metrics import SERVER_NAME_LABEL, SynapseCounter
+from synapse.metrics import SERVER_NAME_LABEL, SynapseCounter, SynapseGauge
 from synapse.metrics._types import Collector
 
 if TYPE_CHECKING:
@@ -80,7 +80,7 @@ _background_process_start_count = SynapseCounter(
     labelnames=["name", SERVER_NAME_LABEL],
 )
 
-_background_process_in_flight_count = Gauge(
+_background_process_in_flight_count = SynapseGauge(
     "synapse_background_process_in_flight_count",
     "Number of background processes in flight",
     labelnames=["name", SERVER_NAME_LABEL],

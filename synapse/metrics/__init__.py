@@ -26,11 +26,14 @@ import os
 import platform
 import threading
 from importlib import metadata
+from time import time
+from types import MethodType
 from typing import (
     Any,
     Callable,
     Generic,
     Iterable,
+    Literal,
     Mapping,
     Optional,
     Sequence,
@@ -49,7 +52,6 @@ from opentelemetry.sdk.resources import SERVICE_NAME, Resource as OtelResource
 from packaging.version import parse as parse_version
 from prometheus_client import (
     CollectorRegistry,
-    Gauge,
     Histogram,
     Metric,
     generate_latest,
@@ -60,6 +62,8 @@ from prometheus_client.core import (
     GaugeMetricFamily,
     Sample,
 )
+from prometheus_client.metrics import _get_use_created
+from prometheus_client.values import ValueClass
 from typing_extensions import Dict, Self
 
 from twisted.python.threadpool import ThreadPool
@@ -195,6 +199,19 @@ T = TypeVar("T", bound="SynapseMetricWrapperBase")
 
 
 class SynapseMetricWrapperBase:
+    def _raise_if_not_observable(self) -> None:
+        # Functions that mutate the state of the metric, for example incrementing
+        # a counter, will fail if the metric is not observable, because only if a
+        # metric is observable will the value be initialized.
+        if not self._is_observable():
+            raise ValueError("%s metric is missing label values" % str(self._type))
+
+    def _is_observable(self):  # type: ignore[no-untyped-def]
+        # Whether this metric is observable, i.e.
+        # * a metric without label names and values, or
+        # * the child of a labelled metric.
+        return not self._labelnames or (self._labelnames and self._labelvalues)
+
     def __init__(
         self: T,
         name: str,
@@ -227,28 +244,92 @@ class SynapseMetricWrapperBase:
         #     self._lock = Lock()
         #     self._metrics: Dict[Sequence[str], T] = {}
 
-        # if self._is_observable():
-        #     self._metric_init()
+        if self._is_observable():
+            self._metric_init()
 
         # if not self._labelvalues:
         #     # Register the multi-wrapper parent metric, or if a label-less metric, the whole shebang.
         #     if registry:
         #         registry.register(self)
+        self._registry = registry
+
+    def _metric_init(self):  # type: ignore[no-untyped-def]  # pragma: no cover
+        """
+        Initialize the metric object as a child, i.e. when it has labels (if any) set.
+
+        This is factored as a separate function to allow for deferred initialization.
+        """
+        raise NotImplementedError("_metric_init() must be implemented by %r" % self)
 
     def labels(self, *labelvalues: Any, **labelkwargs: Any) -> Self:
+        if not self._labelnames:
+            raise ValueError("No label names were set when constructing %s" % self)
+
+        if self._labelvalues:
+            raise ValueError(
+                "{} already has labels set ({}); can not chain calls to .labels()".format(
+                    self, dict(zip(self._labelnames, self._labelvalues))
+                )
+            )
+
+        if labelvalues and labelkwargs:
+            raise ValueError("Can't pass both *args and **kwargs")
+
         if labelkwargs:
             if sorted(labelkwargs) != sorted(self._labelnames):
                 raise ValueError("Incorrect label names")
-            labelvalues = tuple(str(labelkwargs[lv]) for lv in self._labelnames)
+            labelvalues = tuple(
+                str(labelkwargs[lablename]) for lablename in self._labelnames
+            )
         else:
             if len(labelvalues) != len(self._labelnames):
                 raise ValueError("Incorrect label count")
-            labelvalues = tuple(str(lv) for lv in labelvalues)
-
+            labelvalues = tuple(str(labelvalue) for labelvalue in labelvalues)
         with self._lock:
-            self._current_attributes = labelvalues
+            if labelvalues not in self._metrics:
+                original_name = getattr(self, "_original_name", self._name)
+                namespace = getattr(self, "_namespace", "")
+                subsystem = getattr(self, "_subsystem", "")
+                unit = getattr(self, "_unit", "")
 
-        return self
+                child_kwargs = dict(self._kwargs) if self._kwargs else {}
+                for k in ("namespace", "subsystem", "unit"):
+                    child_kwargs.pop(k, None)
+
+                self._metrics[labelvalues] = self.__class__(
+                    original_name,
+                    documentation=self._documentation,
+                    labelnames=self._labelnames,
+                    namespace=namespace,
+                    subsystem=subsystem,
+                    unit=unit,
+                    _labelvalues=labelvalues,
+                    **child_kwargs,
+                )
+            return self._metrics[labelvalues]
+
+    def _get_metric(self):  # type: ignore[no-untyped-def]
+        return Metric(self._name, self._documentation, self._type, self._unit)
+
+    def collect(self) -> Iterable[Metric]:
+        metric = self._get_metric()
+        for (
+            suffix,
+            labels,
+            value,
+            timestamp,
+            exemplar,
+            native_histogram_value,
+        ) in self._samples():
+            metric.add_sample(
+                self._name + suffix,
+                labels,
+                value,
+                timestamp,
+                exemplar,
+                native_histogram_value,
+            )
+        return [metric]
 
     def _is_parent(self):  # type: ignore[no-untyped-def]
         return self._labelnames and not self._labelvalues
@@ -284,6 +365,22 @@ class SynapseMetricWrapperBase:
                     native_histogram_value,
                 )
 
+    # not sure if this is needed, putting it there for now to make the linter happy
+    def remove(self, *labelvalues: Any) -> None:
+        if not self._labelnames:
+            raise ValueError("No label names were set when constructing %s" % self)
+
+        """Remove the given labelset from the metric."""
+        if len(labelvalues) != len(self._labelnames):
+            raise ValueError(
+                "Incorrect label count (expected %d, got %s)"
+                % (len(self._labelnames), labelvalues)
+            )
+        labelvalues = tuple(str(labelvalue) for labelvalue in labelvalues)
+        with self._lock:
+            if labelvalues in self._metrics:
+                del self._metrics[labelvalues]
+
 
 class SynapseCounter(SynapseMetricWrapperBase):
     def __init__(
@@ -315,37 +412,188 @@ class SynapseCounter(SynapseMetricWrapperBase):
 
         self._current_attributes = ()
 
-    def _get_metric(self):  # type: ignore[no-untyped-def]
-        return Metric(self._name, self._documentation, self._type, self._unit)
-
-    def collect(self) -> Iterable[Metric]:
-        metric = self._get_metric()
-        for (
-            suffix,
-            labels,
-            value,
-            timestamp,
-            exemplar,
-            native_histogram_value,
-        ) in self._samples():
-            metric.add_sample(
-                self._name + suffix,
-                labels,
-                value,
-                timestamp,
-                exemplar,
-                native_histogram_value,
-            )
-        return [metric]
-
     def inc(self, amount: float = 1.0) -> None:
         # Need to verify what happens with Counters that do not have labels as children,
         # this may not be appropriate in those cases. Can probably just leave the
         # attributes param as empty in that case?
+        self._value.inc(amount)
         self._counter.add(amount, dict(zip(self._labelnames, self._current_attributes)))
         # # If this was a "child" metric, then the lock will have been taken in labels()
         # if self._lock.locked():
         #     self._lock.release()
+
+    def _metric_init(self) -> None:
+        self._value = ValueClass(
+            self._type,
+            self._name,
+            self._name + "_total",
+            self._labelnames,
+            self._labelvalues,
+            self._documentation,
+        )
+        self._created = time()
+
+    def _child_samples(self) -> Iterable[Sample]:
+        sample = Sample(
+            "_total", {}, self._value.get(), None, self._value.get_exemplar()
+        )
+        if _get_use_created():
+            return (sample, Sample("_created", {}, self._created, None, None))
+        return (sample,)
+
+
+F = TypeVar("F", bound=Callable[..., Any])
+
+
+class InprogressTracker:
+    def __init__(self, gauge) -> None:  # type: ignore[no-untyped-def]
+        self._gauge = gauge
+
+    def __enter__(self) -> None:
+        self._gauge.inc()
+
+    def __exit__(self, typ, value, traceback) -> None:  # type: ignore[no-untyped-def]
+        self._gauge.dec()
+
+    # def __call__(self, f: "F") -> "F":
+    #     def wrapped(func, *args, **kwargs):
+    #         with self:
+    #             return func(*args, **kwargs)
+
+    #     return decorate(f, wrapped)
+
+
+class SynapseGauge(SynapseMetricWrapperBase):
+    _MULTIPROC_MODES = frozenset(
+        (
+            "all",
+            "liveall",
+            "min",
+            "livemin",
+            "max",
+            "livemax",
+            "sum",
+            "livesum",
+            "mostrecent",
+            "livemostrecent",
+        )
+    )
+    _MOST_RECENT_MODES = frozenset(("mostrecent", "livemostrecent"))
+
+    def __init__(
+        self,
+        name: str,
+        documentation: str,
+        labelnames: Iterable[str] = (),
+        namespace: str = "",
+        subsystem: str = "",
+        unit: str = "",
+        registry: Optional[CollectorRegistry] = REGISTRY,
+        _labelvalues: Optional[Sequence[str]] = None,
+        multiprocess_mode: Literal[
+            "all",
+            "liveall",
+            "min",
+            "livemin",
+            "max",
+            "livemax",
+            "sum",
+            "livesum",
+            "mostrecent",
+            "livemostrecent",
+        ] = "all",
+    ):
+        self._multiprocess_mode = multiprocess_mode
+        if multiprocess_mode not in self._MULTIPROC_MODES:
+            raise ValueError("Invalid multiprocess mode: " + multiprocess_mode)
+        super().__init__(
+            name=name,
+            documentation=documentation,
+            labelnames=labelnames,
+            namespace=namespace,
+            subsystem=subsystem,
+            unit=unit,
+            registry=registry,
+            _labelvalues=_labelvalues,
+        )
+        self._type = "gauge"
+        # Here is where we grab the global meter to create a FauxGauge
+        self._gauge = meter.create_gauge(
+            self._name, unit=self._unit, description=self._documentation
+        )
+        self._kwargs["multiprocess_mode"] = self._multiprocess_mode
+        self._is_most_recent = self._multiprocess_mode in self._MOST_RECENT_MODES
+        self._gauge_value: float = 0
+
+        if not self._labelvalues and self._registry:
+            # TODO: look into what to do here
+            self._registry.register(self)  # type: ignore
+
+    def set(self, value: float) -> None:
+        """Set gauge to the given value."""
+        self._raise_if_not_observable()
+        if self._is_most_recent:
+            self._value.set(float(value), timestamp=time())
+        else:
+            self._value.set(float(value))
+        self._gauge.set(value)
+        self._gauge_value = value
+        # self._value.set(0)
+
+    def inc(self, amount: float = 1) -> None:
+        """Increment gauge by the given amount."""
+        if self._is_most_recent:
+            raise RuntimeError("inc must not be used with the mostrecent mode")
+        # self._raise_if_not_observable()
+        self._value.inc(amount)
+        self._gauge_value += amount
+        self._gauge.set(self._gauge_value)
+
+    def dec(self, amount: float = 1) -> None:
+        """Decrement gauge by the given amount."""
+        if self._is_most_recent:
+            raise RuntimeError("inc must not be used with the mostrecent mode")
+        # self._raise_if_not_observable()
+        self._gauge_value -= amount
+        self._gauge.set(self._gauge_value)
+        self._value.inc(-amount)
+
+    def track_inprogress(self) -> InprogressTracker:
+        """Track inprogress blocks of code or functions.
+
+        Can be used as a function decorator or context manager.
+        Increments the gauge when the code is entered,
+        and decrements when it is exited.
+        """
+        # self._raise_if_not_observable()
+        return InprogressTracker(self)
+
+    def set_function(self, f: Callable[[], float]) -> None:
+        """Call the provided function to return the Gauge value.
+
+        The function must return a float, and may be called from
+        multiple threads. All other methods of the Gauge become NOOPs.
+        """
+        # self._raise_if_not_observable()
+
+        def samples(_: SynapseGauge) -> Iterable[Sample]:
+            return (Sample("", {}, float(f()), None, None),)
+
+        self._child_samples = MethodType(samples, self)  # type: ignore
+
+    def _child_samples(self) -> Iterable[Sample]:
+        return (Sample("", {}, self._value.get(), None, None),)
+
+    def _metric_init(self) -> None:
+        self._value = ValueClass(
+            self._type,
+            self._name,
+            self._name,
+            self._labelnames,
+            self._labelvalues,
+            self._documentation,
+            multiprocess_mode=self._multiprocess_mode,
+        )
 
 
 @attr.s(slots=True, hash=True, auto_attribs=True, kw_only=True)
@@ -821,25 +1069,25 @@ event_processing_loop_room_count = SynapseCounter(
 
 # Used to track where various components have processed in the event stream,
 # e.g. federation sending, appservice sending, etc.
-event_processing_positions = Gauge(
+event_processing_positions = SynapseGauge(
     "synapse_event_processing_positions", "", labelnames=["name", SERVER_NAME_LABEL]
 )
 
 # Used to track the current max events stream position
-event_persisted_position = Gauge(
+event_persisted_position = SynapseGauge(
     "synapse_event_persisted_position", "", labelnames=[SERVER_NAME_LABEL]
 )
 
 # Used to track the received_ts of the last event processed by various
 # components
-event_processing_last_ts = Gauge(
+event_processing_last_ts = SynapseGauge(
     "synapse_event_processing_last_ts", "", labelnames=["name", SERVER_NAME_LABEL]
 )
 
 # Used to track the lag processing events. This is the time difference
 # between the last processed event's received_ts and the time it was
 # finished being processed.
-event_processing_lag = Gauge(
+event_processing_lag = SynapseGauge(
     "synapse_event_processing_lag", "", labelnames=["name", SERVER_NAME_LABEL]
 )
 
@@ -854,7 +1102,7 @@ event_processing_lag_by_event = Histogram(
 # This is a process-level metric, so it does not have the `SERVER_NAME_LABEL`. We
 # consider this process-level because all Synapse homeservers running in the process
 # will use the same Synapse version.
-build_info = Gauge(  # type: ignore[missing-server-name-label]
+build_info = SynapseGauge(
     "synapse_build_info", "Build information", ["pythonversion", "version", "osversion"]
 )
 build_info.labels(
@@ -864,7 +1112,7 @@ build_info.labels(
 ).set(1)
 
 # Loaded modules info
-module_instances_info = Gauge(
+module_instances_info = SynapseGauge(
     "synapse_module_info",
     "Information about loaded modules",
     labelnames=["package_name", "module_name", "module_version", SERVER_NAME_LABEL],
@@ -880,38 +1128,38 @@ threepid_send_requests = Histogram(
     labelnames=("type", "reason", SERVER_NAME_LABEL),
 )
 
-threadpool_total_threads = Gauge(
+threadpool_total_threads = SynapseGauge(
     "synapse_threadpool_total_threads",
     "Total number of threads currently in the threadpool",
     labelnames=["name", SERVER_NAME_LABEL],
 )
 
-threadpool_total_working_threads = Gauge(
+threadpool_total_working_threads = SynapseGauge(
     "synapse_threadpool_working_threads",
     "Number of threads currently working in the threadpool",
     labelnames=["name", SERVER_NAME_LABEL],
 )
 
-threadpool_total_min_threads = Gauge(
+threadpool_total_min_threads = SynapseGauge(
     "synapse_threadpool_min_threads",
     "Minimum number of threads configured in the threadpool",
     labelnames=["name", SERVER_NAME_LABEL],
 )
 
-threadpool_total_max_threads = Gauge(
+threadpool_total_max_threads = SynapseGauge(
     "synapse_threadpool_max_threads",
     "Maximum number of threads configured in the threadpool",
     labelnames=["name", SERVER_NAME_LABEL],
 )
 
 # Gauges for room counts
-known_rooms_gauge = Gauge(
+known_rooms_gauge = SynapseGauge(
     "synapse_known_rooms_total",
     "Total number of rooms",
     labelnames=[SERVER_NAME_LABEL],
 )
 
-locally_joined_rooms_gauge = Gauge(
+locally_joined_rooms_gauge = SynapseGauge(
     "synapse_locally_joined_rooms_total",
     "Total number of locally joined rooms",
     labelnames=[SERVER_NAME_LABEL],
@@ -970,4 +1218,5 @@ __all__ = [
     "MIN_TIME_BETWEEN_GCS",
     "install_gc_manager",
     "SynapseCounter",
+    "SynapseGauge",
 ]

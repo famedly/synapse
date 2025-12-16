@@ -37,7 +37,6 @@ from typing import (
 )
 
 import attr
-from prometheus_client import Gauge
 
 from twisted.internet import defer
 
@@ -64,7 +63,7 @@ from synapse.logging.opentracing import (
     tag_args,
     trace,
 )
-from synapse.metrics import SERVER_NAME_LABEL
+from synapse.metrics import SERVER_NAME_LABEL, SynapseGauge
 from synapse.metrics.background_process_metrics import (
     wrap_as_background_process,
 )
@@ -132,7 +131,7 @@ EVENT_QUEUE_ITERATIONS = 3  # No. times we block waiting for requests for events
 EVENT_QUEUE_TIMEOUT_S = 0.1  # Timeout when waiting for requests for events
 
 
-event_fetch_ongoing_gauge = Gauge(
+event_fetch_ongoing_gauge = SynapseGauge(
     "synapse_event_fetch_ongoing",
     "The number of event fetchers that are running",
     labelnames=[SERVER_NAME_LABEL],

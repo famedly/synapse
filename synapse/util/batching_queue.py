@@ -29,12 +29,10 @@ from typing import (
     TypeVar,
 )
 
-from prometheus_client import Gauge
-
 from twisted.internet import defer
 
 from synapse.logging.context import PreserveLoggingContext, make_deferred_yieldable
-from synapse.metrics import SERVER_NAME_LABEL
+from synapse.metrics import SERVER_NAME_LABEL, SynapseGauge
 from synapse.util.clock import Clock
 
 if TYPE_CHECKING:
@@ -46,19 +44,19 @@ logger = logging.getLogger(__name__)
 V = TypeVar("V")
 R = TypeVar("R")
 
-number_queued = Gauge(
+number_queued = SynapseGauge(
     "synapse_util_batching_queue_number_queued",
     "The number of items waiting in the queue across all keys",
     labelnames=("name", SERVER_NAME_LABEL),
 )
 
-number_in_flight = Gauge(
+number_in_flight = SynapseGauge(
     "synapse_util_batching_queue_number_pending",
     "The number of items across all keys either being processed or waiting in a queue",
     labelnames=("name", SERVER_NAME_LABEL),
 )
 
-number_of_keys = Gauge(
+number_of_keys = SynapseGauge(
     "synapse_util_batching_queue_number_of_keys",
     "The number of distinct keys that have items queued",
     labelnames=("name", SERVER_NAME_LABEL),
@@ -123,7 +121,7 @@ class BatchingQueue(Generic[V, R]):
             name=self._name, **{SERVER_NAME_LABEL: self.server_name}
         ).set_function(lambda: len(self._next_values))
 
-        self._number_in_flight_metric: Gauge = number_in_flight.labels(
+        self._number_in_flight_metric: SynapseGauge = number_in_flight.labels(
             name=self._name, **{SERVER_NAME_LABEL: self.server_name}
         )
 

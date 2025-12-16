@@ -19,11 +19,11 @@
 #
 #
 
-from prometheus_client import Gauge
 
 from twisted.internet import defer
 
 from synapse.logging.context import make_deferred_yieldable
+from synapse.metrics import SynapseGauge
 from synapse.util.batching_queue import (
     BatchingQueue,
     number_in_flight,
@@ -59,7 +59,7 @@ class BatchingQueueTestCase(HomeserverTestCase):
         self._pending_calls.append((values, d))
         return await make_deferred_yieldable(d)
 
-    def _get_sample_with_name(self, metric: Gauge, name: str) -> float:
+    def _get_sample_with_name(self, metric: SynapseGauge, name: str) -> float:
         """For a prometheus metric get the value of the sample that has a
         matching "name" label.
         """

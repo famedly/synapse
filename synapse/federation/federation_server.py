@@ -32,7 +32,7 @@ from typing import (
     Union,
 )
 
-from prometheus_client import Gauge, Histogram
+from prometheus_client import Histogram
 
 from twisted.python import failure
 
@@ -79,7 +79,7 @@ from synapse.logging.opentracing import (
     tag_args,
     trace,
 )
-from synapse.metrics import SERVER_NAME_LABEL, SynapseCounter
+from synapse.metrics import SERVER_NAME_LABEL, SynapseCounter, SynapseGauge
 from synapse.metrics.background_process_metrics import wrap_as_background_process
 from synapse.replication.http.federation import (
     ReplicationFederationSendEduRestServlet,
@@ -122,7 +122,7 @@ pdu_process_time = Histogram(
     labelnames=[SERVER_NAME_LABEL],
 )
 
-last_pdu_ts_metric = Gauge(
+last_pdu_ts_metric = SynapseGauge(
     "synapse_federation_last_received_pdu_time",
     "The timestamp of the last PDU which was successfully received from the given domain",
     labelnames=("origin_server_name", SERVER_NAME_LABEL),
