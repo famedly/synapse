@@ -18,7 +18,7 @@
 #
 #
 
-from typing import Any, Optional, cast
+from typing import Any, cast
 
 from prometheus_client import REGISTRY, Gauge
 
@@ -91,9 +91,9 @@ class StatsRoomTests(unittest.HomeserverTestCase):
             )
         )
 
-    async def get_all_room_state(self) -> list[Optional[str]]:
+    async def get_all_room_state(self) -> list[str | None]:
         rows = cast(
-            list[tuple[Optional[str]]],
+            list[tuple[str | None]],
             await self.store.db_pool.simple_select_list(
                 "room_stats_state", None, retcols=("topic",)
             ),
@@ -102,7 +102,7 @@ class StatsRoomTests(unittest.HomeserverTestCase):
 
     def _get_current_stats(
         self, stats_type: str, stat_id: str
-    ) -> Optional[dict[str, Any]]:
+    ) -> dict[str, Any] | None:
         table, id_col = stats.TYPE_TO_TABLE[stats_type]
 
         cols = list(stats.ABSOLUTE_STATS_FIELDS[stats_type])
