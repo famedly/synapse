@@ -107,10 +107,24 @@ jobs:
           yq < schema/synapse-config.schema.yaml \
             > book/schema/synapse-config.schema.json
 
+      - name: Restructure for versioning
+        run: |
+          # Create a clean output directory
+          mkdir -p _site/${{ needs.pre.outputs.branch-version }}
+
+          # Move the built book (and schemas) into the versioned subdirectory
+          mv book/* _site/${{ needs.pre.outputs.branch-version }}/
+
+          # Create a root index.html that redirects to the versioned docs
+          # This ensures https://famedly.github.io/synapse/ still works
+          if [ "${{ needs.pre.outputs.branch-version }}" = "latest" ]; then
+            echo '<!DOCTYPE html><meta http-equiv="refresh" content="0; url=latest/index.html">' > _site/index.html
+          fi
+
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
         with:
-          path: ./book
+          path: ./_site
 
   deploy:
     if: ${{ github.ref == 'refs/heads/master' }}
