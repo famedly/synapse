@@ -60,7 +60,7 @@ from prometheus_client.core import (
     GaugeMetricFamily,
     Sample,
 )
-from typing_extensions import Self
+from typing_extensions import Dict, Self
 
 from twisted.python.threadpool import ThreadPool
 from twisted.web.resource import Resource
@@ -191,36 +191,49 @@ def _build_full_name(
     return full_name
 
 
-class SynapseCounter:
-    _type: str = "counter"
+T = TypeVar("T", bound="SynapseMetricWrapperBase")
 
+
+class SynapseMetricWrapperBase:
     def __init__(
-        self,
+        self: T,
         name: str,
         documentation: str,
         labelnames: Iterable[str] = (),
         namespace: str = "",
         subsystem: str = "",
         unit: str = "",
-        registry: Optional[CollectorRegistry] = None,
+        registry: Optional[CollectorRegistry] = REGISTRY,
         _labelvalues: Optional[Sequence[str]] = None,
     ) -> None:
-        # Here is where we grab the global meter to create a FauxCounter
-        self._counter = meter.create_counter(name, unit=unit, description=documentation)
+        self._type: str = ""
+        self._original_name = name
+        self._namespace = namespace
+        self._subsystem = subsystem
         self._name = _build_full_name(self._type, name, namespace, subsystem, unit)
-        self._documentation = documentation
-        self._unit = unit
-
         # prom validates these, should we do that?
         # labelnames provide a simple way to register that a given set of kwargs call
         # from labels can be used. All should be used in a call?
         self._labelnames = tuple(labelnames or ())
-
         self._labelvalues = tuple(_labelvalues or ())
+        self._kwargs: Dict[str, Any] = {}
+        self._documentation = documentation
+        self._unit = unit
         self._metrics = {}  # type: ignore[var-annotated]
-
-        self._current_attributes = ()
         self._lock = threading.Lock()
+
+        # if self._is_parent():
+        #     # Prepare the fields needed for child metrics.
+        #     self._lock = Lock()
+        #     self._metrics: Dict[Sequence[str], T] = {}
+
+        # if self._is_observable():
+        #     self._metric_init()
+
+        # if not self._labelvalues:
+        #     # Register the multi-wrapper parent metric, or if a label-less metric, the whole shebang.
+        #     if registry:
+        #         registry.register(self)
 
     def labels(self, *labelvalues: Any, **labelkwargs: Any) -> Self:
         if labelkwargs:
@@ -237,11 +250,11 @@ class SynapseCounter:
 
         return self
 
-    def _child_samples(self) -> Iterable[Sample]:  # pragma: no cover
-        raise NotImplementedError("_child_samples() must be implemented by %r" % self)
-
     def _is_parent(self):  # type: ignore[no-untyped-def]
         return self._labelnames and not self._labelvalues
+
+    def _child_samples(self) -> Iterable[Sample]:  # pragma: no cover
+        raise NotImplementedError("_child_samples() must be implemented by %r" % self)
 
     def _samples(self) -> Iterable[Sample]:
         if self._is_parent():
@@ -271,6 +284,37 @@ class SynapseCounter:
                     native_histogram_value,
                 )
 
+
+class SynapseCounter(SynapseMetricWrapperBase):
+    def __init__(
+        self,
+        name: str,
+        documentation: str,
+        labelnames: Iterable[str] = (),
+        namespace: str = "",
+        subsystem: str = "",
+        unit: str = "",
+        registry: Optional[CollectorRegistry] = REGISTRY,
+        _labelvalues: Optional[Sequence[str]] = None,
+    ) -> None:
+        super().__init__(
+            name,
+            documentation,
+            labelnames,
+            namespace,
+            subsystem,
+            unit,
+            registry,
+            _labelvalues,
+        )
+        self._type = "counter"
+        # Here is where we grab the global meter to create a FauxCounter
+        self._counter = meter.create_counter(
+            self._name, unit=self._unit, description=self._documentation
+        )
+
+        self._current_attributes = ()
+
     def _get_metric(self):  # type: ignore[no-untyped-def]
         return Metric(self._name, self._documentation, self._type, self._unit)
 
@@ -299,9 +343,9 @@ class SynapseCounter:
         # this may not be appropriate in those cases. Can probably just leave the
         # attributes param as empty in that case?
         self._counter.add(amount, dict(zip(self._labelnames, self._current_attributes)))
-        # If this was a "child" metric, then the lock will have been taken in labels()
-        if self._lock.locked():
-            self._lock.release()
+        # # If this was a "child" metric, then the lock will have been taken in labels()
+        # if self._lock.locked():
+        #     self._lock.release()
 
 
 @attr.s(slots=True, hash=True, auto_attribs=True, kw_only=True)
