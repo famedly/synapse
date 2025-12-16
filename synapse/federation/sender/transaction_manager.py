@@ -20,8 +20,6 @@
 import logging
 from typing import TYPE_CHECKING
 
-from prometheus_client import Gauge
-
 from synapse.api.constants import EduTypes
 from synapse.api.errors import HttpResponseException
 from synapse.events import EventBase
@@ -34,7 +32,7 @@ from synapse.logging.opentracing import (
     tags,
     whitelisted_homeserver,
 )
-from synapse.metrics import SERVER_NAME_LABEL
+from synapse.metrics import SERVER_NAME_LABEL, meter
 from synapse.types import JsonDict
 from synapse.util.json import json_decoder
 from synapse.util.metrics import measure_func
@@ -45,10 +43,9 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 issue_8631_logger = logging.getLogger("synapse.8631_debug")
 
-last_pdu_ts_metric = Gauge(
+last_pdu_ts_metric = meter.create_gauge(
     "synapse_federation_last_sent_pdu_time",
-    "The timestamp of the last PDU which was successfully sent to the given domain",
-    labelnames=("destination_server_name", SERVER_NAME_LABEL),
+    description="The timestamp of the last PDU which was successfully sent to the given domain",
 )
 
 
@@ -204,7 +201,10 @@ class TransactionManager:
 
             if pdus and destination in self._federation_metrics_domains:
                 last_pdu = pdus[-1]
-                last_pdu_ts_metric.labels(
-                    destination_server_name=destination,
-                    **{SERVER_NAME_LABEL: self.server_name},
-                ).set(last_pdu.origin_server_ts / 1000)
+                last_pdu_ts_metric.set(
+                    last_pdu.origin_server_ts / 1000,
+                    {
+                        "destination_server_name": destination,
+                        SERVER_NAME_LABEL: self.server_name,
+                    },
+                )

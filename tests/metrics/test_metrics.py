@@ -420,12 +420,15 @@ class ModuleInstancesInfoTests(unittest.TestCase):
         test_module_version = "1.2.3"
 
         # Set the metric values
-        module_instances_info.labels(
-            module_name=test_module_name,
-            package_name=test_package_name,
-            module_version=test_module_version,
-            server_name=test_server_name,
-        ).set(1)
+        module_instances_info.set(
+            1,
+            {
+                "module_name": test_module_name,
+                "package_name": test_package_name,
+                "module_version": test_module_version,
+                "server_name": test_server_name,
+            },
+        )
 
         metrics_output = generate_latest(REGISTRY)
 

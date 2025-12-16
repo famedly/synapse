@@ -676,13 +676,16 @@ async def start(hs: "HomeServer", *, freeze: bool = True) -> None:
             module
         )
         # Set module info metrics for prometheus
-        module_instances_info.labels(
-            package_name=package_name,
-            # what is given in the config
-            module_name=module_name,
-            module_version=module_version,
-            **{SERVER_NAME_LABEL: hs.hostname},
-        ).set(1)
+        module_instances_info.set(
+            1,
+            {
+                "package_name": package_name,
+                # what is given in the config
+                "module_name": module_name,
+                "module_version": module_version,
+                SERVER_NAME_LABEL: hs.hostname,
+            },
+        )
         logger.info("Loaded module %s", m)
 
     if hs.config.auto_accept_invites.enabled:

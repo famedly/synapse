@@ -72,6 +72,10 @@ class StatsHandler:
         # Guard to ensure we only process deltas one at a time
         self._is_processing = False
 
+        # Initialize room count metrics to 0
+        known_rooms_gauge.set(0, {SERVER_NAME_LABEL: self.server_name})
+        locally_joined_rooms_gauge.set(0, {SERVER_NAME_LABEL: self.server_name})
+
         if self.stats_enabled and hs.config.worker.run_background_tasks:
             self.notifier.add_replication_callback(self.notify_new_event)
 
@@ -152,9 +156,9 @@ class StatsHandler:
 
             logger.debug("Handled room stats to %s -> %s", self.pos, max_pos)
 
-            event_processing_positions.labels(
-                name="stats", **{SERVER_NAME_LABEL: self.server_name}
-            ).set(max_pos)
+            event_processing_positions.set(
+                max_pos, {"name": "stats", SERVER_NAME_LABEL: self.server_name}
+            )
 
             self.pos = max_pos
 
@@ -164,12 +168,12 @@ class StatsHandler:
             ) = await self.store.get_room_stats()
 
             # Update room count metrics
-            known_rooms_gauge.labels(**{SERVER_NAME_LABEL: self.server_name}).set(
-                known_room_count
+            known_rooms_gauge.set(
+                known_room_count, {SERVER_NAME_LABEL: self.server_name}
             )
-            locally_joined_rooms_gauge.labels(
-                **{SERVER_NAME_LABEL: self.server_name}
-            ).set(locally_joined_room_count)
+            locally_joined_rooms_gauge.set(
+                locally_joined_room_count, {SERVER_NAME_LABEL: self.server_name}
+            )
 
     async def _handle_deltas(
         self, deltas: Iterable[StateDelta]

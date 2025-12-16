@@ -142,7 +142,6 @@ from typing import (
 )
 
 import attr
-from prometheus_client import Counter
 
 from twisted.internet import defer
 
@@ -163,6 +162,7 @@ from synapse.metrics import (
     event_processing_loop_counter,
     event_processing_loop_room_count,
     events_processed_counter,
+    meter,
 )
 from synapse.metrics.background_process_metrics import (
     wrap_as_background_process,
@@ -184,16 +184,14 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-sent_pdus_destination_dist_count = Counter(
+sent_pdus_destination_dist_count = meter.create_counter(
     "synapse_federation_client_sent_pdu_destinations_count",
-    "Number of PDUs queued for sending to one or more destinations",
-    labelnames=[SERVER_NAME_LABEL],
+    description="Number of PDUs queued for sending to one or more destinations",
 )
 
-sent_pdus_destination_dist_total = Counter(
+sent_pdus_destination_dist_total = meter.create_counter(
     "synapse_federation_client_sent_pdu_destinations",
-    "Total number of PDUs queued for sending across all destinations",
-    labelnames=[SERVER_NAME_LABEL],
+    description="Total number of PDUs queued for sending across all destinations",
 )
 
 transaction_queue_pending_destinations_gauge = LaterGauge(
@@ -716,10 +714,13 @@ class FederationSender(AbstractFederationSender):
                         now = self.clock.time_msec()
                         ts = event_to_received_ts[event.event_id]
                         assert ts is not None
-                        synapse.metrics.event_processing_lag_by_event.labels(
-                            name="federation_sender",
-                            **{SERVER_NAME_LABEL: self.server_name},
-                        ).observe((now - ts) / 1000)
+                        synapse.metrics.event_processing_lag_by_event.record(
+                            (now - ts) / 1000,
+                            {
+                                "name": "federation_sender",
+                                SERVER_NAME_LABEL: self.server_name,
+                            },
+                        )
 
                 async def handle_room_events(events: list[EventBase]) -> None:
                     logger.debug(
@@ -761,32 +762,45 @@ class FederationSender(AbstractFederationSender):
                     ts = max(t for t in event_to_received_ts.values() if t)
                     assert ts is not None
 
-                    synapse.metrics.event_processing_lag.labels(
-                        name="federation_sender",
-                        **{SERVER_NAME_LABEL: self.server_name},
-                    ).set(now - ts)
-                    synapse.metrics.event_processing_last_ts.labels(
-                        name="federation_sender",
-                        **{SERVER_NAME_LABEL: self.server_name},
-                    ).set(ts)
+                    synapse.metrics.event_processing_lag.set(
+                        now - ts,
+                        {
+                            "name": "federation_sender",
+                            SERVER_NAME_LABEL: self.server_name,
+                        },
+                    )
+                    synapse.metrics.event_processing_last_ts.set(
+                        ts,
+                        {
+                            "name": "federation_sender",
+                            SERVER_NAME_LABEL: self.server_name,
+                        },
+                    )
 
-                    events_processed_counter.labels(
-                        **{SERVER_NAME_LABEL: self.server_name}
-                    ).inc(len(event_entries))
+                    events_processed_counter.add(
+                        len(event_entries), {SERVER_NAME_LABEL: self.server_name}
+                    )
 
-                    event_processing_loop_room_count.labels(
-                        name="federation_sender",
-                        **{SERVER_NAME_LABEL: self.server_name},
-                    ).inc(len(events_by_room))
+                    event_processing_loop_room_count.add(
+                        len(events_by_room),
+                        {
+                            "name": "federation_sender",
+                            SERVER_NAME_LABEL: self.server_name,
+                        },
+                    )
 
-                event_processing_loop_counter.labels(
-                    name="federation_sender",
-                    **{SERVER_NAME_LABEL: self.server_name},
-                ).inc()
+                event_processing_loop_counter.add(
+                    1,
+                    {
+                        "name": "federation_sender",
+                        SERVER_NAME_LABEL: self.server_name,
+                    },
+                )
 
-                synapse.metrics.event_processing_positions.labels(
-                    name="federation_sender", **{SERVER_NAME_LABEL: self.server_name}
-                ).set(next_token)
+                synapse.metrics.event_processing_positions.set(
+                    next_token,
+                    {"name": "federation_sender", SERVER_NAME_LABEL: self.server_name},
+                )
 
         finally:
             self._is_processing = False
@@ -803,12 +817,10 @@ class FederationSender(AbstractFederationSender):
         if not destinations:
             return
 
-        sent_pdus_destination_dist_total.labels(
-            **{SERVER_NAME_LABEL: self.server_name}
-        ).inc(len(destinations))
-        sent_pdus_destination_dist_count.labels(
-            **{SERVER_NAME_LABEL: self.server_name}
-        ).inc()
+        sent_pdus_destination_dist_total.add(
+            len(destinations), {SERVER_NAME_LABEL: self.server_name}
+        )
+        sent_pdus_destination_dist_count.add(1, {SERVER_NAME_LABEL: self.server_name})
 
         assert pdu.internal_metadata.stream_ordering
 

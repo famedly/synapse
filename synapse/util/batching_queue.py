@@ -20,6 +20,7 @@
 #
 
 import logging
+import weakref
 from typing import (
     TYPE_CHECKING,
     Awaitable,
@@ -29,12 +30,12 @@ from typing import (
     TypeVar,
 )
 
-from prometheus_client import Gauge
+from opentelemetry.metrics._internal.observation import Observation
 
 from twisted.internet import defer
 
 from synapse.logging.context import PreserveLoggingContext, make_deferred_yieldable
-from synapse.metrics import SERVER_NAME_LABEL
+from synapse.metrics import SERVER_NAME_LABEL, meter
 from synapse.util.clock import Clock
 
 if TYPE_CHECKING:
@@ -46,22 +47,67 @@ logger = logging.getLogger(__name__)
 V = TypeVar("V")
 R = TypeVar("R")
 
-number_queued = Gauge(
+# Global registry to track all BatchingQueue instances.
+# We use a WeakSet so that queues can be garbage collected when no longer referenced.
+_batching_queue_registry: "weakref.WeakSet[BatchingQueue]" = weakref.WeakSet()
+
+
+def _collect_number_queued(options: object) -> list[Observation]:
+    """Callback to collect number_queued metrics from all BatchingQueue instances."""
+    observations = []
+    for queue in _batching_queue_registry:
+        observations.append(
+            Observation(
+                sum(len(q) for q in queue._next_values.values()),
+                {"name": queue._name, SERVER_NAME_LABEL: queue.server_name},
+            )
+        )
+    return observations
+
+
+def _collect_number_of_keys(options: object) -> list[Observation]:
+    """Callback to collect number_of_keys metrics from all BatchingQueue instances."""
+    observations = []
+    for queue in _batching_queue_registry:
+        observations.append(
+            Observation(
+                len(queue._next_values),
+                {"name": queue._name, SERVER_NAME_LABEL: queue.server_name},
+            )
+        )
+    return observations
+
+
+def _collect_number_in_flight(options: object) -> list[Observation]:
+    """Callback to collect number_in_flight metrics from all BatchingQueue instances."""
+    observations = []
+    for queue in _batching_queue_registry:
+        observations.append(
+            Observation(
+                queue._number_in_flight,
+                {"name": queue._name, SERVER_NAME_LABEL: queue.server_name},
+            )
+        )
+    return observations
+
+
+# Global observable gauges that collect from all BatchingQueue instances
+number_queued = meter.create_observable_gauge(
     "synapse_util_batching_queue_number_queued",
-    "The number of items waiting in the queue across all keys",
-    labelnames=("name", SERVER_NAME_LABEL),
+    callbacks=[_collect_number_queued],
+    description="The number of items waiting in the queue across all keys",
 )
 
-number_in_flight = Gauge(
-    "synapse_util_batching_queue_number_pending",
-    "The number of items across all keys either being processed or waiting in a queue",
-    labelnames=("name", SERVER_NAME_LABEL),
-)
-
-number_of_keys = Gauge(
+number_of_keys = meter.create_observable_gauge(
     "synapse_util_batching_queue_number_of_keys",
-    "The number of distinct keys that have items queued",
-    labelnames=("name", SERVER_NAME_LABEL),
+    callbacks=[_collect_number_of_keys],
+    description="The number of distinct keys that have items queued",
+)
+
+number_in_flight = meter.create_observable_gauge(
+    "synapse_util_batching_queue_number_pending",
+    callbacks=[_collect_number_in_flight],
+    description="The number of items across all keys either being processed or waiting in a queue",
 )
 
 
@@ -115,25 +161,19 @@ class BatchingQueue(Generic[V, R]):
         # The function to call with batches of values.
         self._process_batch_callback = process_batch_callback
 
-        number_queued.labels(
-            name=self._name, **{SERVER_NAME_LABEL: self.server_name}
-        ).set_function(lambda: sum(len(q) for q in self._next_values.values()))
+        # Counter for number of items in flight (being processed or waiting).
+        self._number_in_flight: int = 0
 
-        number_of_keys.labels(
-            name=self._name, **{SERVER_NAME_LABEL: self.server_name}
-        ).set_function(lambda: len(self._next_values))
-
-        self._number_in_flight_metric: Gauge = number_in_flight.labels(
-            name=self._name, **{SERVER_NAME_LABEL: self.server_name}
-        )
+        # Register this instance with the global registry so metrics can be collected.
+        _batching_queue_registry.add(self)
 
     def shutdown(self) -> None:
         """
         Prepares the object for garbage collection by removing any handed out
         references.
         """
-        number_queued.remove(self._name, self.server_name)
-        number_of_keys.remove(self._name, self.server_name)
+        # The global registry uses WeakSet, so instances are automatically
+        # removed when garbage collected. No explicit cleanup needed.
 
     async def add_to_queue(self, value: V, key: Hashable = ()) -> R:
         """Adds the value to the queue with the given key, returning the result
@@ -155,8 +195,12 @@ class BatchingQueue(Generic[V, R]):
         if key not in self._processing_keys:
             self.hs.run_as_background_process(self._name, self._process_queue, key)
 
-        with self._number_in_flight_metric.track_inprogress():
-            return await make_deferred_yieldable(d)
+        self._number_in_flight += 1
+        try:
+            res = await make_deferred_yieldable(d)
+        finally:
+            self._number_in_flight -= 1
+        return res
 
     async def _process_queue(self, key: Hashable) -> None:
         """A background task to repeatedly pull things off the queue for the

@@ -37,7 +37,6 @@ import attr
 import treq
 from canonicaljson import encode_canonical_json
 from netaddr import AddrFormatError, IPAddress, IPSet
-from prometheus_client import Counter
 from zope.interface import implementer
 
 from OpenSSL import SSL
@@ -81,7 +80,7 @@ from synapse.http.replicationagent import ReplicationAgent
 from synapse.http.types import QueryParams
 from synapse.logging.context import make_deferred_yieldable, run_in_background
 from synapse.logging.opentracing import set_tag, start_active_span, tags
-from synapse.metrics import SERVER_NAME_LABEL
+from synapse.metrics import SERVER_NAME_LABEL, meter
 from synapse.types import ISynapseReactor, StrSequence
 from synapse.util.async_helpers import timeout_deferred
 from synapse.util.clock import Clock
@@ -106,14 +105,8 @@ except ImportError:
 
 logger = logging.getLogger(__name__)
 
-outgoing_requests_counter = Counter(
-    "synapse_http_client_requests", "", labelnames=["method", SERVER_NAME_LABEL]
-)
-incoming_responses_counter = Counter(
-    "synapse_http_client_responses",
-    "",
-    labelnames=["method", "code", SERVER_NAME_LABEL],
-)
+outgoing_requests_counter = meter.create_counter("synapse_http_client_requests")
+incoming_responses_counter = meter.create_counter("synapse_http_client_responses")
 
 # the type of the headers map, to be passed to the t.w.h.Headers.
 #
@@ -388,9 +381,9 @@ class BaseHttpClient:
             RequestTimedOutError if the request times out before the headers are read
 
         """
-        outgoing_requests_counter.labels(
-            method=method, **{SERVER_NAME_LABEL: self.server_name}
-        ).inc()
+        outgoing_requests_counter.add(
+            1, {"method": method, SERVER_NAME_LABEL: self.server_name}
+        )
 
         # log request but strip `access_token` (AS requests for example include this)
         logger.debug("Sending request %s %s", method, redact_uri(uri))
@@ -444,11 +437,14 @@ class BaseHttpClient:
 
                 response = await make_deferred_yieldable(request_deferred)
 
-                incoming_responses_counter.labels(
-                    method=method,
-                    code=response.code,
-                    **{SERVER_NAME_LABEL: self.server_name},
-                ).inc()
+                incoming_responses_counter.add(
+                    1,
+                    {
+                        "method": method,
+                        "code": str(response.code),
+                        SERVER_NAME_LABEL: self.server_name,
+                    },
+                )
                 logger.info(
                     "Received response to %s %s: %s",
                     method,
@@ -457,11 +453,14 @@ class BaseHttpClient:
                 )
                 return response
             except Exception as e:
-                incoming_responses_counter.labels(
-                    method=method,
-                    code="ERR",
-                    **{SERVER_NAME_LABEL: self.server_name},
-                ).inc()
+                incoming_responses_counter.add(
+                    1,
+                    {
+                        "method": method,
+                        "code": "ERR",
+                        SERVER_NAME_LABEL: self.server_name,
+                    },
+                )
                 logger.info(
                     "Error sending request to  %s %s: %s %s",
                     method,
@@ -910,9 +909,9 @@ class ReplicationClient(BaseHttpClient):
             RequestTimedOutError if the request times out before the headers are read
 
         """
-        outgoing_requests_counter.labels(
-            method=method, **{SERVER_NAME_LABEL: self.server_name}
-        ).inc()
+        outgoing_requests_counter.add(
+            1, {"method": method, SERVER_NAME_LABEL: self.server_name}
+        )
 
         logger.debug("Sending request %s %s", method, uri)
 
@@ -969,11 +968,14 @@ class ReplicationClient(BaseHttpClient):
 
                 response = await make_deferred_yieldable(request_deferred)
 
-                incoming_responses_counter.labels(
-                    method=method,
-                    code=response.code,
-                    **{SERVER_NAME_LABEL: self.server_name},
-                ).inc()
+                incoming_responses_counter.add(
+                    1,
+                    {
+                        "method": method,
+                        "code": str(response.code),
+                        SERVER_NAME_LABEL: self.server_name,
+                    },
+                )
                 logger.info(
                     "Received response to %s %s: %s",
                     method,
@@ -982,11 +984,14 @@ class ReplicationClient(BaseHttpClient):
                 )
                 return response
             except Exception as e:
-                incoming_responses_counter.labels(
-                    method=method,
-                    code="ERR",
-                    **{SERVER_NAME_LABEL: self.server_name},
-                ).inc()
+                incoming_responses_counter.add(
+                    1,
+                    {
+                        "method": method,
+                        "code": "ERR",
+                        SERVER_NAME_LABEL: self.server_name,
+                    },
+                )
                 logger.info(
                     "Error sending request to  %s %s: %s %s",
                     method,

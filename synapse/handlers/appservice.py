@@ -28,8 +28,6 @@ from typing import (
     Union,
 )
 
-from prometheus_client import Counter
-
 from twisted.internet import defer
 
 import synapse
@@ -42,6 +40,7 @@ from synapse.metrics import (
     SERVER_NAME_LABEL,
     event_processing_loop_counter,
     event_processing_loop_room_count,
+    meter,
 )
 from synapse.metrics.background_process_metrics import (
     wrap_as_background_process,
@@ -65,8 +64,8 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-events_processed_counter = Counter(
-    "synapse_handlers_appservice_events_processed", "", labelnames=[SERVER_NAME_LABEL]
+events_processed_counter = meter.create_counter(
+    "synapse_handlers_appservice_events_processed"
 )
 
 
@@ -181,10 +180,13 @@ class ApplicationServicesHandler:
                         ts = event_to_received_ts[event.event_id]
                         assert ts is not None
 
-                        synapse.metrics.event_processing_lag_by_event.labels(
-                            name="appservice_sender",
-                            **{SERVER_NAME_LABEL: self.server_name},
-                        ).observe((now - ts) / 1000)
+                        synapse.metrics.event_processing_lag_by_event.record(
+                            (now - ts) / 1000,
+                            {
+                                "name": "appservice_sender",
+                                SERVER_NAME_LABEL: self.server_name,
+                            },
+                        )
 
                     async def handle_room_events(events: Iterable[EventBase]) -> None:
                         for event in events:
@@ -202,38 +204,53 @@ class ApplicationServicesHandler:
 
                     await self.store.set_appservice_last_pos(upper_bound)
 
-                    synapse.metrics.event_processing_positions.labels(
-                        name="appservice_sender",
-                        **{SERVER_NAME_LABEL: self.server_name},
-                    ).set(upper_bound)
+                    synapse.metrics.event_processing_positions.set(
+                        upper_bound,
+                        {
+                            "name": "appservice_sender",
+                            SERVER_NAME_LABEL: self.server_name,
+                        },
+                    )
 
-                    events_processed_counter.labels(
-                        **{SERVER_NAME_LABEL: self.server_name}
-                    ).inc(len(events))
+                    events_processed_counter.add(
+                        len(events), {SERVER_NAME_LABEL: self.server_name}
+                    )
 
-                    event_processing_loop_room_count.labels(
-                        name="appservice_sender",
-                        **{SERVER_NAME_LABEL: self.server_name},
-                    ).inc(len(events_by_room))
+                    event_processing_loop_room_count.add(
+                        len(events_by_room),
+                        {
+                            "name": "appservice_sender",
+                            SERVER_NAME_LABEL: self.server_name,
+                        },
+                    )
 
-                    event_processing_loop_counter.labels(
-                        name="appservice_sender",
-                        **{SERVER_NAME_LABEL: self.server_name},
-                    ).inc()
+                    event_processing_loop_counter.add(
+                        1,
+                        {
+                            "name": "appservice_sender",
+                            SERVER_NAME_LABEL: self.server_name,
+                        },
+                    )
 
                     if events:
                         now = self.clock.time_msec()
                         ts = event_to_received_ts[events[-1].event_id]
                         assert ts is not None
 
-                        synapse.metrics.event_processing_lag.labels(
-                            name="appservice_sender",
-                            **{SERVER_NAME_LABEL: self.server_name},
-                        ).set(now - ts)
-                        synapse.metrics.event_processing_last_ts.labels(
-                            name="appservice_sender",
-                            **{SERVER_NAME_LABEL: self.server_name},
-                        ).set(ts)
+                        synapse.metrics.event_processing_lag.set(
+                            now - ts,
+                            {
+                                "name": "appservice_sender",
+                                SERVER_NAME_LABEL: self.server_name,
+                            },
+                        )
+                        synapse.metrics.event_processing_last_ts.set(
+                            ts,
+                            {
+                                "name": "appservice_sender",
+                                SERVER_NAME_LABEL: self.server_name,
+                            },
+                        )
             finally:
                 self.is_processing = False
 

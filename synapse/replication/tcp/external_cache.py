@@ -20,13 +20,12 @@
 #
 
 import logging
+import time
 from typing import TYPE_CHECKING, Any, Optional
-
-from prometheus_client import Counter, Histogram
 
 from synapse.logging import opentracing
 from synapse.logging.context import make_deferred_yieldable
-from synapse.metrics import SERVER_NAME_LABEL
+from synapse.metrics import SERVER_NAME_LABEL, meter
 from synapse.util.json import json_decoder, json_encoder
 
 if TYPE_CHECKING:
@@ -34,30 +33,27 @@ if TYPE_CHECKING:
 
     from synapse.server import HomeServer
 
-set_counter = Counter(
+set_counter = meter.create_counter(
     "synapse_external_cache_set",
-    "Number of times we set a cache",
-    labelnames=["cache_name", SERVER_NAME_LABEL],
+    description="Number of times we set a cache",
 )
 
-get_counter = Counter(
+get_counter = meter.create_counter(
     "synapse_external_cache_get",
-    "Number of times we get a cache",
-    labelnames=["cache_name", "hit", SERVER_NAME_LABEL],
+    description="Number of times we get a cache",
 )
 
-response_timer = Histogram(
+response_timer = meter.create_histogram(
     "synapse_external_cache_response_time_seconds",
-    "Time taken to get a response from Redis for a cache get/set request",
-    labelnames=["method", SERVER_NAME_LABEL],
-    buckets=(
+    description="Time taken to get a response from Redis for a cache get/set request",
+    explicit_bucket_boundaries_advisory=[
         0.001,
         0.002,
         0.005,
         0.01,
         0.02,
         0.05,
-    ),
+    ],
 )
 
 
@@ -96,9 +92,9 @@ class ExternalCache:
         if self._redis_connection is None:
             return
 
-        set_counter.labels(
-            cache_name=cache_name, **{SERVER_NAME_LABEL: self.server_name}
-        ).inc()
+        set_counter.add(
+            1, {"cache_name": cache_name, SERVER_NAME_LABEL: self.server_name}
+        )
 
         # txredisapi requires the value to be string, bytes or numbers, so we
         # encode stuff in JSON.
@@ -110,16 +106,18 @@ class ExternalCache:
             "ExternalCache.set",
             tags={opentracing.SynapseTags.CACHE_NAME: cache_name},
         ):
-            with response_timer.labels(
-                method="set", **{SERVER_NAME_LABEL: self.server_name}
-            ).time():
-                return await make_deferred_yieldable(
-                    self._redis_connection.set(
-                        self._get_redis_key(cache_name, key),
-                        encoded_value,
-                        pexpire=expiry_ms,
-                    )
+            start = time.perf_counter()
+            await make_deferred_yieldable(
+                self._redis_connection.set(
+                    self._get_redis_key(cache_name, key),
+                    encoded_value,
+                    pexpire=expiry_ms,
                 )
+            )
+            response_timer.record(
+                time.perf_counter() - start,
+                {"method": "set", SERVER_NAME_LABEL: self.server_name},
+            )
 
     async def get(self, cache_name: str, key: str) -> Optional[Any]:
         """Look up a key/value in the named cache."""
@@ -131,20 +129,25 @@ class ExternalCache:
             "ExternalCache.get",
             tags={opentracing.SynapseTags.CACHE_NAME: cache_name},
         ):
-            with response_timer.labels(
-                method="get", **{SERVER_NAME_LABEL: self.server_name}
-            ).time():
-                result = await make_deferred_yieldable(
-                    self._redis_connection.get(self._get_redis_key(cache_name, key))
-                )
+            start = time.perf_counter()
+            result = await make_deferred_yieldable(
+                self._redis_connection.get(self._get_redis_key(cache_name, key))
+            )
+            response_timer.record(
+                time.perf_counter() - start,
+                {"method": "get", SERVER_NAME_LABEL: self.server_name},
+            )
 
         logger.debug("Got cache result %s %s: %r", cache_name, key, result)
 
-        get_counter.labels(
-            cache_name=cache_name,
-            hit=result is not None,
-            **{SERVER_NAME_LABEL: self.server_name},
-        ).inc()
+        get_counter.add(
+            1,
+            {
+                "cache_name": cache_name,
+                "hit": result is not None,
+                SERVER_NAME_LABEL: self.server_name,
+            },
+        )
 
         if not result:
             return None

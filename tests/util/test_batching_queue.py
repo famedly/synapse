@@ -19,7 +19,8 @@
 #
 #
 
-from prometheus_client import Gauge
+from opentelemetry.metrics._internal.instrument import ObservableGauge
+from prometheus_client.core import REGISTRY
 
 from twisted.internet import defer
 
@@ -39,12 +40,13 @@ class BatchingQueueTestCase(HomeserverTestCase):
         super().setUp()
 
         # We ensure that we remove any existing metrics for "test_queue".
-        try:
-            number_queued.remove("test_queue", "test_server")
-            number_of_keys.remove("test_queue", "test_server")
-            number_in_flight.remove("test_queue", "test_server")
-        except KeyError:
-            pass
+        # there doesn't seem to be an equivalent for otel
+        # try:
+        #     number_queued.remove("test_queue", "test_server")
+        #     number_of_keys.remove("test_queue", "test_server")
+        #     number_in_flight.remove("test_queue", "test_server")
+        # except KeyError:
+        #     pass
 
         self._pending_calls: list[tuple[list[str], defer.Deferred]] = []
         self.queue: BatchingQueue[str, str] = BatchingQueue(
@@ -59,15 +61,23 @@ class BatchingQueueTestCase(HomeserverTestCase):
         self._pending_calls.append((values, d))
         return await make_deferred_yieldable(d)
 
-    def _get_sample_with_name(self, metric: Gauge, name: str) -> float:
+    def _get_sample_with_name(self, metric: ObservableGauge, name: str) -> float:
         """For a prometheus metric get the value of the sample that has a
-        matching "name" label.
+        matching "name" label and matching metric name.
         """
-        for sample in next(iter(metric.collect())).samples:
-            if sample.labels.get("name") == name:
-                return sample.value
+        # The metric.name attribute gives us the OTel instrument name
+        metric_name = metric.name
 
-        self.fail("Found no matching sample")
+        for metric_family in REGISTRY.collect():
+            # Check if this metric family corresponds to our metric
+            # (the family name should match or contain the metric name)
+            if metric_family.name != metric_name:
+                continue
+            for sample in metric_family.samples:
+                if sample.labels.get("name") == name:
+                    return sample.value
+
+        self.fail(f"Found no matching sample for metric={metric_name}, name={name}")
 
     def _assert_metrics(self, queued: int, keys: int, in_flight: int) -> None:
         """Assert that the metrics are correct"""

@@ -37,7 +37,6 @@ from typing import (
 )
 
 import attr
-from prometheus_client import Gauge
 
 from twisted.internet import defer
 
@@ -64,7 +63,7 @@ from synapse.logging.opentracing import (
     tag_args,
     trace,
 )
-from synapse.metrics import SERVER_NAME_LABEL
+from synapse.metrics import SERVER_NAME_LABEL, meter
 from synapse.metrics.background_process_metrics import (
     wrap_as_background_process,
 )
@@ -132,10 +131,9 @@ EVENT_QUEUE_ITERATIONS = 3  # No. times we block waiting for requests for events
 EVENT_QUEUE_TIMEOUT_S = 0.1  # Timeout when waiting for requests for events
 
 
-event_fetch_ongoing_gauge = Gauge(
+event_fetch_ongoing_gauge = meter.create_gauge(
     "synapse_event_fetch_ongoing",
-    "The number of event fetchers that are running",
-    labelnames=[SERVER_NAME_LABEL],
+    description="The number of event fetchers that are running",
 )
 
 
@@ -311,8 +309,8 @@ class EventsWorkerStore(SQLBaseStore):
             tuple[Iterable[str], "defer.Deferred[dict[str, _EventRow]]"]
         ] = []
         self._event_fetch_ongoing = 0
-        event_fetch_ongoing_gauge.labels(**{SERVER_NAME_LABEL: self.server_name}).set(
-            self._event_fetch_ongoing
+        event_fetch_ongoing_gauge.set(
+            self._event_fetch_ongoing, {SERVER_NAME_LABEL: self.server_name}
         )
 
         # We define this sequence here so that it can be referenced from both
@@ -1141,9 +1139,9 @@ class EventsWorkerStore(SQLBaseStore):
                 and self._event_fetch_ongoing < EVENT_QUEUE_THREADS
             ):
                 self._event_fetch_ongoing += 1
-                event_fetch_ongoing_gauge.labels(
-                    **{SERVER_NAME_LABEL: self.server_name}
-                ).set(self._event_fetch_ongoing)
+                event_fetch_ongoing_gauge.set(
+                    self._event_fetch_ongoing, {SERVER_NAME_LABEL: self.server_name}
+                )
                 # `_event_fetch_ongoing` is decremented in `_fetch_thread`.
                 should_start = True
             else:
@@ -1165,9 +1163,9 @@ class EventsWorkerStore(SQLBaseStore):
             event_fetches_to_fail = []
             with self._event_fetch_lock:
                 self._event_fetch_ongoing -= 1
-                event_fetch_ongoing_gauge.labels(
-                    **{SERVER_NAME_LABEL: self.server_name}
-                ).set(self._event_fetch_ongoing)
+                event_fetch_ongoing_gauge.set(
+                    self._event_fetch_ongoing, {SERVER_NAME_LABEL: self.server_name}
+                )
 
                 # There may still be work remaining in `_event_fetch_list` if we
                 # failed, or it was added in between us deciding to exit and

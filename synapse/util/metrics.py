@@ -31,7 +31,7 @@ from typing import (
     TypeVar,
 )
 
-from prometheus_client import CollectorRegistry, Counter, Metric
+from prometheus_client import CollectorRegistry, Metric
 from typing_extensions import Concatenate, ParamSpec
 
 from synapse.logging.context import (
@@ -39,61 +39,54 @@ from synapse.logging.context import (
     LoggingContext,
     current_context,
 )
-from synapse.metrics import SERVER_NAME_LABEL, InFlightGauge
+from synapse.metrics import SERVER_NAME_LABEL, InFlightGauge, meter
 from synapse.util.clock import Clock
 
 logger = logging.getLogger(__name__)
 
 # Metrics to see the number of and how much time is spend in various blocks of code.
 #
-block_counter = Counter(
+block_counter = meter.create_counter(
     "synapse_util_metrics_block_count",
-    documentation="The number of times this block has been called.",
-    labelnames=["block_name", SERVER_NAME_LABEL],
+    description="The number of times this block has been called.",
 )
 """The number of times this block has been called."""
 
-block_timer = Counter(
+block_timer = meter.create_counter(
     "synapse_util_metrics_block_time_seconds",
-    documentation="The cumulative time spent executing this block across all calls, in seconds.",
-    labelnames=["block_name", SERVER_NAME_LABEL],
+    description="The cumulative time spent executing this block across all calls, in seconds.",
 )
 """The cumulative time spent executing this block across all calls, in seconds."""
 
-block_ru_utime = Counter(
+block_ru_utime = meter.create_counter(
     "synapse_util_metrics_block_ru_utime_seconds",
-    documentation="Resource usage: user CPU time in seconds used in this block",
-    labelnames=["block_name", SERVER_NAME_LABEL],
+    description="Resource usage: user CPU time in seconds used in this block",
 )
 """Resource usage: user CPU time in seconds used in this block"""
 
-block_ru_stime = Counter(
+block_ru_stime = meter.create_counter(
     "synapse_util_metrics_block_ru_stime_seconds",
-    documentation="Resource usage: system CPU time in seconds used in this block",
-    labelnames=["block_name", SERVER_NAME_LABEL],
+    description="Resource usage: system CPU time in seconds used in this block",
 )
 """Resource usage: system CPU time in seconds used in this block"""
 
-block_db_txn_count = Counter(
+block_db_txn_count = meter.create_counter(
     "synapse_util_metrics_block_db_txn_count",
-    documentation="Number of database transactions completed in this block",
-    labelnames=["block_name", SERVER_NAME_LABEL],
+    description="Number of database transactions completed in this block",
 )
 """Number of database transactions completed in this block"""
 
 # seconds spent waiting for db txns, excluding scheduling time, in this block
-block_db_txn_duration = Counter(
+block_db_txn_duration = meter.create_counter(
     "synapse_util_metrics_block_db_txn_duration_seconds",
-    documentation="Seconds spent waiting for database txns, excluding scheduling time, in this block",
-    labelnames=["block_name", SERVER_NAME_LABEL],
+    description="Seconds spent waiting for database txns, excluding scheduling time, in this block",
 )
 """Seconds spent waiting for database txns, excluding scheduling time, in this block"""
 
 # seconds spent waiting for a db connection, in this block
-block_db_sched_duration = Counter(
+block_db_sched_duration = meter.create_counter(
     "synapse_util_metrics_block_db_sched_duration_seconds",
-    documentation="Seconds spent waiting for a db connection, in this block",
-    labelnames=["block_name", SERVER_NAME_LABEL],
+    description="Seconds spent waiting for a db connection, in this block",
 )
 """Seconds spent waiting for a db connection, in this block"""
 
@@ -253,13 +246,13 @@ class Measure:
 
         try:
             labels = {"block_name": self.name, SERVER_NAME_LABEL: self.server_name}
-            block_counter.labels(**labels).inc()
-            block_timer.labels(**labels).inc(duration)
-            block_ru_utime.labels(**labels).inc(usage.ru_utime)
-            block_ru_stime.labels(**labels).inc(usage.ru_stime)
-            block_db_txn_count.labels(**labels).inc(usage.db_txn_count)
-            block_db_txn_duration.labels(**labels).inc(usage.db_txn_duration_sec)
-            block_db_sched_duration.labels(**labels).inc(usage.db_sched_duration_sec)
+            block_counter.add(1, labels)
+            block_timer.add(duration, labels)
+            block_ru_utime.add(usage.ru_utime, labels)
+            block_ru_stime.add(usage.ru_stime, labels)
+            block_db_txn_count.add(usage.db_txn_count, labels)
+            block_db_txn_duration.add(usage.db_txn_duration_sec, labels)
+            block_db_sched_duration.add(usage.db_sched_duration_sec, labels)
         except ValueError as exc:
             logger.warning("Failed to save metrics! Usage: %s Error: %s", usage, exc)
 
