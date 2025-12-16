@@ -9,6 +9,9 @@ This release of Synapse requires PostgreSQL 14+.
 No significant changes since 1.143.0rc2.
 
 
+### Famedly additions for v1.143.0_1
+- fix: docs url broken on /version ([\#219](https://github.com/famedly/synapse/pull/219)) (FrenchgGithubUser)
+- fix: provide remote servers a way to find out about an event created during the remote join handshake ([\#71](https://github.com/famedly/synapse/pull/71)) (FrenchgGithubUser)
 
 
 # synapse 1.143.0rc2 (2025-11-18)
