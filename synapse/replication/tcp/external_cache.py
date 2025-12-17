@@ -22,11 +22,9 @@
 import logging
 from typing import TYPE_CHECKING, Any, Optional
 
-from prometheus_client import Histogram
-
 from synapse.logging import opentracing
 from synapse.logging.context import make_deferred_yieldable
-from synapse.metrics import SERVER_NAME_LABEL, SynapseCounter
+from synapse.metrics import SERVER_NAME_LABEL, SynapseCounter, SynapseHistogram
 from synapse.util.json import json_decoder, json_encoder
 
 if TYPE_CHECKING:
@@ -46,7 +44,7 @@ get_counter = SynapseCounter(
     labelnames=["cache_name", "hit", SERVER_NAME_LABEL],
 )
 
-response_timer = Histogram(
+response_timer = SynapseHistogram(
     "synapse_external_cache_response_time_seconds",
     "Time taken to get a response from Redis for a cache get/set request",
     labelnames=["method", SERVER_NAME_LABEL],

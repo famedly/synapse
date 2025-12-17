@@ -32,8 +32,6 @@ from typing import (
     Sequence,
 )
 
-from prometheus_client import Histogram
-
 from synapse import event_auth
 from synapse.api.constants import (
     EventContentFields,
@@ -76,7 +74,7 @@ from synapse.logging.opentracing import (
     tag_args,
     trace,
 )
-from synapse.metrics import SERVER_NAME_LABEL, SynapseCounter
+from synapse.metrics import SERVER_NAME_LABEL, SynapseCounter, SynapseHistogram
 from synapse.replication.http.federation import (
     ReplicationFederationSendEventsRestServlet,
 )
@@ -109,7 +107,7 @@ soft_failed_event_counter = SynapseCounter(
 )
 
 # Added to debug performance and track progress on optimizations
-backfill_processing_after_timer = Histogram(
+backfill_processing_after_timer = SynapseHistogram(
     "synapse_federation_backfill_processing_after_time_seconds",
     "sec",
     labelnames=[SERVER_NAME_LABEL],
@@ -134,7 +132,6 @@ backfill_processing_after_timer = Histogram(
         120.0,
         150.0,
         180.0,
-        "+Inf",
     ),
 )
 

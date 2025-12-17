@@ -32,8 +32,6 @@ from typing import (
     Union,
 )
 
-from prometheus_client import Histogram
-
 from twisted.python import failure
 
 from synapse.api.constants import (
@@ -79,7 +77,12 @@ from synapse.logging.opentracing import (
     tag_args,
     trace,
 )
-from synapse.metrics import SERVER_NAME_LABEL, SynapseCounter, SynapseGauge
+from synapse.metrics import (
+    SERVER_NAME_LABEL,
+    SynapseCounter,
+    SynapseGauge,
+    SynapseHistogram,
+)
 from synapse.metrics.background_process_metrics import wrap_as_background_process
 from synapse.replication.http.federation import (
     ReplicationFederationSendEduRestServlet,
@@ -116,7 +119,7 @@ received_queries_counter = SynapseCounter(
     labelnames=["type", SERVER_NAME_LABEL],
 )
 
-pdu_process_time = Histogram(
+pdu_process_time = SynapseHistogram(
     "synapse_federation_server_pdu_process_time",
     "Time taken to process an event",
     labelnames=[SERVER_NAME_LABEL],

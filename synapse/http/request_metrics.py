@@ -24,10 +24,13 @@ import threading
 import traceback
 from typing import Mapping
 
-from prometheus_client.core import Histogram
-
 from synapse.logging.context import current_context
-from synapse.metrics import SERVER_NAME_LABEL, LaterGauge, SynapseCounter
+from synapse.metrics import (
+    SERVER_NAME_LABEL,
+    LaterGauge,
+    SynapseCounter,
+    SynapseHistogram,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -51,7 +54,7 @@ outgoing_responses_counter = SynapseCounter(
     labelnames=["method", "code", SERVER_NAME_LABEL],
 )
 
-response_timer = Histogram(
+response_timer = SynapseHistogram(
     "synapse_http_server_response_time_seconds",
     "sec",
     labelnames=["method", "servlet", "tag", "code", SERVER_NAME_LABEL],

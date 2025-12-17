@@ -45,7 +45,12 @@ from synapse.logging.context import (
     run_in_background,
 )
 from synapse.logging.opentracing import start_active_span
-from synapse.metrics import SERVER_NAME_LABEL, Histogram, LaterGauge, SynapseCounter
+from synapse.metrics import (
+    SERVER_NAME_LABEL,
+    LaterGauge,
+    SynapseCounter,
+    SynapseHistogram,
+)
 from synapse.util.clock import Clock
 
 if typing.TYPE_CHECKING:
@@ -65,7 +70,7 @@ rate_limit_reject_counter = SynapseCounter(
     "Number of requests rejected by the rate limiter",
     labelnames=["rate_limiter_name", SERVER_NAME_LABEL],
 )
-queue_wait_timer = Histogram(
+queue_wait_timer = SynapseHistogram(
     "synapse_rate_limit_queue_wait_time_seconds",
     "Amount of time spent waiting for the rate limiter to let our request through.",
     labelnames=["rate_limiter_name", SERVER_NAME_LABEL],
@@ -83,7 +88,6 @@ queue_wait_timer = Histogram(
         5.0,
         10.0,
         20.0,
-        "+Inf",
     ),
 )
 

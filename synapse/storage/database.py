@@ -43,7 +43,6 @@ from typing import (
 )
 
 import attr
-from prometheus_client import Histogram
 from typing_extensions import Concatenate, ParamSpec
 
 from twisted.enterprise import adbapi
@@ -57,7 +56,12 @@ from synapse.logging.context import (
     current_context,
     make_deferred_yieldable,
 )
-from synapse.metrics import SERVER_NAME_LABEL, SynapseCounter, register_threadpool
+from synapse.metrics import (
+    SERVER_NAME_LABEL,
+    SynapseCounter,
+    SynapseHistogram,
+    register_threadpool,
+)
 from synapse.storage.background_updates import BackgroundUpdater
 from synapse.storage.engines import BaseDatabaseEngine, PostgresEngine, Sqlite3Engine
 from synapse.storage.types import Connection, Cursor, SQLQueryParameters
@@ -77,11 +81,11 @@ sql_logger = logging.getLogger("synapse.storage.SQL")
 transaction_logger = logging.getLogger("synapse.storage.txn")
 perf_logger = logging.getLogger("synapse.storage.TIME")
 
-sql_scheduling_timer = Histogram(
+sql_scheduling_timer = SynapseHistogram(
     "synapse_storage_schedule_time", "sec", labelnames=[SERVER_NAME_LABEL]
 )
 
-sql_query_timer = Histogram(
+sql_query_timer = SynapseHistogram(
     "synapse_storage_query_time", "sec", labelnames=["verb", SERVER_NAME_LABEL]
 )
 sql_txn_count = SynapseCounter(

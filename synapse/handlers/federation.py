@@ -36,7 +36,6 @@ from typing import (
 )
 
 import attr
-from prometheus_client import Histogram
 from signedjson.key import decode_verify_key_bytes
 from signedjson.sign import verify_signed_json
 from unpaddedbase64 import decode_base64
@@ -67,7 +66,7 @@ from synapse.handlers.pagination import PURGE_PAGINATION_LOCK_NAME
 from synapse.http.servlet import assert_params_in_dict
 from synapse.logging.context import nested_logging_context
 from synapse.logging.opentracing import SynapseTags, set_tag, tag_args, trace
-from synapse.metrics import SERVER_NAME_LABEL
+from synapse.metrics import SERVER_NAME_LABEL, SynapseHistogram
 from synapse.module_api import NOT_SPAM
 from synapse.storage.databases.main.events_worker import EventRedactBehaviour
 from synapse.storage.invite_rule import InviteRule
@@ -83,7 +82,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 # Added to debug performance and track progress on optimizations
-backfill_processing_before_timer = Histogram(
+backfill_processing_before_timer = SynapseHistogram(
     "synapse_federation_backfill_processing_before_time_seconds",
     "sec",
     labelnames=[SERVER_NAME_LABEL],
@@ -101,7 +100,6 @@ backfill_processing_before_timer = Histogram(
         40.0,
         60.0,
         80.0,
-        "+Inf",
     ),
 )
 

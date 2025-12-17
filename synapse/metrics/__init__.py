@@ -52,10 +52,11 @@ from opentelemetry.sdk.resources import SERVICE_NAME, Resource as OtelResource
 from packaging.version import parse as parse_version
 from prometheus_client import (
     CollectorRegistry,
-    Histogram,
     Metric,
     generate_latest,
+    values,
 )
+from prometheus_client.context_managers import Timer
 from prometheus_client.core import (
     REGISTRY,
     GaugeHistogramMetricFamily,
@@ -63,6 +64,8 @@ from prometheus_client.core import (
     Sample,
 )
 from prometheus_client.metrics import _get_use_created
+from prometheus_client.samples import Exemplar
+from prometheus_client.utils import INF, floatToGoString
 from prometheus_client.values import ValueClass
 from typing_extensions import Dict, Self
 
@@ -526,7 +529,7 @@ class SynapseGauge(SynapseMetricWrapperBase):
         self._gauge_value: float = 0
 
         if not self._labelvalues and self._registry:
-            # TODO: look into what to do here
+            # TODO: look into what to do here, and maybe move it to the wrapperbase?
             self._registry.register(self)  # type: ignore
 
     def set(self, value: float) -> None:
@@ -594,6 +597,143 @@ class SynapseGauge(SynapseMetricWrapperBase):
             self._documentation,
             multiprocess_mode=self._multiprocess_mode,
         )
+
+
+class SynapseHistogram(SynapseMetricWrapperBase):
+    _type = "histogram"
+    _reserved_labelnames = ["le"]
+    DEFAULT_BUCKETS = (
+        0.005,
+        0.01,
+        0.025,
+        0.05,
+        0.075,
+        0.1,
+        0.25,
+        0.5,
+        0.75,
+        1.0,
+        2.5,
+        5.0,
+        7.5,
+        10.0,
+        INF,
+    )
+
+    def __init__(
+        self,
+        name: str,
+        documentation: str,
+        labelnames: Iterable[str] = (),
+        namespace: str = "",
+        subsystem: str = "",
+        unit: str = "",
+        registry: Optional[CollectorRegistry] = REGISTRY,
+        _labelvalues: Optional[Sequence[str]] = None,
+        buckets: Sequence[float] = DEFAULT_BUCKETS,
+    ):
+        self._prepare_buckets(buckets)
+        super().__init__(
+            name=name,
+            documentation=documentation,
+            labelnames=labelnames,
+            namespace=namespace,
+            subsystem=subsystem,
+            unit=unit,
+            registry=registry,
+            _labelvalues=_labelvalues,
+        )
+        self._histogram = meter.create_histogram(
+            self._name,
+            unit=self._unit,
+            description=self._documentation,
+            explicit_bucket_boundaries_advisory=buckets,
+        )
+        self._kwargs["buckets"] = buckets
+
+    def _prepare_buckets(self, source_buckets: Sequence[Union[float, str]]) -> None:
+        buckets = [float(b) for b in source_buckets]
+        if buckets != sorted(buckets):
+            # This is probably an error on the part of the user,
+            # so raise rather than sorting for them.
+            raise ValueError("Buckets not in sorted order")
+        if buckets and buckets[-1] != INF:
+            buckets.append(INF)
+        if len(buckets) < 2:
+            raise ValueError("Must have at least two buckets")
+        self._upper_bounds = buckets
+
+    def _metric_init(self) -> None:
+        self._buckets: list[values.ValueClass] = []
+        self._created = time()
+        bucket_labelnames = self._labelnames + ("le",)
+        self._sum = values.ValueClass(
+            self._type,
+            self._name,
+            self._name + "_sum",
+            self._labelnames,
+            self._labelvalues,
+            self._documentation,
+        )
+        for b in self._upper_bounds:
+            self._buckets.append(
+                values.ValueClass(
+                    self._type,
+                    self._name,
+                    self._name + "_bucket",
+                    bucket_labelnames,
+                    self._labelvalues + (floatToGoString(b),),
+                    self._documentation,
+                )
+            )
+
+    def observe(self, amount: float, exemplar: Optional[Dict[str, str]] = None) -> None:
+        """Observe the given amount.
+
+        The amount is usually positive or zero. Negative values are
+        accepted but prevent current versions of Prometheus from
+        properly detecting counter resets in the sum of
+        observations. See
+        https://prometheus.io/docs/practices/histograms/#count-and-sum-of-observations
+        for details.
+        """
+        self._raise_if_not_observable()
+        self._sum.inc(amount)
+        for i, bound in enumerate(self._upper_bounds):
+            if amount <= bound:
+                self._buckets[i].inc(1)
+                if exemplar:
+                    # _validate_exemplar(exemplar)
+                    self._buckets[i].set_exemplar(Exemplar(exemplar, amount, time()))
+                break
+
+    def time(self) -> Timer:
+        """Time a block of code or function, and observe the duration in seconds.
+
+        Can be used as a function decorator or context manager.
+        """
+        return Timer(self, "observe")
+
+    def _child_samples(self) -> Iterable[Sample]:
+        samples = []
+        acc = 0.0
+        for i, bound in enumerate(self._upper_bounds):
+            acc += self._buckets[i].get()
+            samples.append(
+                Sample(
+                    "_bucket",
+                    {"le": floatToGoString(bound)},
+                    acc,
+                    None,
+                    self._buckets[i].get_exemplar(),
+                )
+            )
+        samples.append(Sample("_count", {}, acc, None, None))
+        if self._upper_bounds[0] >= 0:
+            samples.append(Sample("_sum", {}, self._sum.get(), None, None))
+        if _get_use_created():
+            samples.append(Sample("_created", {}, self._created, None, None))
+        return tuple(samples)
 
 
 @attr.s(slots=True, hash=True, auto_attribs=True, kw_only=True)
@@ -1091,7 +1231,7 @@ event_processing_lag = SynapseGauge(
     "synapse_event_processing_lag", "", labelnames=["name", SERVER_NAME_LABEL]
 )
 
-event_processing_lag_by_event = Histogram(
+event_processing_lag_by_event = SynapseHistogram(
     "synapse_event_processing_lag_by_event",
     "Time between an event being persisted and it being queued up to be sent to the relevant remote servers",
     labelnames=["name", SERVER_NAME_LABEL],
@@ -1119,7 +1259,7 @@ module_instances_info = SynapseGauge(
 )
 
 # 3PID send info
-threepid_send_requests = Histogram(
+threepid_send_requests = SynapseHistogram(
     "synapse_threepid_send_requests_with_tries",
     documentation="Number of requests for a 3pid token by try count. Note if"
     " there is a request with try count of 4, then there would have been one"
@@ -1219,4 +1359,5 @@ __all__ = [
     "install_gc_manager",
     "SynapseCounter",
     "SynapseGauge",
+    "SynapseHistogram",
 ]
