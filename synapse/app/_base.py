@@ -36,8 +36,6 @@ from typing import (
     Awaitable,
     Callable,
     NoReturn,
-    Optional,
-    Union,
     cast,
 )
 from wsgiref.simple_server import WSGIServer
@@ -186,8 +184,8 @@ def start_worker_reactor(
 def start_reactor(
     appname: str,
     soft_file_limit: int,
-    gc_thresholds: Optional[tuple[int, int, int]],
-    pid_file: Optional[str],
+    gc_thresholds: tuple[int, int, int] | None,
+    pid_file: str | None,
     daemonize: bool,
     print_pidfile: bool,
     logger: logging.Logger,
@@ -427,7 +425,7 @@ def listen_http(
     root_resource: Resource,
     version_string: str,
     max_request_body_size: int,
-    context_factory: Optional[IOpenSSLContextFactory],
+    context_factory: IOpenSSLContextFactory | None,
     reactor: ISynapseReactor = reactor,
 ) -> list[Port]:
     """
@@ -570,9 +568,7 @@ def setup_sighup_handling() -> None:
     if _already_setup_sighup_handling:
         return
 
-    previous_sighup_handler: Union[
-        Callable[[int, Optional[FrameType]], Any], int, None
-    ] = None
+    previous_sighup_handler: Callable[[int, FrameType | None], Any] | int | None = None
 
     # Set up the SIGHUP machinery.
     if hasattr(signal, "SIGHUP"):

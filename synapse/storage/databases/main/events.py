@@ -29,7 +29,6 @@ from typing import (
     Collection,
     Generator,
     Iterable,
-    Optional,
     Sequence,
     TypedDict,
     cast,
@@ -75,7 +74,6 @@ from synapse.types import (
     MutableStateMap,
     StateMap,
     StrCollection,
-    get_domain_from_id,
 )
 from synapse.types.handlers import SLIDING_SYNC_DEFAULT_BUMP_EVENT_TYPES
 from synapse.types.state import StateFilter
@@ -97,8 +95,27 @@ persist_event_counter = Counter(
 event_counter = Counter(
     "synapse_storage_events_persisted_events_sep",
     "",
-    labelnames=["type", "origin_type", "origin_entity", SERVER_NAME_LABEL],
+    labelnames=[
+        "type",  # The event type or "*other*" for types we don't track
+        "origin_type",
+        SERVER_NAME_LABEL,
+    ],
 )
+
+# Event types that we track in the `events_counter` metric above.
+#
+# This list is chosen to balance tracking the most common event types that are
+# useful to monitor (and are likely to spike), while keeping the cardinality of
+# the metric low enough to avoid wasted resources.
+TRACKED_EVENT_TYPES = {
+    EventTypes.Message,
+    EventTypes.Encrypted,
+    EventTypes.Member,
+    EventTypes.ThirdPartyInvite,
+    EventTypes.Redaction,
+    EventTypes.Create,
+    EventTypes.Tombstone,
+}
 
 # State event type/key pairs that we need to gather to fill in the
 # `sliding_sync_joined_rooms`/`sliding_sync_membership_snapshots` tables.
@@ -141,10 +158,10 @@ class SlidingSyncStateInsertValues(TypedDict, total=False):
     `sliding_sync_membership_snapshots` database tables.
     """
 
-    room_type: Optional[str]
-    is_encrypted: Optional[bool]
-    room_name: Optional[str]
-    tombstone_successor_room_id: Optional[str]
+    room_type: str | None
+    is_encrypted: bool | None
+    room_name: str | None
+    tombstone_successor_room_id: str | None
 
 
 class SlidingSyncMembershipSnapshotSharedInsertValues(
@@ -155,7 +172,7 @@ class SlidingSyncMembershipSnapshotSharedInsertValues(
     multiple memberships
     """
 
-    has_known_state: Optional[bool]
+    has_known_state: bool | None
 
 
 @attr.s(slots=True, auto_attribs=True)
@@ -193,7 +210,7 @@ class SlidingSyncTableChanges:
     # foreground update for
     # `sliding_sync_joined_rooms`/`sliding_sync_membership_snapshots` (tracked by
     # https://github.com/element-hq/synapse/issues/17623)
-    joined_room_bump_stamp_to_fully_insert: Optional[int]
+    joined_room_bump_stamp_to_fully_insert: int | None
     # Values to upsert into `sliding_sync_joined_rooms`
     joined_room_updates: SlidingSyncStateInsertValues
 
@@ -272,8 +289,8 @@ class PersistEventsStore:
         room_id: str,
         events_and_contexts: list[EventPersistencePair],
         *,
-        state_delta_for_room: Optional[DeltaState],
-        new_forward_extremities: Optional[set[str]],
+        state_delta_for_room: DeltaState | None,
+        new_forward_extremities: set[str] | None,
         new_event_links: dict[str, NewEventChainLinks],
         use_negative_stream_ordering: bool = False,
         inhibit_local_membership_updates: bool = False,
@@ -375,19 +392,21 @@ class PersistEventsStore:
 
             for event, context in events_and_contexts:
                 if context.app_service:
-                    origin_type = "local"
-                    origin_entity = context.app_service.id
+                    origin_type = "application_service"
                 elif self.hs.is_mine_id(event.sender):
                     origin_type = "local"
-                    origin_entity = "*client*"
                 else:
                     origin_type = "remote"
-                    origin_entity = get_domain_from_id(event.sender)
+
+                # We only track a subset of event types, to avoid high
+                # cardinality in the metrics.
+                metrics_event_type = (
+                    event.type if event.type in TRACKED_EVENT_TYPES else "*other*"
+                )
 
                 event_counter.labels(
-                    type=event.type,
+                    type=metrics_event_type,
                     origin_type=origin_type,
-                    origin_entity=origin_entity,
                     **{SERVER_NAME_LABEL: self.server_name},
                 ).inc()
 
@@ -717,7 +736,7 @@ class PersistEventsStore:
         # `_update_sliding_sync_tables_with_new_persisted_events_txn()`)
         #
         joined_room_updates: SlidingSyncStateInsertValues = {}
-        bump_stamp_to_fully_insert: Optional[int] = None
+        bump_stamp_to_fully_insert: int | None = None
         if not delta_state.no_longer_in_room:
             current_state_ids_map = {}
 
@@ -1014,10 +1033,10 @@ class PersistEventsStore:
         room_id: str,
         events_and_contexts: list[EventPersistencePair],
         inhibit_local_membership_updates: bool,
-        state_delta_for_room: Optional[DeltaState],
-        new_forward_extremities: Optional[set[str]],
+        state_delta_for_room: DeltaState | None,
+        new_forward_extremities: set[str] | None,
         new_event_links: dict[str, NewEventChainLinks],
-        sliding_sync_table_changes: Optional[SlidingSyncTableChanges],
+        sliding_sync_table_changes: SlidingSyncTableChanges | None,
     ) -> None:
         """Insert some number of room events into the necessary database tables.
 
@@ -1570,7 +1589,7 @@ class PersistEventsStore:
         #
 
         existing_chains: set[int] = set()
-        tree: list[tuple[str, Optional[str]]] = []
+        tree: list[tuple[str, str | None]] = []
 
         # We need to do this in a topologically sorted order as we want to
         # generate chain IDs/sequence numbers of an event's auth events before
@@ -1622,7 +1641,7 @@ class PersistEventsStore:
                 if not existing_chain_id:
                     existing_chain_id = chain_map[auth_event_id]
 
-            new_chain_tuple: Optional[tuple[Any, int]] = None
+            new_chain_tuple: tuple[Any, int] | None = None
             if existing_chain_id:
                 # We found a chain ID/sequence number candidate, check its
                 # not already taken.
@@ -2491,7 +2510,7 @@ class PersistEventsStore:
             room_id: The room ID
             events_and_contexts: events we are persisting
         """
-        stream_ordering: Optional[int] = None
+        stream_ordering: int | None = None
         depth_update = 0
         for event, context in events_and_contexts:
             # Don't update the stream ordering for backfilled events because

@@ -23,7 +23,7 @@ import datetime
 import logging
 from collections import OrderedDict
 from types import TracebackType
-from typing import TYPE_CHECKING, Hashable, Iterable, Optional
+from typing import TYPE_CHECKING, Hashable, Iterable
 
 import attr
 from prometheus_client import Counter
@@ -41,6 +41,7 @@ from synapse.events import EventBase
 from synapse.federation.units import Edu
 from synapse.handlers.presence import format_user_presence_state
 from synapse.logging import issue9533_logger
+from synapse.logging.context import PreserveLoggingContext
 from synapse.logging.opentracing import SynapseTags, set_tag
 from synapse.metrics import SERVER_NAME_LABEL, sent_transactions_counter
 from synapse.types import JsonDict, ReadReceipt
@@ -121,7 +122,7 @@ class PerDestinationQueue:
         self._destination = destination
         self.transmission_loop_running = False
         self._transmission_loop_enabled = True
-        self.active_transmission_loop: Optional[defer.Deferred] = None
+        self.active_transmission_loop: defer.Deferred | None = None
 
         # Flag to signal to any running transmission loop that there is new data
         # queued up to be sent.
@@ -142,7 +143,7 @@ class PerDestinationQueue:
 
         # Cache of the last successfully-transmitted stream ordering for this
         # destination (we are the only updater so this is safe)
-        self._last_successful_stream_ordering: Optional[int] = None
+        self._last_successful_stream_ordering: int | None = None
 
         # a queue of pending PDUs
         self._pending_pdus: list[EventBase] = []
@@ -186,7 +187,8 @@ class PerDestinationQueue:
         self._transaction_manager.shutdown()
         try:
             if self.active_transmission_loop is not None:
-                self.active_transmission_loop.cancel()
+                with PreserveLoggingContext():
+                    self.active_transmission_loop.cancel()
         except Exception:
             pass
 
@@ -742,9 +744,9 @@ class _TransactionQueueManager:
 
     queue: PerDestinationQueue
 
-    _device_stream_id: Optional[int] = None
-    _device_list_id: Optional[int] = None
-    _last_stream_ordering: Optional[int] = None
+    _device_stream_id: int | None = None
+    _device_list_id: int | None = None
+    _last_stream_ordering: int | None = None
     _pdus: list[EventBase] = attr.Factory(list)
 
     async def __aenter__(self) -> tuple[list[EventBase], list[Edu]]:
@@ -845,9 +847,9 @@ class _TransactionQueueManager:
 
     async def __aexit__(
         self,
-        exc_type: Optional[type[BaseException]],
-        exc: Optional[BaseException],
-        tb: Optional[TracebackType],
+        exc_type: type[BaseException] | None,
+        exc: BaseException | None,
+        tb: TracebackType | None,
     ) -> None:
         if exc_type is not None:
             # Failed to send transaction, so we bail out.

@@ -31,7 +31,6 @@ from typing import (
     Optional,
     Sized,
     TypeVar,
-    Union,
     cast,
 )
 
@@ -40,6 +39,7 @@ from prometheus_client import Gauge
 from twisted.internet import defer
 from twisted.python.failure import Failure
 
+from synapse.logging.context import PreserveLoggingContext
 from synapse.metrics import SERVER_NAME_LABEL
 from synapse.util.async_helpers import ObservableDeferred
 from synapse.util.caches.lrucache import LruCache
@@ -107,9 +107,9 @@ class DeferredCache(Generic[KT, VT]):
         cache_type = TreeCache if tree else dict
 
         # _pending_deferred_cache maps from the key value to a `CacheEntry` object.
-        self._pending_deferred_cache: Union[
-            TreeCache, "MutableMapping[KT, CacheEntry[KT, VT]]"
-        ] = cache_type()
+        self._pending_deferred_cache: (
+            TreeCache | "MutableMapping[KT, CacheEntry[KT, VT]]"
+        ) = cache_type()
 
         def metrics_cb() -> None:
             cache_pending_metric.labels(
@@ -136,7 +136,7 @@ class DeferredCache(Generic[KT, VT]):
             prune_unread_entries=prune_unread_entries,
         )
 
-        self.thread: Optional[threading.Thread] = None
+        self.thread: threading.Thread | None = None
 
     @property
     def max_entries(self) -> int:
@@ -155,7 +155,7 @@ class DeferredCache(Generic[KT, VT]):
     def get(
         self,
         key: KT,
-        callback: Optional[Callable[[], None]] = None,
+        callback: Callable[[], None] | None = None,
         update_metrics: bool = True,
     ) -> defer.Deferred:
         """Looks the key up in the caches.
@@ -199,7 +199,7 @@ class DeferredCache(Generic[KT, VT]):
     def get_bulk(
         self,
         keys: Collection[KT],
-        callback: Optional[Callable[[], None]] = None,
+        callback: Callable[[], None] | None = None,
     ) -> tuple[dict[KT, VT], Optional["defer.Deferred[dict[KT, VT]]"], Collection[KT]]:
         """Bulk lookup of items in the cache.
 
@@ -263,9 +263,7 @@ class DeferredCache(Generic[KT, VT]):
 
         return (cached, pending_deferred, missing)
 
-    def get_immediate(
-        self, key: KT, default: T, update_metrics: bool = True
-    ) -> Union[VT, T]:
+    def get_immediate(self, key: KT, default: T, update_metrics: bool = True) -> VT | T:
         """If we have a *completed* cached value, return it."""
         return self.cache.get(key, default, update_metrics=update_metrics)
 
@@ -273,7 +271,7 @@ class DeferredCache(Generic[KT, VT]):
         self,
         key: KT,
         value: "defer.Deferred[VT]",
-        callback: Optional[Callable[[], None]] = None,
+        callback: Callable[[], None] | None = None,
     ) -> defer.Deferred:
         """Adds a new entry to the cache (or updates an existing one).
 
@@ -328,7 +326,7 @@ class DeferredCache(Generic[KT, VT]):
     def start_bulk_input(
         self,
         keys: Collection[KT],
-        callback: Optional[Callable[[], None]] = None,
+        callback: Callable[[], None] | None = None,
     ) -> "CacheMultipleEntries[KT, VT]":
         """Bulk set API for use when fetching multiple keys at once from the DB.
 
@@ -382,7 +380,7 @@ class DeferredCache(Generic[KT, VT]):
         return failure
 
     def prefill(
-        self, key: KT, value: VT, callback: Optional[Callable[[], None]] = None
+        self, key: KT, value: VT, callback: Callable[[], None] | None = None
     ) -> None:
         callbacks = (callback,) if callback else ()
         self.cache.set(key, value, callbacks=callbacks)
@@ -435,7 +433,7 @@ class CacheEntry(Generic[KT, VT], metaclass=abc.ABCMeta):
 
     @abc.abstractmethod
     def add_invalidation_callback(
-        self, key: KT, callback: Optional[Callable[[], None]]
+        self, key: KT, callback: Callable[[], None] | None
     ) -> None:
         """Add an invalidation callback"""
         ...
@@ -461,7 +459,7 @@ class CacheEntrySingle(CacheEntry[KT, VT]):
         return self._deferred.observe()
 
     def add_invalidation_callback(
-        self, key: KT, callback: Optional[Callable[[], None]]
+        self, key: KT, callback: Callable[[], None] | None
     ) -> None:
         if callback is None:
             return
@@ -478,7 +476,7 @@ class CacheMultipleEntries(CacheEntry[KT, VT]):
     __slots__ = ["_deferred", "_callbacks", "_global_callbacks"]
 
     def __init__(self) -> None:
-        self._deferred: Optional[ObservableDeferred[dict[KT, VT]]] = None
+        self._deferred: ObservableDeferred[dict[KT, VT]] | None = None
         self._callbacks: dict[KT, set[Callable[[], None]]] = {}
         self._global_callbacks: set[Callable[[], None]] = set()
 
@@ -488,7 +486,7 @@ class CacheMultipleEntries(CacheEntry[KT, VT]):
         return self._deferred.observe().addCallback(lambda res: res[key])
 
     def add_invalidation_callback(
-        self, key: KT, callback: Optional[Callable[[], None]]
+        self, key: KT, callback: Callable[[], None] | None
     ) -> None:
         if callback is None:
             return
@@ -499,7 +497,7 @@ class CacheMultipleEntries(CacheEntry[KT, VT]):
         return self._callbacks.get(key, set()) | self._global_callbacks
 
     def add_global_invalidation_callback(
-        self, callback: Optional[Callable[[], None]]
+        self, callback: Callable[[], None] | None
     ) -> None:
         """Add a callback for when any keys get invalidated."""
         if callback is None:
@@ -517,7 +515,8 @@ class CacheMultipleEntries(CacheEntry[KT, VT]):
             cache._completed_callback(value, self, key)
 
         if self._deferred:
-            self._deferred.callback(result)
+            with PreserveLoggingContext():
+                self._deferred.callback(result)
 
     def error_bulk(
         self, cache: DeferredCache[KT, VT], keys: Collection[KT], failure: Failure
@@ -527,4 +526,5 @@ class CacheMultipleEntries(CacheEntry[KT, VT]):
             cache._error_callback(failure, self, key)
 
         if self._deferred:
-            self._deferred.errback(failure)
+            with PreserveLoggingContext():
+                self._deferred.errback(failure)

@@ -252,10 +252,11 @@ jobs:
           -exec echo "::endgroup::" \;
           || true
       - run: poetry run coverage combine
+      - run: poetry run coverage xml
       - name: Codecov - Upload coverage
-        uses: codecov/codecov-action@v4
+        uses: codecov/codecov-action@v5
         with:
-          token: ${{secrets.CODECOV_TOKEN}}
+          use_oidc: true
 
   sytest:
     if: ${{ !failure() && !cancelled() }}
