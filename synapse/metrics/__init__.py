@@ -26,8 +26,6 @@ import os
 import platform
 import threading
 from importlib import metadata
-from time import time
-from types import MethodType
 from typing import (
     Any,
     Callable,
@@ -52,22 +50,19 @@ from opentelemetry.sdk.resources import SERVICE_NAME, Resource as OtelResource
 from packaging.version import parse as parse_version
 from prometheus_client import (
     CollectorRegistry,
+    Counter,
+    Gauge,
+    Histogram,
     Metric,
     generate_latest,
-    values,
 )
-from prometheus_client.context_managers import Timer
+from prometheus_client.context_managers import InprogressTracker, Timer
 from prometheus_client.core import (
     REGISTRY,
     GaugeHistogramMetricFamily,
     GaugeMetricFamily,
-    Sample,
 )
-from prometheus_client.metrics import _get_use_created
-from prometheus_client.samples import Exemplar
-from prometheus_client.utils import INF, floatToGoString
-from prometheus_client.values import ValueClass
-from typing_extensions import Dict, Self
+from prometheus_client.utils import INF
 
 from twisted.python.threadpool import ThreadPool
 from twisted.web.resource import Resource
@@ -175,217 +170,7 @@ class _RegistryProxy:
 RegistryProxy = cast(CollectorRegistry, _RegistryProxy)
 
 
-def _build_full_name(
-    metric_type: str, name: str, namespace: str, subsystem: str, unit: str
-) -> str:
-    # Ripped from prometheus_client/metrics.py
-    if not name:
-        raise ValueError("Metric name should not be empty")
-    full_name = ""
-    if namespace:
-        full_name += namespace + "_"
-    if subsystem:
-        full_name += subsystem + "_"
-    full_name += name
-    if metric_type == "counter" and full_name.endswith("_total"):
-        full_name = full_name[:-6]  # Munge to OpenMetrics.
-    if unit and not full_name.endswith("_" + unit):
-        full_name += "_" + unit
-    if unit and metric_type in ("info", "stateset"):
-        raise ValueError(
-            "Metric name is of a type that cannot have a unit: " + full_name
-        )
-    return full_name
-
-
-T = TypeVar("T", bound="SynapseMetricWrapperBase")
-
-
-class SynapseMetricWrapperBase:
-    def _raise_if_not_observable(self) -> None:
-        # Functions that mutate the state of the metric, for example incrementing
-        # a counter, will fail if the metric is not observable, because only if a
-        # metric is observable will the value be initialized.
-        if not self._is_observable():
-            raise ValueError("%s metric is missing label values" % str(self._type))
-
-    def _is_observable(self):  # type: ignore[no-untyped-def]
-        # Whether this metric is observable, i.e.
-        # * a metric without label names and values, or
-        # * the child of a labelled metric.
-        return not self._labelnames or (self._labelnames and self._labelvalues)
-
-    def __init__(
-        self: T,
-        name: str,
-        documentation: str,
-        labelnames: Iterable[str] = (),
-        namespace: str = "",
-        subsystem: str = "",
-        unit: str = "",
-        registry: Optional[CollectorRegistry] = REGISTRY,
-        _labelvalues: Optional[Sequence[str]] = None,
-    ) -> None:
-        self._type: str = ""
-        self._original_name = name
-        self._namespace = namespace
-        self._subsystem = subsystem
-        self._name = _build_full_name(self._type, name, namespace, subsystem, unit)
-        # prom validates these, should we do that?
-        # labelnames provide a simple way to register that a given set of kwargs call
-        # from labels can be used. All should be used in a call?
-        self._labelnames = tuple(labelnames or ())
-        self._labelvalues = tuple(_labelvalues or ())
-        self._kwargs: Dict[str, Any] = {}
-        self._documentation = documentation
-        self._unit = unit
-        self._metrics = {}  # type: ignore[var-annotated]
-        self._lock = threading.Lock()
-
-        # if self._is_parent():
-        #     # Prepare the fields needed for child metrics.
-        #     self._lock = Lock()
-        #     self._metrics: Dict[Sequence[str], T] = {}
-
-        if self._is_observable():
-            self._metric_init()
-
-        # if not self._labelvalues:
-        #     # Register the multi-wrapper parent metric, or if a label-less metric, the whole shebang.
-        #     if registry:
-        #         registry.register(self)
-        self._registry = registry
-
-    def _metric_init(self):  # type: ignore[no-untyped-def]  # pragma: no cover
-        """
-        Initialize the metric object as a child, i.e. when it has labels (if any) set.
-
-        This is factored as a separate function to allow for deferred initialization.
-        """
-        raise NotImplementedError("_metric_init() must be implemented by %r" % self)
-
-    def labels(self, *labelvalues: Any, **labelkwargs: Any) -> Self:
-        if not self._labelnames:
-            raise ValueError("No label names were set when constructing %s" % self)
-
-        if self._labelvalues:
-            raise ValueError(
-                "{} already has labels set ({}); can not chain calls to .labels()".format(
-                    self, dict(zip(self._labelnames, self._labelvalues))
-                )
-            )
-
-        if labelvalues and labelkwargs:
-            raise ValueError("Can't pass both *args and **kwargs")
-
-        if labelkwargs:
-            if sorted(labelkwargs) != sorted(self._labelnames):
-                raise ValueError("Incorrect label names")
-            labelvalues = tuple(
-                str(labelkwargs[lablename]) for lablename in self._labelnames
-            )
-        else:
-            if len(labelvalues) != len(self._labelnames):
-                raise ValueError("Incorrect label count")
-            labelvalues = tuple(str(labelvalue) for labelvalue in labelvalues)
-        with self._lock:
-            if labelvalues not in self._metrics:
-                original_name = getattr(self, "_original_name", self._name)
-                namespace = getattr(self, "_namespace", "")
-                subsystem = getattr(self, "_subsystem", "")
-                unit = getattr(self, "_unit", "")
-
-                child_kwargs = dict(self._kwargs) if self._kwargs else {}
-                for k in ("namespace", "subsystem", "unit"):
-                    child_kwargs.pop(k, None)
-
-                self._metrics[labelvalues] = self.__class__(
-                    original_name,
-                    documentation=self._documentation,
-                    labelnames=self._labelnames,
-                    namespace=namespace,
-                    subsystem=subsystem,
-                    unit=unit,
-                    _labelvalues=labelvalues,
-                    **child_kwargs,
-                )
-            return self._metrics[labelvalues]
-
-    def _get_metric(self):  # type: ignore[no-untyped-def]
-        return Metric(self._name, self._documentation, self._type, self._unit)
-
-    def collect(self) -> Iterable[Metric]:
-        metric = self._get_metric()
-        for (
-            suffix,
-            labels,
-            value,
-            timestamp,
-            exemplar,
-            native_histogram_value,
-        ) in self._samples():
-            metric.add_sample(
-                self._name + suffix,
-                labels,
-                value,
-                timestamp,
-                exemplar,
-                native_histogram_value,
-            )
-        return [metric]
-
-    def _is_parent(self):  # type: ignore[no-untyped-def]
-        return self._labelnames and not self._labelvalues
-
-    def _child_samples(self) -> Iterable[Sample]:  # pragma: no cover
-        raise NotImplementedError("_child_samples() must be implemented by %r" % self)
-
-    def _samples(self) -> Iterable[Sample]:
-        if self._is_parent():
-            return self._multi_samples()
-        else:
-            return self._child_samples()
-
-    def _multi_samples(self) -> Iterable[Sample]:
-        with self._lock:
-            metrics = self._metrics.copy()
-        for labels, metric in metrics.items():
-            series_labels = list(zip(self._labelnames, labels))
-            for (
-                suffix,
-                sample_labels,
-                value,
-                timestamp,
-                exemplar,
-                native_histogram_value,
-            ) in metric._samples():
-                yield Sample(
-                    suffix,
-                    dict(series_labels + list(sample_labels.items())),
-                    value,
-                    timestamp,
-                    exemplar,
-                    native_histogram_value,
-                )
-
-    # not sure if this is needed, putting it there for now to make the linter happy
-    def remove(self, *labelvalues: Any) -> None:
-        if not self._labelnames:
-            raise ValueError("No label names were set when constructing %s" % self)
-
-        """Remove the given labelset from the metric."""
-        if len(labelvalues) != len(self._labelnames):
-            raise ValueError(
-                "Incorrect label count (expected %d, got %s)"
-                % (len(self._labelnames), labelvalues)
-            )
-        labelvalues = tuple(str(labelvalue) for labelvalue in labelvalues)
-        with self._lock:
-            if labelvalues in self._metrics:
-                del self._metrics[labelvalues]
-
-
-class SynapseCounter(SynapseMetricWrapperBase):
+class SynapseCounter:
     def __init__(
         self,
         name: str,
@@ -397,92 +182,37 @@ class SynapseCounter(SynapseMetricWrapperBase):
         registry: Optional[CollectorRegistry] = REGISTRY,
         _labelvalues: Optional[Sequence[str]] = None,
     ) -> None:
-        super().__init__(
-            name,
-            documentation,
-            labelnames,
-            namespace,
-            subsystem,
-            unit,
-            registry,
-            _labelvalues,
+        # TODO: remove the ignore
+        self._prometheus_counter = Counter(  # type: ignore[missing-server-name-label]
+            name=name,
+            documentation=documentation,
+            labelnames=labelnames,
+            namespace=namespace,
+            subsystem=subsystem,
+            unit=unit,
+            registry=registry,
+            _labelvalues=_labelvalues,
         )
-        self._type = "counter"
         # Here is where we grab the global meter to create a FauxCounter
-        self._counter = meter.create_counter(
-            self._name, unit=self._unit, description=self._documentation
+        self._otel_counter = meter.create_counter(
+            name, unit=unit, description=documentation
         )
-
-        self._current_attributes = ()
 
     def inc(self, amount: float = 1.0) -> None:
+        self._prometheus_counter.inc(amount=amount)
         # Need to verify what happens with Counters that do not have labels as children,
         # this may not be appropriate in those cases. Can probably just leave the
         # attributes param as empty in that case?
-        self._value.inc(amount)
-        self._counter.add(amount, dict(zip(self._labelnames, self._current_attributes)))
-        # # If this was a "child" metric, then the lock will have been taken in labels()
-        # if self._lock.locked():
-        #     self._lock.release()
+        self._otel_counter.add(amount)
 
-    def _metric_init(self) -> None:
-        self._value = ValueClass(
-            self._type,
-            self._name,
-            self._name + "_total",
-            self._labelnames,
-            self._labelvalues,
-            self._documentation,
-        )
-        self._created = time()
+    def labels(self, *labelvalues: Any, **labelkwargs: Any) -> Counter:
+        return self._prometheus_counter.labels(*labelvalues, **labelkwargs)
 
-    def _child_samples(self) -> Iterable[Sample]:
-        sample = Sample(
-            "_total", {}, self._value.get(), None, self._value.get_exemplar()
-        )
-        if _get_use_created():
-            return (sample, Sample("_created", {}, self._created, None, None))
-        return (sample,)
+    def collect(self) -> Iterable[Metric]:
+        return self._prometheus_counter.collect()
 
 
-F = TypeVar("F", bound=Callable[..., Any])
-
-
-class InprogressTracker:
-    def __init__(self, gauge) -> None:  # type: ignore[no-untyped-def]
-        self._gauge = gauge
-
-    def __enter__(self) -> None:
-        self._gauge.inc()
-
-    def __exit__(self, typ, value, traceback) -> None:  # type: ignore[no-untyped-def]
-        self._gauge.dec()
-
-    # def __call__(self, f: "F") -> "F":
-    #     def wrapped(func, *args, **kwargs):
-    #         with self:
-    #             return func(*args, **kwargs)
-
-    #     return decorate(f, wrapped)
-
-
-class SynapseGauge(SynapseMetricWrapperBase):
-    _MULTIPROC_MODES = frozenset(
-        (
-            "all",
-            "liveall",
-            "min",
-            "livemin",
-            "max",
-            "livemax",
-            "sum",
-            "livesum",
-            "mostrecent",
-            "livemostrecent",
-        )
-    )
-    _MOST_RECENT_MODES = frozenset(("mostrecent", "livemostrecent"))
-
+class SynapseGauge:
     def __init__(
         self,
         name: str,
@@ -506,10 +236,8 @@ class SynapseGauge(SynapseMetricWrapperBase):
             "livemostrecent",
         ] = "all",
     ):
-        self._multiprocess_mode = multiprocess_mode
-        if multiprocess_mode not in self._MULTIPROC_MODES:
-            raise ValueError("Invalid multiprocess mode: " + multiprocess_mode)
-        super().__init__(
+        # TODO: remove the type ignore
+        self._prometheus_gauge = Gauge(  # type: ignore[missing-server-name-label]
             name=name,
             documentation=documentation,
             labelnames=labelnames,
@@ -518,90 +246,43 @@ class SynapseGauge(SynapseMetricWrapperBase):
             unit=unit,
             registry=registry,
             _labelvalues=_labelvalues,
+            multiprocess_mode=multiprocess_mode,
         )
-        self._type = "gauge"
         # Here is where we grab the global meter to create a FauxGauge
-        self._gauge = meter.create_gauge(
-            self._name, unit=self._unit, description=self._documentation
+        self._otel_gauge = meter.create_gauge(
+            name, unit=unit, description=documentation
         )
-        self._kwargs["multiprocess_mode"] = self._multiprocess_mode
-        self._is_most_recent = self._multiprocess_mode in self._MOST_RECENT_MODES
-        self._gauge_value: float = 0
-
-        if not self._labelvalues and self._registry:
-            # TODO: look into what to do here, and maybe move it to the wrapperbase?
-            self._registry.register(self)  # type: ignore
 
     def set(self, value: float) -> None:
-        """Set gauge to the given value."""
-        self._raise_if_not_observable()
-        if self._is_most_recent:
-            self._value.set(float(value), timestamp=time())
-        else:
-            self._value.set(float(value))
-        self._gauge.set(value)
-        self._gauge_value = value
-        # self._value.set(0)
+        self._prometheus_gauge.set(value)
+        self._otel_gauge.set(value)
 
     def inc(self, amount: float = 1) -> None:
-        """Increment gauge by the given amount."""
-        if self._is_most_recent:
-            raise RuntimeError("inc must not be used with the mostrecent mode")
-        # self._raise_if_not_observable()
-        self._value.inc(amount)
-        self._gauge_value += amount
-        self._gauge.set(self._gauge_value)
+        self._prometheus_gauge.inc(amount)
+        self._otel_gauge.set(self._prometheus_gauge._value.get())
 
     def dec(self, amount: float = 1) -> None:
-        """Decrement gauge by the given amount."""
-        if self._is_most_recent:
-            raise RuntimeError("inc must not be used with the mostrecent mode")
-        # self._raise_if_not_observable()
-        self._gauge_value -= amount
-        self._gauge.set(self._gauge_value)
-        self._value.inc(-amount)
+        self._prometheus_gauge.dec(amount)
+        self._otel_gauge.set(self._prometheus_gauge._value.get())
 
     def track_inprogress(self) -> InprogressTracker:
-        """Track inprogress blocks of code or functions.
-
-        Can be used as a function decorator or context manager.
-        Increments the gauge when the code is entered,
-        and decrements when it is exited.
-        """
-        # self._raise_if_not_observable()
-        return InprogressTracker(self)
+        return self._prometheus_gauge.track_inprogress()
 
     def set_function(self, f: Callable[[], float]) -> None:
-        """Call the provided function to return the Gauge value.
+        self._prometheus_gauge.set_function(f)
+        # TODO: figure out what's the equivalent for otel here
 
-        The function must return a float, and may be called from
-        multiple threads. All other methods of the Gauge become NOOPs.
-        """
-        # self._raise_if_not_observable()
+    def labels(self, *labelvalues: Any, **labelkwargs: Any) -> Gauge:
+        return self._prometheus_gauge.labels(*labelvalues, **labelkwargs)
 
-        def samples(_: SynapseGauge) -> Iterable[Sample]:
-            return (Sample("", {}, float(f()), None, None),)
+    def remove(self, *labelvalues: Any) -> None:
+        self._prometheus_gauge.remove(*labelvalues)
 
-        self._child_samples = MethodType(samples, self)  # type: ignore
-
-    def _child_samples(self) -> Iterable[Sample]:
-        return (Sample("", {}, self._value.get(), None, None),)
-
-    def _metric_init(self) -> None:
-        self._value = ValueClass(
-            self._type,
-            self._name,
-            self._name,
-            self._labelnames,
-            self._labelvalues,
-            self._documentation,
-            multiprocess_mode=self._multiprocess_mode,
-        )
+    def collect(self) -> Iterable[Metric]:
+        return self._prometheus_gauge.collect()
 
 
-class SynapseHistogram(SynapseMetricWrapperBase):
-    _type = "histogram"
-    _reserved_labelnames = ["le"]
+class SynapseHistogram:
     DEFAULT_BUCKETS = (
         0.005,
         0.01,
@@ -630,110 +311,30 @@ class SynapseHistogram(SynapseMetricWrapperBase):
         unit: str = "",
         registry: Optional[CollectorRegistry] = REGISTRY,
         _labelvalues: Optional[Sequence[str]] = None,
-        buckets: Sequence[float] = DEFAULT_BUCKETS,
+        buckets: Sequence[Union[float, str]] = DEFAULT_BUCKETS,
     ):
-        self._prepare_buckets(buckets)
-        super().__init__(
+        # TODO: remove the type ignore
+        self._prometheus_histogram = Histogram(  # type: ignore[missing-server-name-label]
             name=name,
             documentation=documentation,
             labelnames=labelnames,
-            namespace=namespace,
-            subsystem=subsystem,
+            buckets=buckets,
+        )
+        self._otel_histogram = meter.create_histogram(
+            name,
             unit=unit,
-            registry=registry,
-            _labelvalues=_labelvalues,
+            description=documentation,
+            # prometheus_client accepts "INF" as a boundary, but otel doesn't, we just remove it
+            explicit_bucket_boundaries_advisory=[
+                x for x in buckets if isinstance(x, float)
+            ],
         )
-        self._histogram = meter.create_histogram(
-            self._name,
-            unit=self._unit,
-            description=self._documentation,
-            explicit_bucket_boundaries_advisory=buckets,
-        )
-        self._kwargs["buckets"] = buckets
-
-    def _prepare_buckets(self, source_buckets: Sequence[Union[float, str]]) -> None:
-        buckets = [float(b) for b in source_buckets]
-        if buckets != sorted(buckets):
-            # This is probably an error on the part of the user,
-            # so raise rather than sorting for them.
-            raise ValueError("Buckets not in sorted order")
-        if buckets and buckets[-1] != INF:
-            buckets.append(INF)
-        if len(buckets) < 2:
-            raise ValueError("Must have at least two buckets")
-        self._upper_bounds = buckets
-
-    def _metric_init(self) -> None:
-        self._buckets: list[values.ValueClass] = []
-        self._created = time()
-        bucket_labelnames = self._labelnames + ("le",)
-        self._sum = values.ValueClass(
-            self._type,
-            self._name,
-            self._name + "_sum",
-            self._labelnames,
-            self._labelvalues,
-            self._documentation,
-        )
-        for b in self._upper_bounds:
-            self._buckets.append(
-                values.ValueClass(
-                    self._type,
-                    self._name,
-                    self._name + "_bucket",
-                    bucket_labelnames,
-                    self._labelvalues + (floatToGoString(b),),
-                    self._documentation,
-                )
-            )
-
-    def observe(self, amount: float, exemplar: Optional[Dict[str, str]] = None) -> None:
-        """Observe the given amount.
-
-        The amount is usually positive or zero. Negative values are
-        accepted but prevent current versions of Prometheus from
-        properly detecting counter resets in the sum of
-        observations. See
-        https://prometheus.io/docs/practices/histograms/#count-and-sum-of-observations
-        for details.
-        """
-        self._raise_if_not_observable()
-        self._sum.inc(amount)
-        for i, bound in enumerate(self._upper_bounds):
-            if amount <= bound:
-                self._buckets[i].inc(1)
-                if exemplar:
-                    # _validate_exemplar(exemplar)
-                    self._buckets[i].set_exemplar(Exemplar(exemplar, amount, time()))
-                break
 
     def time(self) -> Timer:
-        """Time a block of code or function, and observe the duration in seconds.
+        return self._prometheus_histogram.time()
 
-        Can be used as a function decorator or context manager.
-        """
-        return Timer(self, "observe")
-
-    def _child_samples(self) -> Iterable[Sample]:
-        samples = []
-        acc = 0.0
-        for i, bound in enumerate(self._upper_bounds):
-            acc += self._buckets[i].get()
-            samples.append(
-                Sample(
-                    "_bucket",
-                    {"le": floatToGoString(bound)},
-                    acc,
-                    None,
-                    self._buckets[i].get_exemplar(),
-                )
-            )
-        samples.append(Sample("_count", {}, acc, None, None))
-        if self._upper_bounds[0] >= 0:
-            samples.append(Sample("_sum", {}, self._sum.get(), None, None))
-        if _get_use_created():
-            samples.append(Sample("_created", {}, self._created, None, None))
-        return tuple(samples)
+    def labels(self, *labelvalues: Any, **labelkwargs: Any) -> Histogram:
+        return self._prometheus_histogram.labels(*labelvalues, **labelkwargs)
 
 
 @attr.s(slots=True, hash=True, auto_attribs=True, kw_only=True)

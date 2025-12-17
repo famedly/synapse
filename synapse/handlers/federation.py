@@ -100,6 +100,7 @@ backfill_processing_before_timer = SynapseHistogram(
         40.0,
         60.0,
         80.0,
+        "+Inf",
     ),
 )
 

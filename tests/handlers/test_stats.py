@@ -20,11 +20,10 @@
 
 from typing import Any, Optional, cast
 
-from prometheus_client import REGISTRY
+from prometheus_client import REGISTRY, Gauge
 
 from twisted.internet.testing import MemoryReactor
 
-from synapse.metrics import SynapseGauge
 from synapse.rest import admin
 from synapse.rest.client import login, room
 from synapse.server import HomeServer
@@ -61,12 +60,9 @@ class StatsRoomTests(unittest.HomeserverTestCase):
         metrics = ["synapse_known_rooms_total", "synapse_locally_joined_rooms_total"]
         for metric_name in metrics:
             gauge = REGISTRY._names_to_collectors.get(metric_name)
-            if gauge is not None and isinstance(gauge, SynapseGauge):
-                # if isinstance(gauge, SynapseGauge):
-                gauge.labels(server_name=self.hs.hostname).set(0)
-                # else:
-                #     for labels in gauge._metrics:
-                #         gauge.labels(*labels).set(0)
+            if gauge is not None and isinstance(gauge, Gauge):
+                for labels in gauge._metrics:
+                    gauge.labels(*labels).set(0)
 
     def _add_background_updates(self) -> None:
         """

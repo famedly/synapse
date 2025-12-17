@@ -29,6 +29,8 @@ from typing import (
     TypeVar,
 )
 
+from prometheus_client import Gauge
+
 from twisted.internet import defer
 
 from synapse.logging.context import PreserveLoggingContext, make_deferred_yieldable
@@ -121,7 +123,7 @@ class BatchingQueue(Generic[V, R]):
             name=self._name, **{SERVER_NAME_LABEL: self.server_name}
         ).set_function(lambda: len(self._next_values))
 
-        self._number_in_flight_metric: SynapseGauge = number_in_flight.labels(
+        self._number_in_flight_metric: Gauge = number_in_flight.labels(
             name=self._name, **{SERVER_NAME_LABEL: self.server_name}
         )
 

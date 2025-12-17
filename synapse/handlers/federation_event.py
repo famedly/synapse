@@ -132,6 +132,7 @@ backfill_processing_after_timer = SynapseHistogram(
         120.0,
         150.0,
         180.0,
+        "+Inf",
     ),
 )
 

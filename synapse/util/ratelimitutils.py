@@ -88,6 +88,7 @@ queue_wait_timer = SynapseHistogram(
         5.0,
         10.0,
         20.0,
+        "+Inf",
     ),
 )
 

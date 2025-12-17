@@ -100,7 +100,7 @@ forward_extremities_counter = SynapseHistogram(
     "synapse_storage_events_forward_extremities_persisted",
     "Number of forward extremities for each new event",
     labelnames=[SERVER_NAME_LABEL],
-    buckets=(1, 2, 3, 5, 7, 10, 15, 20, 50, 100, 200, 500),
+    buckets=(1, 2, 3, 5, 7, 10, 15, 20, 50, 100, 200, 500, "+Inf"),
 )
 
 # The number of stale forward extremities for each new event. Stale extremities
@@ -109,7 +109,7 @@ stale_forward_extremities_counter = SynapseHistogram(
     "synapse_storage_events_stale_forward_extremities_persisted",
     "Number of unchanged forward extremities for each new event",
     labelnames=[SERVER_NAME_LABEL],
-    buckets=(0, 1, 2, 3, 5, 7, 10, 15, 20, 50, 100, 200, 500),
+    buckets=(0, 1, 2, 3, 5, 7, 10, 15, 20, 50, 100, 200, 500, "+Inf"),
 )
 
 state_resolutions_during_persistence = SynapseCounter(
