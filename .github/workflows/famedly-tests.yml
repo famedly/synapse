@@ -191,6 +191,8 @@ jobs:
     needs:
       - calculate-test-jobs
     runs-on: ubuntu-latest
+    permissions:
+      id-token: write
     strategy:
       matrix:
         job: ${{ fromJson(needs.calculate-test-jobs.outputs.trial_test_matrix) }}
@@ -256,7 +258,7 @@ jobs:
       - name: Codecov - Upload coverage
         uses: codecov/codecov-action@v5
         with:
-          token: ${{secrets.CODECOV_TOKEN}}
+          use_oidc: true
 
   sytest:
     if: ${{ !failure() && !cancelled() }}
