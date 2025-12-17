@@ -142,7 +142,6 @@ from typing import (
 )
 
 import attr
-from prometheus_client import Counter
 
 from twisted.internet import defer
 
@@ -160,6 +159,7 @@ from synapse.logging.context import make_deferred_yieldable, run_in_background
 from synapse.metrics import (
     SERVER_NAME_LABEL,
     LaterGauge,
+    SynapseCounter,
     event_processing_loop_counter,
     event_processing_loop_room_count,
     events_processed_counter,
@@ -184,13 +184,13 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-sent_pdus_destination_dist_count = Counter(
+sent_pdus_destination_dist_count = SynapseCounter(
     "synapse_federation_client_sent_pdu_destinations_count",
     "Number of PDUs queued for sending to one or more destinations",
     labelnames=[SERVER_NAME_LABEL],
 )
 
-sent_pdus_destination_dist_total = Counter(
+sent_pdus_destination_dist_total = SynapseCounter(
     "synapse_federation_client_sent_pdu_destinations",
     "Total number of PDUs queued for sending across all destinations",
     labelnames=[SERVER_NAME_LABEL],

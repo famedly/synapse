@@ -30,8 +30,6 @@ from typing import (
     TypedDict,
 )
 
-from prometheus_client import Counter
-
 from synapse import types
 from synapse.api.constants import (
     MAX_USERID_LENGTH,
@@ -50,7 +48,7 @@ from synapse.api.errors import (
 from synapse.appservice import ApplicationService
 from synapse.config.server import is_threepid_reserved
 from synapse.http.servlet import assert_params_in_dict
-from synapse.metrics import SERVER_NAME_LABEL
+from synapse.metrics import SERVER_NAME_LABEL, SynapseCounter
 from synapse.replication.http.login import RegisterDeviceReplicationServlet
 from synapse.replication.http.register import (
     ReplicationPostRegisterActionsServlet,
@@ -65,13 +63,13 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-registration_counter = Counter(
+registration_counter = SynapseCounter(
     "synapse_user_registrations_total",
     "Number of new users registered (since restart)",
     labelnames=["guest", "shadow_banned", "auth_provider", SERVER_NAME_LABEL],
 )
 
-login_counter = Counter(
+login_counter = SynapseCounter(
     "synapse_user_logins_total",
     "Number of user logins (since restart)",
     labelnames=["guest", "auth_provider", SERVER_NAME_LABEL],

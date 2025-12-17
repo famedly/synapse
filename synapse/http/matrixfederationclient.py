@@ -44,7 +44,6 @@ from typing import (
 import attr
 import treq
 from canonicaljson import encode_canonical_json
-from prometheus_client import Counter
 from signedjson.sign import sign_json
 
 from twisted.internet import defer
@@ -84,7 +83,7 @@ from synapse.http.types import QueryParams
 from synapse.logging import opentracing
 from synapse.logging.context import make_deferred_yieldable, run_in_background
 from synapse.logging.opentracing import set_tag, start_active_span, tags
-from synapse.metrics import SERVER_NAME_LABEL
+from synapse.metrics import SERVER_NAME_LABEL, SynapseCounter
 from synapse.types import JsonDict
 from synapse.util.async_helpers import AwakenableSleeper, Linearizer, timeout_deferred
 from synapse.util.clock import Clock
@@ -97,12 +96,12 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-outgoing_requests_counter = Counter(
+outgoing_requests_counter = SynapseCounter(
     "synapse_http_matrixfederationclient_requests",
     "",
     labelnames=["method", SERVER_NAME_LABEL],
 )
-incoming_responses_counter = Counter(
+incoming_responses_counter = SynapseCounter(
     "synapse_http_matrixfederationclient_responses",
     "",
     labelnames=["method", "code", SERVER_NAME_LABEL],

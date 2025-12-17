@@ -24,11 +24,9 @@ import resource
 import sys
 from typing import TYPE_CHECKING, Mapping, Sized
 
-from prometheus_client import Gauge
-
 from twisted.internet import defer
 
-from synapse.metrics import SERVER_NAME_LABEL
+from synapse.metrics import SERVER_NAME_LABEL, SynapseGauge
 from synapse.types import JsonDict
 from synapse.util.constants import (
     MILLISECONDS_PER_SECOND,
@@ -57,22 +55,22 @@ Phone home stats are sent every 3 hours
 _stats_process: list[tuple[int, "resource.struct_rusage"]] = []
 
 # Gauges to expose monthly active user control metrics
-current_mau_gauge = Gauge(
+current_mau_gauge = SynapseGauge(
     "synapse_admin_mau_current",
     "Current MAU",
     labelnames=[SERVER_NAME_LABEL],
 )
-current_mau_by_service_gauge = Gauge(
+current_mau_by_service_gauge = SynapseGauge(
     "synapse_admin_mau_current_mau_by_service",
     "Current MAU by service",
     labelnames=["app_service", SERVER_NAME_LABEL],
 )
-max_mau_gauge = Gauge(
+max_mau_gauge = SynapseGauge(
     "synapse_admin_mau_max",
     "MAU Limit",
     labelnames=[SERVER_NAME_LABEL],
 )
-registered_reserved_users_mau_gauge = Gauge(
+registered_reserved_users_mau_gauge = SynapseGauge(
     "synapse_admin_mau_registered_reserved_users",
     "Registered users with reserved threepids",
     labelnames=[SERVER_NAME_LABEL],

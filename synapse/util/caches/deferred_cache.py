@@ -35,18 +35,16 @@ from typing import (
     cast,
 )
 
-from prometheus_client import Gauge
-
 from twisted.internet import defer
 from twisted.python.failure import Failure
 
-from synapse.metrics import SERVER_NAME_LABEL
+from synapse.metrics import SERVER_NAME_LABEL, SynapseGauge
 from synapse.util.async_helpers import ObservableDeferred
 from synapse.util.caches.lrucache import LruCache
 from synapse.util.caches.treecache import TreeCache, iterate_tree_cache_entry
 from synapse.util.clock import Clock
 
-cache_pending_metric = Gauge(
+cache_pending_metric = SynapseGauge(
     "synapse_util_caches_cache_pending",
     "Number of lookups currently pending for this cache",
     labelnames=["name", SERVER_NAME_LABEL],

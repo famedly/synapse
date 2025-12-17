@@ -23,35 +23,34 @@ from typing import TYPE_CHECKING
 
 import attr
 
-from synapse.metrics import SERVER_NAME_LABEL
+from synapse.metrics import SERVER_NAME_LABEL, SynapseGauge
 
 if TYPE_CHECKING:
     from synapse.server import HomeServer
 
-from prometheus_client import Gauge
 
 # Gauge to expose daily active users metrics
-current_dau_gauge = Gauge(
+current_dau_gauge = SynapseGauge(
     "synapse_admin_daily_active_users",
     "Current daily active users count",
     labelnames=[SERVER_NAME_LABEL],
 )
 
 # Gauge for users
-users_in_status_gauge = Gauge(
+users_in_status_gauge = SynapseGauge(
     "synapse_user_count",
     "Number of users in active, deactivated, suspended, and locked status",
     ["status", SERVER_NAME_LABEL],
 )
 
-users_in_time_ranges_gauge = Gauge(
+users_in_time_ranges_gauge = SynapseGauge(
     "synapse_active_users",
     "Number of active users in time ranges in 24h, 7d, and 30d",
     ["time_range", SERVER_NAME_LABEL],
 )
 
 # We may want to add additional ranges in the future.
-retained_users_gauge = Gauge(
+retained_users_gauge = SynapseGauge(
     "synapse_retained_users",
     "Number of retained users in 30d",
     ["time_range", SERVER_NAME_LABEL],

@@ -32,8 +32,6 @@ from typing import (
     Union,
 )
 
-from prometheus_client import Counter, Gauge, Histogram
-
 from twisted.python import failure
 
 from synapse.api.constants import (
@@ -79,7 +77,12 @@ from synapse.logging.opentracing import (
     tag_args,
     trace,
 )
-from synapse.metrics import SERVER_NAME_LABEL
+from synapse.metrics import (
+    SERVER_NAME_LABEL,
+    SynapseCounter,
+    SynapseGauge,
+    SynapseHistogram,
+)
 from synapse.metrics.background_process_metrics import wrap_as_background_process
 from synapse.replication.http.federation import (
     ReplicationFederationSendEduRestServlet,
@@ -102,27 +105,27 @@ TRANSACTION_CONCURRENCY_LIMIT = 10
 
 logger = logging.getLogger(__name__)
 
-received_pdus_counter = Counter(
+received_pdus_counter = SynapseCounter(
     "synapse_federation_server_received_pdus", "", labelnames=[SERVER_NAME_LABEL]
 )
 
-received_edus_counter = Counter(
+received_edus_counter = SynapseCounter(
     "synapse_federation_server_received_edus", "", labelnames=[SERVER_NAME_LABEL]
 )
 
-received_queries_counter = Counter(
+received_queries_counter = SynapseCounter(
     "synapse_federation_server_received_queries",
     "",
     labelnames=["type", SERVER_NAME_LABEL],
 )
 
-pdu_process_time = Histogram(
+pdu_process_time = SynapseHistogram(
     "synapse_federation_server_pdu_process_time",
     "Time taken to process an event",
     labelnames=[SERVER_NAME_LABEL],
 )
 
-last_pdu_ts_metric = Gauge(
+last_pdu_ts_metric = SynapseGauge(
     "synapse_federation_last_received_pdu_time",
     "The timestamp of the last PDU which was successfully received from the given domain",
     labelnames=("origin_server_name", SERVER_NAME_LABEL),

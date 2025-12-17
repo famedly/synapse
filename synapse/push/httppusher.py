@@ -23,15 +23,13 @@ import random
 import urllib.parse
 from typing import TYPE_CHECKING, Optional, Union
 
-from prometheus_client import Counter
-
 from twisted.internet.error import AlreadyCalled, AlreadyCancelled
 from twisted.internet.interfaces import IDelayedCall
 
 from synapse.api.constants import EventTypes
 from synapse.events import EventBase
 from synapse.logging import opentracing
-from synapse.metrics import SERVER_NAME_LABEL
+from synapse.metrics import SERVER_NAME_LABEL, SynapseCounter
 from synapse.push import Pusher, PusherConfig, PusherConfigException
 from synapse.storage.databases.main.event_push_actions import HttpPushAction
 from synapse.types import JsonDict, JsonMapping
@@ -43,25 +41,25 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-http_push_processed_counter = Counter(
+http_push_processed_counter = SynapseCounter(
     "synapse_http_httppusher_http_pushes_processed",
     "Number of push notifications successfully sent",
     labelnames=[SERVER_NAME_LABEL],
 )
 
-http_push_failed_counter = Counter(
+http_push_failed_counter = SynapseCounter(
     "synapse_http_httppusher_http_pushes_failed",
     "Number of push notifications which failed",
     labelnames=[SERVER_NAME_LABEL],
 )
 
-http_badges_processed_counter = Counter(
+http_badges_processed_counter = SynapseCounter(
     "synapse_http_httppusher_badge_updates_processed",
     "Number of badge updates successfully sent",
     labelnames=[SERVER_NAME_LABEL],
 )
 
-http_badges_failed_counter = Counter(
+http_badges_failed_counter = SynapseCounter(
     "synapse_http_httppusher_badge_updates_failed",
     "Number of badge updates which failed",
     labelnames=[SERVER_NAME_LABEL],

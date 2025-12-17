@@ -38,7 +38,7 @@ from typing import (
 )
 
 from prometheus_client import Metric
-from prometheus_client.core import REGISTRY, Counter, Gauge
+from prometheus_client.core import REGISTRY
 from typing_extensions import Concatenate, ParamSpec
 
 from twisted.internet import defer
@@ -54,7 +54,7 @@ from synapse.logging.opentracing import (
     start_active_span,
     start_active_span_follows_from,
 )
-from synapse.metrics import SERVER_NAME_LABEL
+from synapse.metrics import SERVER_NAME_LABEL, SynapseCounter, SynapseGauge
 from synapse.metrics._types import Collector
 
 if TYPE_CHECKING:
@@ -74,13 +74,13 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-_background_process_start_count = Counter(
+_background_process_start_count = SynapseCounter(
     "synapse_background_process_start_count",
     "Number of background processes started",
     labelnames=["name", SERVER_NAME_LABEL],
 )
 
-_background_process_in_flight_count = Gauge(
+_background_process_in_flight_count = SynapseGauge(
     "synapse_background_process_in_flight_count",
     "Number of background processes in flight",
     labelnames=["name", SERVER_NAME_LABEL],
@@ -90,28 +90,28 @@ _background_process_in_flight_count = Gauge(
 # the default registry. Instead we collect them all via the CustomCollector,
 # which ensures that we can update them before they are collected.
 #
-_background_process_ru_utime = Counter(
+_background_process_ru_utime = SynapseCounter(
     "synapse_background_process_ru_utime_seconds",
     "User CPU time used by background processes, in seconds",
     labelnames=["name", SERVER_NAME_LABEL],
     registry=None,
 )
 
-_background_process_ru_stime = Counter(
+_background_process_ru_stime = SynapseCounter(
     "synapse_background_process_ru_stime_seconds",
     "System CPU time used by background processes, in seconds",
     labelnames=["name", SERVER_NAME_LABEL],
     registry=None,
 )
 
-_background_process_db_txn_count = Counter(
+_background_process_db_txn_count = SynapseCounter(
     "synapse_background_process_db_txn_count",
     "Number of database transactions done by background processes",
     labelnames=["name", SERVER_NAME_LABEL],
     registry=None,
 )
 
-_background_process_db_txn_duration = Counter(
+_background_process_db_txn_duration = SynapseCounter(
     "synapse_background_process_db_txn_duration_seconds",
     (
         "Seconds spent by background processes waiting for database "
@@ -121,7 +121,7 @@ _background_process_db_txn_duration = Counter(
     registry=None,
 )
 
-_background_process_db_sched_duration = Counter(
+_background_process_db_sched_duration = SynapseCounter(
     "synapse_background_process_db_sched_duration_seconds",
     "Seconds spent by background processes waiting for database connections",
     labelnames=["name", SERVER_NAME_LABEL],

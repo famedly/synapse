@@ -33,14 +33,13 @@ from typing import (
 )
 
 import attr
-from prometheus_client import Counter, Gauge
 
 from synapse.api.constants import MAX_DEPTH
 from synapse.api.errors import StoreError
 from synapse.api.room_versions import EventFormatVersions, RoomVersion
 from synapse.events import EventBase, make_event_from_dict
 from synapse.logging.opentracing import tag_args, trace
-from synapse.metrics import SERVER_NAME_LABEL
+from synapse.metrics import SERVER_NAME_LABEL, SynapseCounter, SynapseGauge
 from synapse.metrics.background_process_metrics import wrap_as_background_process
 from synapse.storage._base import db_to_json, make_in_list_sql_clause
 from synapse.storage.background_updates import ForeignKeyConstraint
@@ -63,19 +62,19 @@ from synapse.util.json import json_encoder
 if TYPE_CHECKING:
     from synapse.server import HomeServer
 
-oldest_pdu_in_federation_staging = Gauge(
+oldest_pdu_in_federation_staging = SynapseGauge(
     "synapse_federation_server_oldest_inbound_pdu_in_staging",
     "The age in seconds since we received the oldest pdu in the federation staging area",
     labelnames=[SERVER_NAME_LABEL],
 )
 
-number_pdus_in_federation_queue = Gauge(
+number_pdus_in_federation_queue = SynapseGauge(
     "synapse_federation_server_number_inbound_pdu_in_staging",
     "The total number of events in the inbound federation staging",
     labelnames=[SERVER_NAME_LABEL],
 )
 
-pdus_pruned_from_federation_queue = Counter(
+pdus_pruned_from_federation_queue = SynapseCounter(
     "synapse_federation_server_number_inbound_pdu_pruned",
     "The number of events in the inbound federation staging that have been "
     "pruned due to the queue getting too long",

@@ -27,9 +27,11 @@ import platform
 import threading
 from importlib import metadata
 from typing import (
+    Any,
     Callable,
     Generic,
     Iterable,
+    Literal,
     Mapping,
     Optional,
     Sequence,
@@ -39,6 +41,12 @@ from typing import (
 )
 
 import attr
+from opentelemetry import metrics
+from opentelemetry.exporter.prometheus import (
+    PrometheusMetricReader,
+)
+from opentelemetry.sdk.metrics import MeterProvider
+from opentelemetry.sdk.resources import SERVICE_NAME, Resource as OtelResource
 from packaging.version import parse as parse_version
 from prometheus_client import (
     CollectorRegistry,
@@ -48,11 +56,13 @@ from prometheus_client import (
     Metric,
     generate_latest,
 )
+from prometheus_client.context_managers import InprogressTracker, Timer
 from prometheus_client.core import (
     REGISTRY,
     GaugeHistogramMetricFamily,
     GaugeMetricFamily,
 )
+from prometheus_client.utils import INF
 
 from twisted.python.threadpool import ThreadPool
 from twisted.web.resource import Resource
@@ -134,6 +144,16 @@ def _set_prometheus_client_use_created_metrics(new_value: bool) -> None:
 # Set this globally so it applies wherever we generate/collect metrics
 _set_prometheus_client_use_created_metrics(False)
 
+# This will create a Resource that can do the displaying of the prometheus metrics. The
+# start_http_server() that is used by the listen_metrics() call in _base.py will pick
+# this up and serve it.
+resource = OtelResource(attributes={SERVICE_NAME: "synapse"})
+reader = PrometheusMetricReader()
+provider = MeterProvider(resource=resource, metric_readers=[reader])
+metrics.set_meter_provider(provider)
+# Global meter for registering otel metrics
+meter = provider.get_meter("synapse-otel-meter")
+
 
 class _RegistryProxy:
     @staticmethod
@@ -148,6 +168,173 @@ class _RegistryProxy:
 # for it to be usable in the contexts in which we use it.
 # TODO Do something nicer about this.
 RegistryProxy = cast(CollectorRegistry, _RegistryProxy)
+
+
+class SynapseCounter:
+    def __init__(
+        self,
+        name: str,
+        documentation: str,
+        labelnames: Iterable[str] = (),
+        namespace: str = "",
+        subsystem: str = "",
+        unit: str = "",
+        registry: Optional[CollectorRegistry] = REGISTRY,
+        _labelvalues: Optional[Sequence[str]] = None,
+    ) -> None:
+        # TODO: remove the ignore
+        self._prometheus_counter = Counter(  # type: ignore[missing-server-name-label]
+            name=name,
+            documentation=documentation,
+            labelnames=labelnames,
+            namespace=namespace,
+            subsystem=subsystem,
+            unit=unit,
+            registry=registry,
+            _labelvalues=_labelvalues,
+        )
+        # Here is where we grab the global meter to create a FauxCounter
+        self._otel_counter = meter.create_counter(
+            name, unit=unit, description=documentation
+        )
+
+    def inc(self, amount: float = 1.0) -> None:
+        self._prometheus_counter.inc(amount=amount)
+        # Need to verify what happens with Counters that do not have labels as children,
+        # this may not be appropriate in those cases. Can probably just leave the
+        # attributes param as empty in that case?
+        self._otel_counter.add(amount)
+
+    def labels(self, *labelvalues: Any, **labelkwargs: Any) -> Counter:
+        return self._prometheus_counter.labels(*labelvalues, **labelkwargs)
+
+    def collect(self) -> Iterable[Metric]:
+        return self._prometheus_counter.collect()
+
+
+class SynapseGauge:
+    def __init__(
+        self,
+        name: str,
+        documentation: str,
+        labelnames: Iterable[str] = (),
+        namespace: str = "",
+        subsystem: str = "",
+        unit: str = "",
+        registry: Optional[CollectorRegistry] = REGISTRY,
+        _labelvalues: Optional[Sequence[str]] = None,
+        multiprocess_mode: Literal[
+            "all",
+            "liveall",
+            "min",
+            "livemin",
+            "max",
+            "livemax",
+            "sum",
+            "livesum",
+            "mostrecent",
+            "livemostrecent",
+        ] = "all",
+    ):
+        # TODO: remove the type ignore
+        self._prometheus_gauge = Gauge(  # type: ignore[missing-server-name-label]
+            name=name,
+            documentation=documentation,
+            labelnames=labelnames,
+            namespace=namespace,
+            subsystem=subsystem,
+            unit=unit,
+            registry=registry,
+            _labelvalues=_labelvalues,
+            multiprocess_mode=multiprocess_mode,
+        )
+        # Here is where we grab the global meter to create a FauxGauge
+        self._otel_gauge = meter.create_gauge(
+            name, unit=unit, description=documentation
+        )
+
+    def set(self, value: float) -> None:
+        self._prometheus_gauge.set(value)
+        self._otel_gauge.set(value)
+
+    def inc(self, amount: float = 1) -> None:
+        self._prometheus_gauge.inc(amount)
+        self._otel_gauge.set(self._prometheus_gauge._value.get())
+
+    def dec(self, amount: float = 1) -> None:
+        self._prometheus_gauge.dec(amount)
+        self._otel_gauge.set(self._prometheus_gauge._value.get())
+
+    def track_inprogress(self) -> InprogressTracker:
+        return self._prometheus_gauge.track_inprogress()
+
+    def set_function(self, f: Callable[[], float]) -> None:
+        self._prometheus_gauge.set_function(f)
+        # TODO: figure out what's the equivalent for otel here
+
+    def labels(self, *labelvalues: Any, **labelkwargs: Any) -> Gauge:
+        return self._prometheus_gauge.labels(*labelvalues, **labelkwargs)
+
+    def remove(self, *labelvalues: Any) -> None:
+        self._prometheus_gauge.remove(*labelvalues)
+
+    def collect(self) -> Iterable[Metric]:
+        return self._prometheus_gauge.collect()
+
+
+class SynapseHistogram:
+    DEFAULT_BUCKETS = (
+        0.005,
+        0.01,
+        0.025,
+        0.05,
+        0.075,
+        0.1,
+        0.25,
+        0.5,
+        0.75,
+        1.0,
+        2.5,
+        5.0,
+        7.5,
+        10.0,
+        INF,
+    )
+
+    def __init__(
+        self,
+        name: str,
+        documentation: str,
+        labelnames: Iterable[str] = (),
+        namespace: str = "",
+        subsystem: str = "",
+        unit: str = "",
+        registry: Optional[CollectorRegistry] = REGISTRY,
+        _labelvalues: Optional[Sequence[str]] = None,
+        buckets: Sequence[Union[float, str]] = DEFAULT_BUCKETS,
+    ):
+        # TODO: remove the type ignore
+        self._prometheus_histogram = Histogram(  # type: ignore[missing-server-name-label]
+            name=name,
+            documentation=documentation,
+            labelnames=labelnames,
+            buckets=buckets,
+        )
+        self._otel_histogram = meter.create_histogram(
+            name,
+            unit=unit,
+            description=documentation,
+            # prometheus_client accepts "INF" as a boundary, but otel doesn't, we just remove it
+            explicit_bucket_boundaries_advisory=[
+                x for x in buckets if isinstance(x, float)
+            ],
+        )
+
+    def time(self) -> Timer:
+        return self._prometheus_histogram.time()
+
+    def labels(self, *labelvalues: Any, **labelkwargs: Any) -> Histogram:
+        return self._prometheus_histogram.labels(*labelvalues, **labelkwargs)
 
 
 @attr.s(slots=True, hash=True, auto_attribs=True, kw_only=True)
@@ -600,21 +787,21 @@ REGISTRY.register(CPUMetrics())  # type: ignore[missing-server-name-label]
 # Federation Metrics
 #
 
-sent_transactions_counter = Counter(
+sent_transactions_counter = SynapseCounter(
     "synapse_federation_client_sent_transactions", "", labelnames=[SERVER_NAME_LABEL]
 )
 
-events_processed_counter = Counter(
+events_processed_counter = SynapseCounter(
     "synapse_federation_client_events_processed", "", labelnames=[SERVER_NAME_LABEL]
 )
 
-event_processing_loop_counter = Counter(
+event_processing_loop_counter = SynapseCounter(
     "synapse_event_processing_loop_count",
     "Event processing loop iterations",
     labelnames=["name", SERVER_NAME_LABEL],
 )
 
-event_processing_loop_room_count = Counter(
+event_processing_loop_room_count = SynapseCounter(
     "synapse_event_processing_loop_room_count",
     "Rooms seen per event processing loop iteration",
     labelnames=["name", SERVER_NAME_LABEL],
@@ -623,29 +810,29 @@ event_processing_loop_room_count = Counter(
 
 # Used to track where various components have processed in the event stream,
 # e.g. federation sending, appservice sending, etc.
-event_processing_positions = Gauge(
+event_processing_positions = SynapseGauge(
     "synapse_event_processing_positions", "", labelnames=["name", SERVER_NAME_LABEL]
 )
 
 # Used to track the current max events stream position
-event_persisted_position = Gauge(
+event_persisted_position = SynapseGauge(
     "synapse_event_persisted_position", "", labelnames=[SERVER_NAME_LABEL]
 )
 
 # Used to track the received_ts of the last event processed by various
 # components
-event_processing_last_ts = Gauge(
+event_processing_last_ts = SynapseGauge(
     "synapse_event_processing_last_ts", "", labelnames=["name", SERVER_NAME_LABEL]
 )
 
 # Used to track the lag processing events. This is the time difference
 # between the last processed event's received_ts and the time it was
 # finished being processed.
-event_processing_lag = Gauge(
+event_processing_lag = SynapseGauge(
     "synapse_event_processing_lag", "", labelnames=["name", SERVER_NAME_LABEL]
 )
 
-event_processing_lag_by_event = Histogram(
+event_processing_lag_by_event = SynapseHistogram(
     "synapse_event_processing_lag_by_event",
     "Time between an event being persisted and it being queued up to be sent to the relevant remote servers",
     labelnames=["name", SERVER_NAME_LABEL],
@@ -656,7 +843,7 @@ event_processing_lag_by_event = Histogram(
 # This is a process-level metric, so it does not have the `SERVER_NAME_LABEL`. We
 # consider this process-level because all Synapse homeservers running in the process
 # will use the same Synapse version.
-build_info = Gauge(  # type: ignore[missing-server-name-label]
+build_info = SynapseGauge(
     "synapse_build_info", "Build information", ["pythonversion", "version", "osversion"]
 )
 build_info.labels(
@@ -666,14 +853,14 @@ build_info.labels(
 ).set(1)
 
 # Loaded modules info
-module_instances_info = Gauge(
+module_instances_info = SynapseGauge(
     "synapse_module_info",
     "Information about loaded modules",
     labelnames=["package_name", "module_name", "module_version", SERVER_NAME_LABEL],
 )
 
 # 3PID send info
-threepid_send_requests = Histogram(
+threepid_send_requests = SynapseHistogram(
     "synapse_threepid_send_requests_with_tries",
     documentation="Number of requests for a 3pid token by try count. Note if"
     " there is a request with try count of 4, then there would have been one"
@@ -682,38 +869,38 @@ threepid_send_requests = Histogram(
     labelnames=("type", "reason", SERVER_NAME_LABEL),
 )
 
-threadpool_total_threads = Gauge(
+threadpool_total_threads = SynapseGauge(
     "synapse_threadpool_total_threads",
     "Total number of threads currently in the threadpool",
     labelnames=["name", SERVER_NAME_LABEL],
 )
 
-threadpool_total_working_threads = Gauge(
+threadpool_total_working_threads = SynapseGauge(
     "synapse_threadpool_working_threads",
     "Number of threads currently working in the threadpool",
     labelnames=["name", SERVER_NAME_LABEL],
 )
 
-threadpool_total_min_threads = Gauge(
+threadpool_total_min_threads = SynapseGauge(
     "synapse_threadpool_min_threads",
     "Minimum number of threads configured in the threadpool",
     labelnames=["name", SERVER_NAME_LABEL],
 )
 
-threadpool_total_max_threads = Gauge(
+threadpool_total_max_threads = SynapseGauge(
     "synapse_threadpool_max_threads",
     "Maximum number of threads configured in the threadpool",
     labelnames=["name", SERVER_NAME_LABEL],
 )
 
 # Gauges for room counts
-known_rooms_gauge = Gauge(
+known_rooms_gauge = SynapseGauge(
     "synapse_known_rooms_total",
     "Total number of rooms",
     labelnames=[SERVER_NAME_LABEL],
 )
 
-locally_joined_rooms_gauge = Gauge(
+locally_joined_rooms_gauge = SynapseGauge(
     "synapse_locally_joined_rooms_total",
     "Total number of locally joined rooms",
     labelnames=[SERVER_NAME_LABEL],
@@ -771,4 +958,7 @@ __all__ = [
     "GaugeBucketCollector",
     "MIN_TIME_BETWEEN_GCS",
     "install_gc_manager",
+    "SynapseCounter",
+    "SynapseGauge",
+    "SynapseHistogram",
 ]

@@ -33,7 +33,6 @@ from typing import (
 
 import attr
 from immutabledict import immutabledict
-from prometheus_client import Counter, Histogram
 
 from synapse.api.constants import EventTypes
 from synapse.api.room_versions import KNOWN_ROOM_VERSIONS, StateResolutionVersions
@@ -45,7 +44,7 @@ from synapse.events.snapshot import (
 )
 from synapse.logging.context import ContextResourceUsage
 from synapse.logging.opentracing import tag_args, trace
-from synapse.metrics import SERVER_NAME_LABEL
+from synapse.metrics import SERVER_NAME_LABEL, SynapseCounter, SynapseHistogram
 from synapse.replication.http.state import ReplicationUpdateCurrentStateRestServlet
 from synapse.state import v1, v2
 from synapse.storage.databases.main.event_federation import StateDifference
@@ -67,7 +66,7 @@ logger = logging.getLogger(__name__)
 metrics_logger = logging.getLogger("synapse.state.metrics")
 
 # Metrics for number of state groups involved in a resolution.
-state_groups_histogram = Histogram(
+state_groups_histogram = SynapseHistogram(
     "synapse_state_number_state_groups_in_resolution",
     "Number of state groups used when performing a state resolution",
     labelnames=[SERVER_NAME_LABEL],
@@ -600,25 +599,25 @@ class _StateResMetrics:
     db_events: int = 0
 
 
-_biggest_room_by_cpu_counter = Counter(
+_biggest_room_by_cpu_counter = SynapseCounter(
     "synapse_state_res_cpu_for_biggest_room_seconds",
     "CPU time spent performing state resolution for the single most expensive "
     "room for state resolution",
     labelnames=[SERVER_NAME_LABEL],
 )
-_biggest_room_by_db_counter = Counter(
+_biggest_room_by_db_counter = SynapseCounter(
     "synapse_state_res_db_for_biggest_room_seconds",
     "Database time spent performing state resolution for the single most "
     "expensive room for state resolution",
     labelnames=[SERVER_NAME_LABEL],
 )
 
-_cpu_times = Histogram(
+_cpu_times = SynapseHistogram(
     "synapse_state_res_cpu_for_all_rooms_seconds",
     "CPU time (utime+stime) spent computing a single state resolution",
     labelnames=[SERVER_NAME_LABEL],
 )
-_db_times = Histogram(
+_db_times = SynapseHistogram(
     "synapse_state_res_db_for_all_rooms_seconds",
     "Database time spent computing a single state resolution",
     labelnames=[SERVER_NAME_LABEL],
@@ -858,7 +857,7 @@ class StateResolutionHandler:
         self,
         extract_key: Callable[[_StateResMetrics], Any],
         metric_name: str,
-        prometheus_counter_metric: Counter,
+        prometheus_counter_metric: SynapseCounter,
     ) -> None:
         """Report metrics on the biggest rooms for state res
 

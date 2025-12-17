@@ -26,13 +26,12 @@ from typing import TYPE_CHECKING, Iterable, Optional, TypeVar
 import bleach
 import jinja2
 from markupsafe import Markup
-from prometheus_client import Counter
 
 from synapse.api.constants import EventContentFields, EventTypes, Membership, RoomTypes
 from synapse.api.errors import StoreError
 from synapse.config.emailconfig import EmailSubjectConfig
 from synapse.events import EventBase
-from synapse.metrics import SERVER_NAME_LABEL
+from synapse.metrics import SERVER_NAME_LABEL, SynapseCounter
 from synapse.push.presentable_names import (
     calculate_room_name,
     descriptor_from_member_events,
@@ -58,7 +57,7 @@ logger = logging.getLogger(__name__)
 
 T = TypeVar("T")
 
-emails_sent_counter = Counter(
+emails_sent_counter = SynapseCounter(
     "synapse_emails_sent_total",
     "Emails sent by type",
     labelnames=["type", SERVER_NAME_LABEL],

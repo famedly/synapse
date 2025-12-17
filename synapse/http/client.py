@@ -37,7 +37,6 @@ import attr
 import treq
 from canonicaljson import encode_canonical_json
 from netaddr import AddrFormatError, IPAddress, IPSet
-from prometheus_client import Counter
 from zope.interface import implementer
 
 from OpenSSL import SSL
@@ -81,7 +80,7 @@ from synapse.http.replicationagent import ReplicationAgent
 from synapse.http.types import QueryParams
 from synapse.logging.context import make_deferred_yieldable, run_in_background
 from synapse.logging.opentracing import set_tag, start_active_span, tags
-from synapse.metrics import SERVER_NAME_LABEL
+from synapse.metrics import SERVER_NAME_LABEL, SynapseCounter
 from synapse.types import ISynapseReactor, StrSequence
 from synapse.util.async_helpers import timeout_deferred
 from synapse.util.clock import Clock
@@ -106,10 +105,10 @@ except ImportError:
 
 logger = logging.getLogger(__name__)
 
-outgoing_requests_counter = Counter(
+outgoing_requests_counter = SynapseCounter(
     "synapse_http_client_requests", "", labelnames=["method", SERVER_NAME_LABEL]
 )
-incoming_responses_counter = Counter(
+incoming_responses_counter = SynapseCounter(
     "synapse_http_client_responses",
     "",
     labelnames=["method", "code", SERVER_NAME_LABEL],

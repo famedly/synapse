@@ -36,7 +36,6 @@ from typing import (
 )
 
 import attr
-from prometheus_client import Counter
 
 import synapse.metrics
 from synapse.api.constants import (
@@ -56,7 +55,7 @@ from synapse.events import (
 from synapse.events.snapshot import EventPersistencePair
 from synapse.events.utils import parse_stripped_state_event
 from synapse.logging.opentracing import trace
-from synapse.metrics import SERVER_NAME_LABEL
+from synapse.metrics import SERVER_NAME_LABEL, SynapseCounter
 from synapse.storage._base import db_to_json, make_in_list_sql_clause
 from synapse.storage.database import (
     DatabasePool,
@@ -91,10 +90,10 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-persist_event_counter = Counter(
+persist_event_counter = SynapseCounter(
     "synapse_storage_events_persisted_events", "", labelnames=[SERVER_NAME_LABEL]
 )
-event_counter = Counter(
+event_counter = SynapseCounter(
     "synapse_storage_events_persisted_events_sep",
     "",
     labelnames=["type", "origin_type", "origin_entity", SERVER_NAME_LABEL],

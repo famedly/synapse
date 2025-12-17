@@ -41,7 +41,6 @@ from typing import (
 )
 
 import attr
-from prometheus_client import Counter
 
 from synapse.api.constants import Direction, EventContentFields, EventTypes, Membership
 from synapse.api.errors import (
@@ -71,7 +70,7 @@ from synapse.federation.transport.client import SendJoinResponse
 from synapse.http.client import is_unknown_endpoint
 from synapse.http.types import QueryParams
 from synapse.logging.opentracing import SynapseTags, log_kv, set_tag, tag_args, trace
-from synapse.metrics import SERVER_NAME_LABEL
+from synapse.metrics import SERVER_NAME_LABEL, SynapseCounter
 from synapse.types import JsonDict, StrCollection, UserID, get_domain_from_id
 from synapse.types.handlers.policy_server import RECOMMENDATION_OK, RECOMMENDATION_SPAM
 from synapse.util.async_helpers import concurrently_execute
@@ -83,7 +82,7 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-sent_queries_counter = Counter(
+sent_queries_counter = SynapseCounter(
     "synapse_federation_client_sent_queries", "", labelnames=["type", SERVER_NAME_LABEL]
 )
 

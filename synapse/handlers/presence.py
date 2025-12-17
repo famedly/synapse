@@ -91,8 +91,6 @@ from typing import (
     Optional,
 )
 
-from prometheus_client import Counter
-
 import synapse.metrics
 from synapse.api.constants import EduTypes, EventTypes, Membership, PresenceState
 from synapse.api.errors import SynapseError
@@ -100,7 +98,7 @@ from synapse.api.presence import UserDevicePresenceState, UserPresenceState
 from synapse.appservice import ApplicationService
 from synapse.events.presence_router import PresenceRouter
 from synapse.logging.context import run_in_background
-from synapse.metrics import SERVER_NAME_LABEL, LaterGauge
+from synapse.metrics import SERVER_NAME_LABEL, LaterGauge, SynapseCounter
 from synapse.metrics.background_process_metrics import (
     wrap_as_background_process,
 )
@@ -131,37 +129,37 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-notified_presence_counter = Counter(
+notified_presence_counter = SynapseCounter(
     "synapse_handler_presence_notified_presence", "", labelnames=[SERVER_NAME_LABEL]
 )
-federation_presence_out_counter = Counter(
+federation_presence_out_counter = SynapseCounter(
     "synapse_handler_presence_federation_presence_out",
     "",
     labelnames=[SERVER_NAME_LABEL],
 )
-presence_updates_counter = Counter(
+presence_updates_counter = SynapseCounter(
     "synapse_handler_presence_presence_updates", "", labelnames=[SERVER_NAME_LABEL]
 )
-timers_fired_counter = Counter(
+timers_fired_counter = SynapseCounter(
     "synapse_handler_presence_timers_fired", "", labelnames=[SERVER_NAME_LABEL]
 )
-federation_presence_counter = Counter(
+federation_presence_counter = SynapseCounter(
     "synapse_handler_presence_federation_presence", "", labelnames=[SERVER_NAME_LABEL]
 )
-bump_active_time_counter = Counter(
+bump_active_time_counter = SynapseCounter(
     "synapse_handler_presence_bump_active_time", "", labelnames=[SERVER_NAME_LABEL]
 )
 
-get_updates_counter = Counter(
+get_updates_counter = SynapseCounter(
     "synapse_handler_presence_get_updates", "", labelnames=["type", SERVER_NAME_LABEL]
 )
 
-notify_reason_counter = Counter(
+notify_reason_counter = SynapseCounter(
     "synapse_handler_presence_notify_reason",
     "",
     labelnames=["locality", "reason", SERVER_NAME_LABEL],
 )
-state_transition_counter = Counter(
+state_transition_counter = SynapseCounter(
     "synapse_handler_presence_state_transition",
     "",
     labelnames=["locality", "from", "to", SERVER_NAME_LABEL],
