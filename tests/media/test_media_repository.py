@@ -59,6 +59,7 @@ class MediaRepositorySha256PathTestCase(unittest.HomeserverTestCase):
         return resources
 
     def _store_media_with_path(self, file_info: FileInfo, expected_path: str) -> None:
+        """Store media with given path."""
         assert isinstance(self.repo, MediaRepository)
         ctx = self.repo.media_storage.store_into_file(file_info)
         (f, fname) = self.get_success(ctx.__aenter__())
@@ -70,8 +71,8 @@ class MediaRepositorySha256PathTestCase(unittest.HomeserverTestCase):
 
     def _create_local_media_with_media_id_path(self, user: str) -> MXCUri:
         """
-        Force creation of a media object at the specific place based on the media id
-        path. This does assert that the file exists where it is expected to be
+        Force creation of a local media object at the specific place based on the media
+        id path. This does assert that the file exists where it is expected to be
         """
         assert isinstance(self.repo, MediaRepository)
         media_id = random_string(24)
@@ -121,6 +122,7 @@ class MediaRepositorySha256PathTestCase(unittest.HomeserverTestCase):
         return MXCUri(server_name=self.hs.config.server.server_name, media_id=media_id)
 
     def _create_local_media_with_sha256_path(self, user: str) -> MXCUri:
+        """Creates local media object with sha256 path."""
         assert isinstance(self.repo, MediaRepository)
         media_id = random_string(24)
         # Curate a specialized FileInfo that includes sha256 data, then file will be
@@ -162,18 +164,17 @@ class MediaRepositorySha256PathTestCase(unittest.HomeserverTestCase):
                 media_id=media_id,
                 file_id=media_id,
                 media_type="image/png",
-                # We purposely do not use the sha256 here, as it directly causes the sha256
-                # path for thumbnails to be populated, and that is not what we are looking
-                # for.
                 sha256=SMALL_PNG_SHA256,
             )
         )
-
         return MXCUri(server_name=self.hs.config.server.server_name, media_id=media_id)
 
     def _create_remote_media_with_media_id_path(self, server_name: str) -> str:
+        """Creates remote media object with media id path."""
         media_id = random_string(24)
         upload_name = "other_server_media"
+        # Curate a specialized FileInfo that is lacking sha256 data, then file will be
+        # forced to the old media_id path
         file_info = FileInfo(
             server_name=server_name,
             file_id=media_id,
@@ -205,6 +206,7 @@ class MediaRepositorySha256PathTestCase(unittest.HomeserverTestCase):
         return media_id
 
     def _create_remote_media_with_sha256_path(self, server_name: str) -> str:
+        """Creates remote media object with sha256 path."""
         media_id = random_string(24)
         upload_name = "other_server_media"
         file_info = FileInfo(
@@ -265,11 +267,12 @@ class MediaRepositorySha256PathTestCase(unittest.HomeserverTestCase):
         assert not os.path.exists(old_path)
 
     def test_create_or_update_content_updates_content_with_media_id_path(self) -> None:
-        """Test that `create_or_update_content` function can update existing media with media_id path"""
-        # Strictly speaking, this is not an operation that is supposed to be supported,
-        # but is currently possible. In the case it becomes necessary, the behavior
-        # should not be unexpected.
-
+        """
+        Test that `create_or_update_content` function can update existing media with
+        media_id path. Strictly speaking, this is not an operation that is supposed to
+        be supported, but is currently possible. In the case it becomes necessary, the
+        behavior should not be unexpected.
+        """
         # Create media with media_id path
         mxc_uri = self._create_local_media_with_media_id_path(self.creator)
         media_id = mxc_uri.media_id
@@ -291,11 +294,12 @@ class MediaRepositorySha256PathTestCase(unittest.HomeserverTestCase):
         assert os.path.exists(self.repo.filepaths.local_media_filepath(media_id))
 
     def test_create_or_update_content_updates_content_with_sha256_path(self) -> None:
-        """Test that `create_or_update_content` function can update existing media with sha256 path"""
-        # Strictly speaking, this is not an operation that is supposed to be supported,
-        # but is currently possible. In the case it becomes necessary, the behavior
-        # should not be unexpected.
-
+        """
+        Test that `create_or_update_content` function can update existing media with
+        sha256 path. Strictly speaking, this is not an operation that is supposed to be
+        supported, but is currently possible. In the case it becomes necessary, the
+        behavior should not be unexpected.
+        """
         # Create media with sha256 path
         mxc_uri = self._create_local_media_with_sha256_path(self.creator)
         media_id = mxc_uri.media_id
@@ -392,6 +396,10 @@ class MediaRepositorySha256PathTestCase(unittest.HomeserverTestCase):
         self.assertEqual(channel.result["body"], SMALL_PNG)
 
     def test_get_remote_media_impl_with_sha256_path_cache_hit(self) -> None:
+        """
+        Test `_get_remote_media_impl` can fetch the media with sha256 path successfully
+        in case of cache hit.
+        """
         server_name = "other_server.com"
         # Generate remote media with sha256 path
         media_id = self._create_remote_media_with_sha256_path(server_name)
@@ -423,7 +431,10 @@ class MediaRepositorySha256PathTestCase(unittest.HomeserverTestCase):
     def test_get_remote_media_impl_with_sha256_path_cache_miss_no_federation(
         self,
     ) -> None:
-        """Test that `_get_remote_media_impl` can fetch the media with sha256 path successfully"""
+        """
+        Test that `_get_remote_media_impl` can fetch the media with sha256 path
+        successfully in case of cache miss, without using federation endpoint.
+        """
 
         # Mock the download media function of the client.
         async def _mock_download_media(
@@ -492,7 +503,7 @@ class MediaRepositorySha256PathTestCase(unittest.HomeserverTestCase):
         assert thumbnail is not None
 
     def test_remove_local_media_from_disk_with_media_id_path(self) -> None:
-        """Test that `_remove_local_media_from_disk` can remove media with media_id path"""
+        """Test that `_remove_local_media_from_disk` can remove media with media_id path."""
         # Generate 2 media with media_id path
         media1_mxc = self._create_local_media_with_media_id_path(self.creator)
         media1_id = media1_mxc.media_id
@@ -509,7 +520,7 @@ class MediaRepositorySha256PathTestCase(unittest.HomeserverTestCase):
         assert not os.path.exists(self.repo.filepaths.local_media_filepath(media2_id))
 
     def test_remove_local_media_from_disk_with_sha256_path(self) -> None:
-        """Test that `_remove_local_media_from_disk` can remove media with sha256 path"""
+        """Test that `_remove_local_media_from_disk` can remove media with sha256 path."""
         # Generate 2 media with sha256 path with the same image.
         # There should be 2 rows in the table and only 1 media stored in filesystem.
         media1_mxc = self._create_local_media_with_sha256_path(self.creator)

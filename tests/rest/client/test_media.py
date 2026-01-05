@@ -5098,6 +5098,7 @@ class MediaStorageSha256PathCompatTestCase(unittest.HomeserverTestCase):
         self.tok = self.login("user", "pass")
 
     def _create_local_media_with_sha256_path(self) -> str:
+        """Create local media with sha256 path."""
         assert isinstance(self.repo, MediaRepository)
         media_id = random_string(24)
         # Curate a specialized FileInfo that includes sha256 data, then file will be
@@ -5139,16 +5140,13 @@ class MediaStorageSha256PathCompatTestCase(unittest.HomeserverTestCase):
                 media_id=media_id,
                 file_id=media_id,
                 media_type="image/png",
-                # We purposely do not use the sha256 here, as it directly causes the sha256
-                # path for thumbnails to be populated, and that is not what we are looking
-                # for.
                 sha256=SMALL_PNG_SHA256,
             )
         )
-
         return media_id
 
     def _create_local_media_with_media_id_path(self) -> str:
+        """Create local media with media id path."""
         assert isinstance(self.repo, MediaRepository)
         media_id = random_string(24)
         # Curate a specialized FileInfo that is lacking sha256 data, then file will be
@@ -5217,7 +5215,7 @@ class MediaStorageSha256PathCompatTestCase(unittest.HomeserverTestCase):
         return 67, headers
 
     def test_download_remote_media_saves_file_in_sha256_path(self) -> None:
-        """Test that downloading remote media using sha256 path."""
+        """Test downloading remote media using sha256 path via download endpoint."""
         # Mock the federation download media
         self.repo.client.federation_download_media = (  # type: ignore
             self._mock_federation_download_media
@@ -5251,10 +5249,10 @@ class MediaStorageSha256PathCompatTestCase(unittest.HomeserverTestCase):
     def test_download_local_media_with_media_id_path(
         self,
     ) -> None:
-        """Test that downloading local media with media_id path serves correct file."""
-        # Specifically, that a preexisting file on the legacy media paths can still be
-        # served from its present location.
-
+        """Test that downloading local media with media_id path serves correct file.
+        Specifically, that a preexisting file on the media id path(legacy) can still be
+        served from its present location.
+        """
         media_id = self._create_local_media_with_media_id_path()
         channel = self.make_request(
             "GET",
@@ -5325,7 +5323,7 @@ class MediaStorageSha256PathCompatTestCase(unittest.HomeserverTestCase):
         )
 
     def test_copy_local_media_with_media_id(self) -> None:
-        """Test that copying media with media_id path works correctly, when sha256 path is enabled"""
+        """Test that copying media with media_id path works correctly, when sha256 path is enabled."""
         # Create local media with media_id path.
         media_id = self._create_local_media_with_media_id_path()
 

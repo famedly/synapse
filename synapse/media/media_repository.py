@@ -925,11 +925,11 @@ class MediaRepository(AbstractMediaRepository):
             # Let existing methods handle creating the new file for us. By not passing a
             # media id, one will be created.
             new_mxc_uri = await self.create_or_update_content(
-                old_media_info.media_type,
-                old_media_info.upload_name,
-                io_object,
-                old_media_info.media_length,
-                auth_user,
+                media_type=old_media_info.media_type,
+                upload_name=old_media_info.upload_name,
+                content=io_object,
+                content_length=old_media_info.media_length,
+                auth_user=auth_user,
                 restricted=True,
             )
 
@@ -1340,7 +1340,6 @@ class MediaRepository(AbstractMediaRepository):
             await self.is_media_visible(requester.user, media_info)
 
         file_id = media_info.filesystem_id
-
         if not media_info.media_type:
             media_info = attr.evolve(media_info, media_type="application/octet-stream")
 
