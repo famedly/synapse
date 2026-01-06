@@ -7,7 +7,7 @@ on:
   push:
     branches: ["master", "release-*"]
     tags:
-      - '**'
+      - "**"
   pull_request:
   merge_group:
   workflow_dispatch:
@@ -362,6 +362,104 @@ jobs:
 
       - run: cargo test
 
+  invite-checker:
+    if: ${{ !failure() && !cancelled() }}
+    needs:
+      - linting-done
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout synapse
+        uses: actions/checkout@v4
+
+      - name: Checkout synapse-invite-checker
+        uses: actions/checkout@v4
+        with:
+          repository: famedly/synapse-invite-checker
+          path: synapse-invite-checker
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install hatch
+        run: pip install hatch
+
+      - name: Determine synapse git ref
+        id: synapse-ref
+        run: |
+          if [ "${{ github.event_name }}" == "pull_request" ]; then
+            echo "ref=${{ github.event.pull_request.head.ref }}" >> "$GITHUB_OUTPUT"
+            echo "repo=${{ github.event.pull_request.head.repo.full_name }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "ref=${{ github.ref_name }}" >> "$GITHUB_OUTPUT"
+            echo "repo=${{ github.repository }}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Update dependency to the current branch
+        working-directory: synapse-invite-checker
+        run: |
+          sed -i 's|"matrix-synapse[^"]*"|"matrix-synapse @ git+https://github.com/${{ steps.synapse-ref.outputs.repo }}.git@${{ steps.synapse-ref.outputs.ref }}"|' pyproject.toml
+          # Check if the file was actually modified
+          if git diff --exit-code pyproject.toml > /dev/null; then
+            echo "::error::The sed command did not modify pyproject.toml. Check if the 'matrix-synapse' dependency exists in the file."
+            exit 1
+          fi
+
+      - name: Run invite-checker tests
+        working-directory: synapse-invite-checker
+        run: hatch run cov
+
+  token-authenticator:
+    if: ${{ !failure() && !cancelled() }}
+    needs:
+      - linting-done
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout synapse
+        uses: actions/checkout@v4
+
+      - name: Checkout synapse-token-authenticator
+        uses: actions/checkout@v4
+        with:
+          repository: famedly/synapse-token-authenticator
+          path: synapse-token-authenticator
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install hatch
+        run: pip install hatch
+
+      - name: Determine synapse git ref
+        id: synapse-ref
+        run: |
+          if [ "${{ github.event_name }}" == "pull_request" ]; then
+            echo "ref=${{ github.event.pull_request.head.ref }}" >> "$GITHUB_OUTPUT"
+            echo "repo=${{ github.event.pull_request.head.repo.full_name }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "ref=${{ github.ref_name }}" >> "$GITHUB_OUTPUT"
+            echo "repo=${{ github.repository }}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Update dependency to the current branch
+        working-directory: synapse-token-authenticator
+        run: |
+          sed -i 's|"matrix-synapse[^"]*"|"matrix-synapse @ git+https://github.com/${{ steps.synapse-ref.outputs.repo }}.git@${{ steps.synapse-ref.outputs.ref }}"|' pyproject.toml
+          # Check if the file was actually modified
+          if git diff --exit-code pyproject.toml > /dev/null; then
+            echo "::error::The sed command did not modify pyproject.toml. Check if the 'matrix-synapse' dependency exists in the file."
+            exit 1
+          fi
+
+      - name: Run token-authenticator tests
+        working-directory: synapse-token-authenticator
+        run: hatch run cov
+
   otlp:
     if: ${{ !failure() && !cancelled() }}
     runs-on: ubuntu-latest
@@ -388,6 +486,8 @@ jobs:
       - sytest
       - complement
       - cargo-test
+      - invite-checker
+      - token-authenticator
       - linting-done
     runs-on: ubuntu-latest
     steps:
