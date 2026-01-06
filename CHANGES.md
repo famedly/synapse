@@ -1,7 +1,12 @@
 # Synapse 1.145.0rc1 (2026-01-06)
 
-- Ubuntu 25.04 (Plucky Puffin) will be end of life on Jan 17, 2026. Synapse will stop building packages for Ubuntu 25.04 shortly thereafter.
-- Remove the "Updates to locked dependencies" section from the changelog due to lack of use and the maintenance burden. ([\#19254](https://github.com/element-hq/synapse/issues/19254))
+## End of Life of Ubuntu 25.04 Plucky Puffin
+
+Ubuntu 25.04 (Plucky Puffin) will be end of life on Jan 17, 2026. Synapse will stop building packages for Ubuntu 25.04 shortly thereafter.
+
+## Updates to Locked Dependencies No Longer Included in Changelog
+
+The "Updates to locked dependencies" section has been removed from the changelog due to lack of use and the maintenance burden. ([\#19254](https://github.com/element-hq/synapse/issues/19254))
 
 ## Features
 
