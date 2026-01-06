@@ -11,7 +11,6 @@ The "Updates to locked dependencies" section has been removed from the changelog
 ## Features
 
 - Add `memberships` endpoint to the admin API. This is useful for forensics and T&S purpose. ([\#19260](https://github.com/element-hq/synapse/issues/19260))
-- Add an admin API for retrieving a paginated list of quarantined media. ([\#19268](https://github.com/element-hq/synapse/issues/19268))
 - Server admins can bypass the quarantine media check when downloading media by setting the `admin_unsafely_bypass_quarantine` query parameter to `true` on Client-Server API media download requests. ([\#19275](https://github.com/element-hq/synapse/issues/19275))
 - Implemented pagination for the [MSC2666](https://github.com/matrix-org/matrix-spec-proposals/pull/2666) mutual rooms endpoint. Contributed by @tulir @ Beeper. ([\#19279](https://github.com/element-hq/synapse/issues/19279))
 - Admin API: add worker support to `GET /_synapse/admin/v2/users/<user_id>`. ([\#19281](https://github.com/element-hq/synapse/issues/19281))
