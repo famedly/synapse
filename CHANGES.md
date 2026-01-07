@@ -1,3 +1,11 @@
+# Synapse 1.145.0rc2 (2026-01-07)
+
+No significant changes since 1.145.0rc1.
+
+This RC fixes the source distribution packaging for uploading to PyPI.
+
+
+
 # Synapse 1.145.0rc1 (2026-01-06)
 
 ## End of Life of Ubuntu 25.04 Plucky Puffin
