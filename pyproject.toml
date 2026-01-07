@@ -364,7 +364,13 @@ types-requests = ">=2.26.0"
 types-setuptools = ">=57.4.0"
 
 # Famedly addiiton for coverage reports
-coverage = "^7.6.12"
+# This started pinned to 7.6.12 as an arbitrary starting point.
+# 7.9.1 made the "sysmon" measurement core for python 3.14+ as default(instead of "ctrace")
+# 7.11.0 dropped support for python 3.9
+# 7.11.1 adjusted auto config of the measurement core to not use "sysmon" under certain concurrency conditions
+# 7.12.0 fixed "except" clauses handling under the "sysmon" core
+# 7.13.1 now better detects 3rd-party code, and avoids measuring it
+coverage = ">=7.13.1"
 
 # Dependencies which are exclusively required by unit test code. This is
 # NOT a list of all modules that are necessary to run the unit tests.
