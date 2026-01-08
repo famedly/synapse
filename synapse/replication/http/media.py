@@ -96,5 +96,46 @@ class ReplicationCopyMediaServlet(ReplicationEndpoint):
         return 200, {"content_uri": str(mxc_uri)}
 
 
+class ReplicationDeleteMediaServlet(ReplicationEndpoint):
+    """Request the MediaRepository to delete a piece of media from filesystem.
+
+    Request format:
+
+        DELETE /_synapse/replication/delete_media
+
+        {
+            "media_ids": [...], # List of media IDs to delete
+        }
+
+    """
+
+    NAME = "delete_media"
+    PATH_ARGS = ()
+
+    def __init__(self, hs: "HomeServer"):
+        super().__init__(hs)
+        self.media_repo = hs.get_media_repository()
+
+    @staticmethod
+    async def _serialize_payload(  # type: ignore[override]
+        media_ids: list[str],
+    ) -> JsonDict:
+        """
+        Args:
+            media_ids: The list of media IDs to delete.
+        """
+        return {"media_ids": media_ids}
+
+    async def _handle_request(  # type: ignore[override]
+        self,
+        request: Request,
+        content: JsonDict,
+    ) -> Tuple[int, JsonDict]:
+        media_ids = content["media_ids"]
+        deleted, count = await self.media_repo._remove_local_media_from_disk(media_ids)
+        return 200, {"deleted": deleted, "count": count}
+
+
 def register_servlets(hs: "HomeServer", http_server: HttpServer) -> None:
     ReplicationCopyMediaServlet(hs).register(http_server)
+    ReplicationDeleteMediaServlet(hs).register(http_server)
