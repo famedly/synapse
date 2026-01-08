@@ -10,9 +10,17 @@ No significant changes since 1.143.0rc2.
 
 
 ### Famedly additions for v1.143.0_1
-- fix: docs url broken on /version ([\#219](https://github.com/famedly/synapse/pull/219)) (FrenchgGithubUser)
-- fix: provide remote servers a way to find out about an event created during the remote join handshake ([\#71](https://github.com/famedly/synapse/pull/71)) (FrenchgGithubUser)
-
+- fix: docs url broken on /version ([\#219](https://github.com/famedly/synapse/pull/219)) (FrenchGithubUser)
+- fix: provide remote servers a way to find out about an event created during the remote join handshake ([\#71](https://github.com/famedly/synapse/pull/71)) (FrenchGithubUser)
+- fix: ci: fix up test coverage:
+  - [bump: codecov-action to v5](https://github.com/famedly/synapse/pull/220/commits/1158faf443b7493e6eadd82788a377397b8ab48e) (Jason Little)
+  - [ci: generate xml coverage file](https://github.com/famedly/synapse/pull/220/commits/cced457e7d14dd4b19c4ffedeb6ced1b2da5ab35) (Jason Little)
+  - [ci: use oidc for codecov access](https://github.com/famedly/synapse/pull/220/commits/e08f4f25d39fb441c6c1702b88553203ac8c6c77) (Jason Little)
+  - [ci: Stop forcing debug level logging for this one test](https://github.com/famedly/synapse/pull/220/commits/1994509e55397305448f856308218821999230c1) (Jason Little)
+  - [ci: Allow a test to selectively not run if coverage is being collected](https://github.com/famedly/synapse/pull/220/commits/26426cac0f5c3f5b298c495746b65199265411f4) (Jason Little) 
+  - [bump: coverage to v7.13.1](https://github.com/famedly/synapse/pull/220/commits/82d865ac3d0295427d73a575834d9080284088e2) (Jason Little)
+- bump: Synapse Invite Checker to version v0.4.13[(b601d6f)](https://github.com/famedly/synapse/pull/220/commits/b601d6fd4bd25d9909bcfba0a595538133340f88) (Jason Little)
+- tests: run the invite-checker and token-authenticator tests in the CI([\#222](https://github.com/famedly/synapse/pull/222/commits/3dd03b161807d868edbe8c26d46c80264ccca0c9)) (FrenchGithubUser)
 
 # synapse 1.143.0rc2 (2025-11-18)
 
