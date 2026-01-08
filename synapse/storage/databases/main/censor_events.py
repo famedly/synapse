@@ -59,7 +59,7 @@ class CensorEventsStore(EventsWorkerStore, CacheInvalidationWorkerStore, SQLBase
     @wrap_as_background_process("_censor_redactions")
     async def _censor_redactions(self) -> None:
         """Censors all redactions older than the configured period that haven't
-        been censored yet.
+        been censored yet and deletes any media attached to the redacted events.
 
         By censor we mean update the event_json table with the redacted event.
         """
@@ -104,11 +104,15 @@ class CensorEventsStore(EventsWorkerStore, CacheInvalidationWorkerStore, SQLBase
         )
 
         updates = []
+        media = []
 
         for redaction_id, event_id in rows:
             redaction_event = await self.get_event(redaction_id, allow_none=True)
             original_event = await self.get_event(
                 event_id, allow_rejected=True, allow_none=True
+            )
+            attached_media_ids = (
+                await self.hs.get_datastores().main.get_attached_media_ids(event_id)
             )
 
             # The SQL above ensures that we have both the redaction and
@@ -131,6 +135,7 @@ class CensorEventsStore(EventsWorkerStore, CacheInvalidationWorkerStore, SQLBase
                 pruned_json = None
 
             updates.append((redaction_id, event_id, pruned_json))
+            media.extend(attached_media_ids)
 
         def _update_censor_txn(txn: LoggingTransaction) -> None:
             for redaction_id, event_id, pruned_json in updates:
@@ -145,6 +150,7 @@ class CensorEventsStore(EventsWorkerStore, CacheInvalidationWorkerStore, SQLBase
                 )
 
         await self.db_pool.runInteraction("_update_censor_txn", _update_censor_txn)
+        await self.hs.get_media_repository().delete_local_media_ids(media)
 
     def _censor_event_txn(
         self, txn: LoggingTransaction, event_id: str, pruned_json: str

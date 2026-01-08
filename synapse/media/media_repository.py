@@ -71,7 +71,10 @@ from synapse.media.storage_provider import StorageProviderWrapper
 from synapse.media.thumbnailer import Thumbnailer, ThumbnailError
 from synapse.media.url_previewer import UrlPreviewer
 from synapse.metrics.background_process_metrics import run_as_background_process
-from synapse.replication.http.media import ReplicationCopyMediaServlet
+from synapse.replication.http.media import (
+    ReplicationCopyMediaServlet,
+    ReplicationDeleteMediaServlet,
+)
 from synapse.state import CREATE_KEY, POWER_KEY
 from synapse.storage.databases.main.media_repository import (
     LocalMedia,
@@ -581,6 +584,7 @@ class MediaRepositoryWorker(AbstractMediaRepository):
         super().__init__(hs)
         # initialize replication endpoint here
         self.copy_media_client = ReplicationCopyMediaServlet.make_client(hs)
+        self.delete_media_client = ReplicationDeleteMediaServlet.make_client(hs)
 
     async def copy_media(
         self, existing_mxc: MXCUri, auth_user: UserID, max_timeout_ms: int
@@ -596,6 +600,15 @@ class MediaRepositoryWorker(AbstractMediaRepository):
             max_timeout_ms=max_timeout_ms,
         )
         return MXCUri.from_str(result["content_uri"])
+
+    async def delete_local_media_ids(
+        self, media_ids: List[str]
+    ) -> Tuple[List[str], int]:
+        """
+        Call out to the worker responsible for handling media to delete this media object
+        """
+        result = await self.delete_media_client(media_ids)
+        return result["deleted"], result["count"]
 
 
 class MediaRepository(AbstractMediaRepository):
