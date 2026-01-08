@@ -25,6 +25,8 @@ import random
 from http import HTTPStatus
 from typing import TYPE_CHECKING, Iterable, Optional
 
+from twisted.internet.defer import CancelledError
+
 from synapse import types
 from synapse.api.constants import (
     AccountDataTypes,
@@ -2204,6 +2206,10 @@ class RoomForgetterHandler(StateDeltasHandler):
         async def process() -> None:
             try:
                 await self._unsafe_process()
+            except CancelledError:
+                logger.warning(
+                    "room_forgetter.notify_new_event received a cancel request"
+                )
             finally:
                 self._is_processing = False
 
