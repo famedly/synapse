@@ -438,7 +438,9 @@ include = [
     { path = "rust/build.rs", format = "sdist" },
     { path = "rust/src/**", format = "sdist" },
 ]
-exclude = ["synapse/*.so"]
+exclude = [
+    { path = "synapse/*.so", format = "sdist" },
+]
 
 [build-system]
 # The upper bounds here are defensive, intended to prevent situations like
