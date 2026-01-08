@@ -216,7 +216,7 @@ jobs:
             --mount 'type=bind,src=/var/run/postgresql,dst=/var/run/postgresql' \
             -e POSTGRES_PASSWORD=postgres \
             -e POSTGRES_INITDB_ARGS="--lc-collate C --lc-ctype C --encoding UTF8" \
-            postgres:${{ matrix.job.postgres-version }}
+            postgres:${{ matrix.job.postgres-version }} -c full_page_writes=off -c wal_init_zero=off -c effective_io_concurrency=200 -c maintenance_io_concurrency=200 -c max_worker_processes=4 -c max_parallel_workers=4 -c random_page_cost=1.05
 
       - uses: Swatinem/rust-cache@68b3cb7503c78e67dae8373749990a220eb65352
 
