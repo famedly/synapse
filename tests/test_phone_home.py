@@ -31,7 +31,7 @@ from synapse.server import HomeServer
 from synapse.types import JsonDict
 from synapse.util.clock import Clock
 
-from tests.unittest import HomeserverTestCase
+from tests.unittest import INFO, HomeserverTestCase
 
 
 class PhoneHomeStatsTestCase(HomeserverTestCase):
@@ -46,6 +46,7 @@ class PhoneHomeStatsTestCase(HomeserverTestCase):
         self.get_success(phone_stats_home(self.hs, stats, past_stats))
         self.assertEqual(stats["cpu_average"], 0)
 
+    @INFO
     def test_performance_100(self) -> None:
         """
         1 second of usage over 1 second is 100% CPU usage.

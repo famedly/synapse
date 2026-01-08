@@ -118,13 +118,36 @@ def phone_stats_home(
         stats["memory_rss"] = new[1].ru_maxrss
 
         # Get CPU time in % of a single core, not % of all cores
+        logger.info("Calculating used_cpu_time")
+        logger.info(
+            "new_cpu_time: %r + %r = %r",
+            new[1].ru_utime,
+            new[1].ru_stime,
+            new[1].ru_utime + new[1].ru_stime,
+        )
+        logger.info(
+            "old_cpu_time: %r + %r = %r",
+            old[1].ru_utime,
+            old[1].ru_stime,
+            old[1].ru_utime + old[1].ru_stime,
+        )
+        logger.info(
+            "difference: %r",
+            (new[1].ru_utime + new[1].ru_stime) - (old[1].ru_utime + old[1].ru_stime),
+        )
         used_cpu_time = (new[1].ru_utime + new[1].ru_stime) - (
             old[1].ru_utime + old[1].ru_stime
         )
+        logger.info("new(time): %r - previous(time): %r =:", new[0], old[0])
+        time_diff = new[0] - old[0]
+        logger.info("time_diff: %r ", time_diff)
         if used_cpu_time == 0 or new[0] == old[0]:
+            logger.info("calculated cpu time: 0, ignoring value as times are same")
             stats["cpu_average"] = 0
         else:
-            stats["cpu_average"] = math.floor(used_cpu_time / (new[0] - old[0]) * 100)
+            the_number = math.floor(used_cpu_time / time_diff) * 100
+            logger.info("calculated cpu time: %r", the_number)
+            stats["cpu_average"] = the_number
 
         #
         # General statistics
