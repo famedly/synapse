@@ -110,6 +110,7 @@ class ReplicationDeleteMediaServlet(ReplicationEndpoint):
     """
 
     NAME = "delete_media"
+    PATH_ARGS = ()
 
     def __init__(self, hs: "HomeServer"):
         super().__init__(hs)
