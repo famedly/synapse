@@ -245,11 +245,14 @@ class TCPListenerConfig:
 
     # http_options is only populated if type=http
     http_options: Optional[HttpListenerConfig] = None
+    fd: Optional[int] = attr.ib(default=None, validator=attr.validators.optional(attr.validators.instance_of(int)))
 
     def get_site_tag(self) -> str:
-        """Retrieves http_options.tag if it exists, otherwise the port number."""
+        """Retrieves http_options.tag if it exists, otherwise the port number or fd."""
         if self.http_options and self.http_options.tag is not None:
             return self.http_options.tag
+        elif self.fd is not None:
+            return f"fd{self.fd}"
         else:
             return str(self.port)
 
@@ -1094,20 +1097,21 @@ def parse_listener_def(num: int, listener: Any) -> ListenerConfig:
 
     port = listener.get("port")
     socket_path = listener.get("path")
-    # Either a port or a path should be declared at a minimum. Using both would be bad.
+    fd = listener.get("fd")
+    # Either a port, fd, or a path should be declared at a minimum. Using more than one would be bad.
     if port is not None and not isinstance(port, int):
         raise ConfigError("Listener configuration is lacking a valid 'port' option")
     if socket_path is not None and not isinstance(socket_path, str):
         raise ConfigError("Listener configuration is lacking a valid 'path' option")
-    if port and socket_path:
+    if fd is not None and not isinstance(fd, int):
+        raise ConfigError("Listener configuration is lacking a valid 'fd' option")
+    if sum(x is not None for x in (port, socket_path, fd)) > 1:
         raise ConfigError(
-            "Can not have both a UNIX socket and an IP/port declared for the same "
-            "resource!"
+            "Can not have more than one of UNIX socket, IP/port, or fd declared for the same resource!"
         )
-    if port is None and socket_path is None:
+    if port is None and socket_path is None and fd is None:
         raise ConfigError(
-            "Must have either a UNIX socket or an IP/port declared for a given "
-            "resource!"
+            "Must have either a UNIX socket, an IP/port, or an fd declared for a given resource!"
         )
 
     tls = listener.get("tls", False)
@@ -1139,6 +1143,10 @@ def parse_listener_def(num: int, listener: Any) -> ListenerConfig:
         socket_mode = listener.get("mode", 0o666)
 
         return UnixListenerConfig(socket_path, socket_mode, listener_type, http_config)
+
+    if fd is not None:
+        assert not tls
+        return TCPListenerConfig(0, [], listener_type, False, http_config, fd=fd)
 
     else:
         assert port is not None

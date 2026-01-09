@@ -399,6 +399,25 @@ def listen_tcp(
     return r  # type: ignore[return-value]
 
 
+def listen_fd(
+    fd: int,
+    factory: ServerFactory,
+    reactor: IReactorTCP = reactor,
+    backlog: int = 50,
+) -> List[Port]:
+    """
+    Use an inherited file descriptor as a listening socket.
+
+    Returns:
+        list of twisted.internet.tcp.Port listening for TCP connections
+    """
+    sock = socket.socket(fileno=fd)
+    sock.setblocking(False)
+    port = Port._fromListeningDescriptor(reactor, fd, sock.family, factory)
+    port.startListening()
+    return [port]
+
+
 def listen_unix(
     path: str,
     mode: int,
@@ -456,7 +475,15 @@ def listen_http(
     )
 
     if isinstance(listener_config, TCPListenerConfig):
-        if listener_config.is_tls():
+        if listener_config.fd is not None:
+            # Use inherited socket
+            ports = listen_fd(
+                listener_config.fd,
+                site,
+                reactor=reactor,
+            )
+            logger.info("Synapse now listening on inherited fd %d", listener_config.fd)
+        elif listener_config.is_tls():
             # refresh_certificate should have been called before this.
             assert context_factory is not None
             ports = listen_ssl(
