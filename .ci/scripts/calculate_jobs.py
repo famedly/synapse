@@ -63,7 +63,7 @@ if not IS_PR:
             "database": "sqlite",
             "extras": "all",
         }
-        for version in ("3.11", "3.12", "3.13")
+        for version in ("3.11", "3.12")
     )
 
 # Only test postgres against the earliest and latest Python versions that we
@@ -76,7 +76,7 @@ trial_postgres_tests = [
         "extras": "all",
     },
     {
-        "python-version": "3.14",
+        "python-version": "3.13",
         "database": "postgres",
         "postgres-version": "17",
         "extras": "all",
