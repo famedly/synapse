@@ -5,7 +5,7 @@ name: Tests
 # so a change to a pull request was triggering both. Also run tests when a tag is pushed.
 on:
   push:
-    branches: [ "master", "release-*" ]
+    branches: ["master", "release-*"]
     tags:
       - "**"
   pull_request:
@@ -451,12 +451,16 @@ jobs:
 
       - name: Update dependency to the current branch
         working-directory: synapse-token-authenticator
+        # the synapse dependency of the token-authenticator is already pointing to synapse's master branch
+        # we skip the branch update when the CI runs on master
         run: |
-          sed -i 's|"matrix-synapse[^"]*"|"matrix-synapse @ git+https://github.com/${{ steps.synapse-ref.outputs.repo }}.git@${{ steps.synapse-ref.outputs.ref }}"|' pyproject.toml
-          # Check if the file was actually modified
-          if git diff --exit-code pyproject.toml > /dev/null; then
-            echo "::error::The sed command did not modify pyproject.toml. Check if the 'matrix-synapse' dependency exists in the file."
-            exit 1
+          if [ "${{ steps.synapse-ref.outputs.ref }}" != "master" ]; then
+            sed -i 's|"matrix-synapse[^"]*"|"matrix-synapse @ git+https://github.com/${{ steps.synapse-ref.outputs.repo }}.git@${{ steps.synapse-ref.outputs.ref }}"|' pyproject.toml
+            # Check if the file was actually modified
+            if git diff --exit-code pyproject.toml > /dev/null; then
+              echo "::error::The sed command did not modify pyproject.toml. Check if the 'matrix-synapse' dependency exists in the file."
+              exit 1
+            fi
           fi
 
       - name: Run token-authenticator tests
