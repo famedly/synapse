@@ -19,6 +19,7 @@ No significant changes since 1.143.0rc2.
   - [ci: Stop forcing debug level logging for this one test](https://github.com/famedly/synapse/pull/220/commits/1994509e55397305448f856308218821999230c1) (Jason Little)
   - [ci: Allow a test to selectively not run if coverage is being collected](https://github.com/famedly/synapse/pull/220/commits/26426cac0f5c3f5b298c495746b65199265411f4) (Jason Little) 
   - [bump: coverage to v7.13.1](https://github.com/famedly/synapse/pull/220/commits/82d865ac3d0295427d73a575834d9080284088e2) (Jason Little)
+  - [fix: bump the tolerance of cpu_average stats collected for test to a wider margin](https://github.com/famedly/synapse/pull/220/commits/bcf0b812abc204d0579973f71bdea2a299e9fe78) (Jason Little)
 - bump: Synapse Invite Checker to version v0.4.13[(b601d6f)](https://github.com/famedly/synapse/pull/220/commits/b601d6fd4bd25d9909bcfba0a595538133340f88) (Jason Little)
 - tests: run the invite-checker and token-authenticator tests in the CI([\#222](https://github.com/famedly/synapse/pull/222/commits/3dd03b161807d868edbe8c26d46c80264ccca0c9)) (FrenchGithubUser)
 
