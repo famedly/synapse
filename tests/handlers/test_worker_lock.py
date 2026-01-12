@@ -30,6 +30,7 @@ from synapse.util.clock import Clock
 
 from tests import unittest
 from tests.replication._base import BaseMultiWorkerStreamTestCase
+from tests.unittest import COVERAGE_RUNNING
 from tests.utils import test_timeout
 
 logger = logging.getLogger(__name__)
@@ -56,6 +57,13 @@ class WorkerLockTestCase(unittest.HomeserverTestCase):
         self.get_success(d2)
         self.get_success(lock2.__aexit__(None, None, None))
 
+    # We do not want to run this test while collecting coverage. Some environments are
+    # resource constrained and this test will flake/fail as it is a stress test and not
+    # a compliance test. The coverage included from this test is found in other tests.
+    @unittest.skip_unless(
+        not COVERAGE_RUNNING,
+        "Test requested to not be run when collecting coverage data.",
+    )
     def test_lock_contention(self) -> None:
         """Test lock contention when a lot of locks wait on a single worker"""
         nb_locks_to_test = 500

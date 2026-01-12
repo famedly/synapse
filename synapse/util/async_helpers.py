@@ -40,9 +40,7 @@ from typing import (
     Hashable,
     Iterable,
     Literal,
-    Optional,
     TypeVar,
-    Union,
     overload,
 )
 
@@ -104,8 +102,8 @@ class ObservableDeferred(Generic[_T], AbstractObservableDeferred[_T]):
     __slots__ = ["_deferred", "_observers", "_result"]
 
     _deferred: "defer.Deferred[_T]"
-    _observers: Union[list["defer.Deferred[_T]"], tuple[()]]
-    _result: Union[None, tuple[Literal[True], _T], tuple[Literal[False], Failure]]
+    _observers: list["defer.Deferred[_T]"] | tuple[()]
+    _result: None | tuple[Literal[True], _T] | tuple[Literal[False], Failure]
 
     def __init__(self, deferred: "defer.Deferred[_T]", consumeErrors: bool = False):
         object.__setattr__(self, "_deferred", deferred)
@@ -132,7 +130,7 @@ class ObservableDeferred(Generic[_T], AbstractObservableDeferred[_T]):
                     )
             return r
 
-        def errback(f: Failure) -> Optional[Failure]:
+        def errback(f: Failure) -> Failure | None:
             object.__setattr__(self, "_result", (False, f))
 
             # once we have set _result, no more entries will be added to _observers,
@@ -187,7 +185,7 @@ class ObservableDeferred(Generic[_T], AbstractObservableDeferred[_T]):
     def has_succeeded(self) -> bool:
         return self._result is not None and self._result[0] is True
 
-    def get_result(self) -> Union[_T, Failure]:
+    def get_result(self) -> _T | Failure:
         if self._result is None:
             raise ValueError(f"{self!r} has no result yet")
         return self._result[1]
@@ -402,80 +400,78 @@ def gather_results(  # type: ignore[misc]
 
 @overload
 async def gather_optional_coroutines(
-    *coroutines: Unpack[tuple[Optional[Coroutine[Any, Any, T1]]]],
-) -> tuple[Optional[T1]]: ...
+    *coroutines: Unpack[tuple[Coroutine[Any, Any, T1] | None]],
+) -> tuple[T1 | None]: ...
 
 
 @overload
 async def gather_optional_coroutines(
     *coroutines: Unpack[
         tuple[
-            Optional[Coroutine[Any, Any, T1]],
-            Optional[Coroutine[Any, Any, T2]],
+            Coroutine[Any, Any, T1] | None,
+            Coroutine[Any, Any, T2] | None,
         ]
     ],
-) -> tuple[Optional[T1], Optional[T2]]: ...
+) -> tuple[T1 | None, T2 | None]: ...
 
 
 @overload
 async def gather_optional_coroutines(
     *coroutines: Unpack[
         tuple[
-            Optional[Coroutine[Any, Any, T1]],
-            Optional[Coroutine[Any, Any, T2]],
-            Optional[Coroutine[Any, Any, T3]],
+            Coroutine[Any, Any, T1] | None,
+            Coroutine[Any, Any, T2] | None,
+            Coroutine[Any, Any, T3] | None,
         ]
     ],
-) -> tuple[Optional[T1], Optional[T2], Optional[T3]]: ...
+) -> tuple[T1 | None, T2 | None, T3 | None]: ...
 
 
 @overload
 async def gather_optional_coroutines(
     *coroutines: Unpack[
         tuple[
-            Optional[Coroutine[Any, Any, T1]],
-            Optional[Coroutine[Any, Any, T2]],
-            Optional[Coroutine[Any, Any, T3]],
-            Optional[Coroutine[Any, Any, T4]],
+            Coroutine[Any, Any, T1] | None,
+            Coroutine[Any, Any, T2] | None,
+            Coroutine[Any, Any, T3] | None,
+            Coroutine[Any, Any, T4] | None,
         ]
     ],
-) -> tuple[Optional[T1], Optional[T2], Optional[T3], Optional[T4]]: ...
+) -> tuple[T1 | None, T2 | None, T3 | None, T4 | None]: ...
 
 
 @overload
 async def gather_optional_coroutines(
     *coroutines: Unpack[
         tuple[
-            Optional[Coroutine[Any, Any, T1]],
-            Optional[Coroutine[Any, Any, T2]],
-            Optional[Coroutine[Any, Any, T3]],
-            Optional[Coroutine[Any, Any, T4]],
-            Optional[Coroutine[Any, Any, T5]],
+            Coroutine[Any, Any, T1] | None,
+            Coroutine[Any, Any, T2] | None,
+            Coroutine[Any, Any, T3] | None,
+            Coroutine[Any, Any, T4] | None,
+            Coroutine[Any, Any, T5] | None,
         ]
     ],
-) -> tuple[Optional[T1], Optional[T2], Optional[T3], Optional[T4], Optional[T5]]: ...
+) -> tuple[T1 | None, T2 | None, T3 | None, T4 | None, T5 | None]: ...
 
 
 @overload
 async def gather_optional_coroutines(
     *coroutines: Unpack[
         tuple[
-            Optional[Coroutine[Any, Any, T1]],
-            Optional[Coroutine[Any, Any, T2]],
-            Optional[Coroutine[Any, Any, T3]],
-            Optional[Coroutine[Any, Any, T4]],
-            Optional[Coroutine[Any, Any, T5]],
-            Optional[Coroutine[Any, Any, T6]],
+            Coroutine[Any, Any, T1] | None,
+            Coroutine[Any, Any, T2] | None,
+            Coroutine[Any, Any, T3] | None,
+            Coroutine[Any, Any, T4] | None,
+            Coroutine[Any, Any, T5] | None,
+            Coroutine[Any, Any, T6] | None,
         ]
     ],
-) -> tuple[
-    Optional[T1], Optional[T2], Optional[T3], Optional[T4], Optional[T5], Optional[T6]
-]: ...
+) -> tuple[T1 | None, T2 | None, T3 | None, T4 | None, T5 | None, T6 | None]: ...
 
 
 async def gather_optional_coroutines(
-    *coroutines: Unpack[tuple[Optional[Coroutine[Any, Any, T1]], ...]],
-) -> tuple[Optional[T1], ...]:
+    *coroutines: Unpack[tuple[Coroutine[Any, Any, T1] | None, ...]],
+) -> tuple[T1 | None, ...]:
     """Helper function that allows waiting on multiple coroutines at once.
 
     The return value is a tuple of the return values of the coroutines in order.
@@ -817,7 +813,8 @@ def timeout_deferred(
         # will have errbacked new_d, but in case it hasn't, errback it now.
 
         if not new_d.called:
-            new_d.errback(defer.TimeoutError("Timed out after %gs" % (timeout,)))
+            with PreserveLoggingContext():
+                new_d.errback(defer.TimeoutError("Timed out after %gs" % (timeout,)))
 
     # We don't track these calls since they are short.
     delayed_call = clock.call_later(
@@ -844,11 +841,13 @@ def timeout_deferred(
 
     def success_cb(val: _T) -> None:
         if not new_d.called:
-            new_d.callback(val)
+            with PreserveLoggingContext():
+                new_d.callback(val)
 
     def failure_cb(val: Failure) -> None:
         if not new_d.called:
-            new_d.errback(val)
+            with PreserveLoggingContext():
+                new_d.errback(val)
 
     deferred.addCallbacks(success_cb, failure_cb)
 
@@ -866,7 +865,7 @@ class DoneAwaitable(Awaitable[R]):
         return self.value
 
 
-def maybe_awaitable(value: Union[Awaitable[R], R]) -> Awaitable[R]:
+def maybe_awaitable(value: Awaitable[R] | R) -> Awaitable[R]:
     """Convert a value to an awaitable if not already an awaitable."""
     if inspect.isawaitable(value):
         return value
@@ -950,7 +949,8 @@ def delay_cancellation(awaitable: Awaitable[T]) -> Awaitable[T]:
         # propagating. we then `unpause` it once the wrapped deferred completes, to
         # propagate the exception.
         new_deferred.pause()
-        new_deferred.errback(Failure(CancelledError()))
+        with PreserveLoggingContext():
+            new_deferred.errback(Failure(CancelledError()))
 
         deferred.addBoth(lambda _: new_deferred.unpause())
 
@@ -982,15 +982,6 @@ class AwakenableSleeper:
         """Sleep for the given number of milliseconds, or return if the given
         `name` is explicitly woken up.
         """
-
-        # Create a deferred that gets called in N seconds
-        sleep_deferred: "defer.Deferred[None]" = defer.Deferred()
-        call = self._clock.call_later(
-            delay_ms / 1000,
-            sleep_deferred.callback,
-            None,
-        )
-
         # Create a deferred that will get called if `wake` is called with
         # the same `name`.
         stream_set = self._streams.setdefault(name, set())
@@ -1000,13 +991,14 @@ class AwakenableSleeper:
         try:
             # Wait for either the delay or for `wake` to be called.
             await make_deferred_yieldable(
-                defer.DeferredList(
-                    [sleep_deferred, notify_deferred],
-                    fireOnOneCallback=True,
-                    fireOnOneErrback=True,
-                    consumeErrors=True,
+                timeout_deferred(
+                    deferred=stop_cancellation(notify_deferred),
+                    timeout=delay_ms / 1000,
+                    clock=self._clock,
                 )
             )
+        except defer.TimeoutError:
+            pass
         finally:
             # Clean up the state
             curr_stream_set = self._streams.get(name)
@@ -1014,10 +1006,6 @@ class AwakenableSleeper:
                 curr_stream_set.discard(notify_deferred)
                 if len(curr_stream_set) == 0:
                     self._streams.pop(name)
-
-            # Cancel the sleep if we were woken up
-            if call.active():
-                call.cancel()
 
 
 class DeferredEvent:
@@ -1029,7 +1017,8 @@ class DeferredEvent:
 
     def set(self) -> None:
         if not self._deferred.called:
-            self._deferred.callback(None)
+            with PreserveLoggingContext():
+                self._deferred.callback(None)
 
     def clear(self) -> None:
         if self._deferred.called:
@@ -1042,26 +1031,15 @@ class DeferredEvent:
         if self.is_set():
             return True
 
-        # Create a deferred that gets called in N seconds
-        sleep_deferred: "defer.Deferred[None]" = defer.Deferred()
-        call = self._clock.call_later(
-            timeout_seconds,
-            sleep_deferred.callback,
-            None,
-        )
-
         try:
             await make_deferred_yieldable(
-                defer.DeferredList(
-                    [sleep_deferred, self._deferred],
-                    fireOnOneCallback=True,
-                    fireOnOneErrback=True,
-                    consumeErrors=True,
+                timeout_deferred(
+                    deferred=stop_cancellation(self._deferred),
+                    timeout=timeout_seconds,
+                    clock=self._clock,
                 )
             )
-        finally:
-            # Cancel the sleep if we were woken up
-            if call.active():
-                call.cancel()
+        except defer.TimeoutError:
+            pass
 
         return self.is_set()

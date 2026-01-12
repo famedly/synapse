@@ -5,9 +5,9 @@ name: Tests
 # so a change to a pull request was triggering both. Also run tests when a tag is pushed.
 on:
   push:
-    branches: ["master", "release-*"]
+    branches: [ "master", "release-*" ]
     tags:
-      - '**'
+      - "**"
   pull_request:
   merge_group:
   workflow_dispatch:
@@ -191,6 +191,8 @@ jobs:
     needs:
       - calculate-test-jobs
     runs-on: ubuntu-latest
+    permissions:
+      id-token: write
     strategy:
       matrix:
         job: ${{ fromJson(needs.calculate-test-jobs.outputs.trial_test_matrix) }}
@@ -229,11 +231,11 @@ jobs:
         run: until pg_isready -h localhost; do sleep 1; done
       # coverage is already installed from the pyproject.toml file
       - run: poetry run pip install coverage-enable-subprocess
-        # Normally, this Github runner has 2 cores(actually threads) available to it.
-        # Using only one trial test runner does not saturate the cpu. Rough experimentation in the past led to having 3
-        # of these runners per core as optimal, but now coverage is required and there may be the need
-        # to scale back a little. This should be 6 trial test runners/jobs
-      - run: poetry run coverage run -m twisted.trial -j$((`nproc` * 2 )) tests
+        # Normally, this Github runner has 4 cores(vCPUs) available to it.
+        # Just use that number to define the number of runners. Adding in
+        # --debug=core will display which measurement core is in use. For python 3.14+
+        # this is educational.
+      - run: poetry run coverage run --debug=core -m twisted.trial -j$((`nproc`)) tests
         env:
           SYNAPSE_POSTGRES: ${{ matrix.job.database == 'postgres' || '' }}
           SYNAPSE_POSTGRES_HOST: /var/run/postgresql
@@ -252,10 +254,11 @@ jobs:
           -exec echo "::endgroup::" \;
           || true
       - run: poetry run coverage combine
+      - run: poetry run coverage xml
       - name: Codecov - Upload coverage
-        uses: codecov/codecov-action@v4
+        uses: codecov/codecov-action@v5
         with:
-          token: ${{secrets.CODECOV_TOKEN}}
+          use_oidc: true
 
   sytest:
     if: ${{ !failure() && !cancelled() }}
@@ -362,6 +365,104 @@ jobs:
 
       - run: cargo test
 
+  invite-checker:
+    if: ${{ !failure() && !cancelled() }}
+    needs:
+      - linting-done
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout synapse
+        uses: actions/checkout@v4
+
+      - name: Checkout synapse-invite-checker
+        uses: actions/checkout@v4
+        with:
+          repository: famedly/synapse-invite-checker
+          path: synapse-invite-checker
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install hatch
+        run: pip install hatch
+
+      - name: Determine synapse git ref
+        id: synapse-ref
+        run: |
+          if [ "${{ github.event_name }}" == "pull_request" ]; then
+            echo "ref=${{ github.event.pull_request.head.ref }}" >> "$GITHUB_OUTPUT"
+            echo "repo=${{ github.event.pull_request.head.repo.full_name }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "ref=${{ github.ref_name }}" >> "$GITHUB_OUTPUT"
+            echo "repo=${{ github.repository }}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Update dependency to the current branch
+        working-directory: synapse-invite-checker
+        run: |
+          sed -i 's|"matrix-synapse[^"]*"|"matrix-synapse @ git+https://github.com/${{ steps.synapse-ref.outputs.repo }}.git@${{ steps.synapse-ref.outputs.ref }}"|' pyproject.toml
+          # Check if the file was actually modified
+          if git diff --exit-code pyproject.toml > /dev/null; then
+            echo "::error::The sed command did not modify pyproject.toml. Check if the 'matrix-synapse' dependency exists in the file."
+            exit 1
+          fi
+
+      - name: Run invite-checker tests
+        working-directory: synapse-invite-checker
+        run: hatch run cov
+
+  token-authenticator:
+    if: ${{ !failure() && !cancelled() }}
+    needs:
+      - linting-done
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout synapse
+        uses: actions/checkout@v4
+
+      - name: Checkout synapse-token-authenticator
+        uses: actions/checkout@v4
+        with:
+          repository: famedly/synapse-token-authenticator
+          path: synapse-token-authenticator
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install hatch
+        run: pip install hatch
+
+      - name: Determine synapse git ref
+        id: synapse-ref
+        run: |
+          if [ "${{ github.event_name }}" == "pull_request" ]; then
+            echo "ref=${{ github.event.pull_request.head.ref }}" >> "$GITHUB_OUTPUT"
+            echo "repo=${{ github.event.pull_request.head.repo.full_name }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "ref=${{ github.ref_name }}" >> "$GITHUB_OUTPUT"
+            echo "repo=${{ github.repository }}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Update dependency to the current branch
+        working-directory: synapse-token-authenticator
+        run: |
+          sed -i 's|"matrix-synapse[^"]*"|"matrix-synapse @ git+https://github.com/${{ steps.synapse-ref.outputs.repo }}.git@${{ steps.synapse-ref.outputs.ref }}"|' pyproject.toml
+          # Check if the file was actually modified
+          if git diff --exit-code pyproject.toml > /dev/null; then
+            echo "::error::The sed command did not modify pyproject.toml. Check if the 'matrix-synapse' dependency exists in the file."
+            exit 1
+          fi
+
+      - name: Run token-authenticator tests
+        working-directory: synapse-token-authenticator
+        run: hatch run cov
+
   otlp:
     if: ${{ !failure() && !cancelled() }}
     runs-on: ubuntu-latest
@@ -388,6 +489,8 @@ jobs:
       - sytest
       - complement
       - cargo-test
+      - invite-checker
+      - token-authenticator
       - linting-done
     runs-on: ubuntu-latest
     steps:
