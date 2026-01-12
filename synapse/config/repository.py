@@ -194,6 +194,10 @@ class ContentRepositoryConfig(Config):
             config.get("media_store_path", "media_store")
         )
 
+        self.enable_local_media_storage_deduplication = config.get(
+            "enable_local_media_storage_deduplication", False
+        )
+
         backup_media_store_path = config.get("backup_media_store_path")
 
         synchronous_backup_media_store = config.get(

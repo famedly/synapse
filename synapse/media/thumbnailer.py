@@ -271,7 +271,8 @@ class ThumbnailProvider:
         self.media_storage = media_storage
         self.store = hs.get_datastores().main
         self.dynamic_thumbnails = hs.config.media.dynamic_thumbnails
-        self.enable_media_restriction = self.hs.config.experimental.msc3911.enabled
+        self.msc3911_config = hs.config.experimental.msc3911
+        self.use_sha256_path = self.media_repo.use_sha256_path
 
     async def respond_local_thumbnail(
         self,
@@ -301,7 +302,7 @@ class ThumbnailProvider:
         # if MSC3911 is enabled, check visibility of the media for the user and retrieve
         # any restrictions
         restrictions = None
-        if self.enable_media_restriction:
+        if self.msc3911_config.enabled:
             if requester is not None:
                 # Only check media visibility if this is for a local request. This will
                 # raise directly back to the client if not visible
@@ -331,6 +332,7 @@ class ThumbnailProvider:
             for_federation=for_federation,
             media_info=media_info,
             json_response=restrictions_json,
+            sha256=media_info.sha256,
         )
 
     async def select_or_generate_local_thumbnail(
@@ -361,7 +363,7 @@ class ThumbnailProvider:
         # if MSC3911 is enabled, check visibility of the media for the user and retrieve
         # any restrictions
         restrictions = None
-        if self.enable_media_restriction:
+        if self.msc3911_config.enabled:
             if requester is not None:
                 # Only check media visibility if this is for a local request. This will
                 # raise directly back to the client if not visible
@@ -390,6 +392,7 @@ class ThumbnailProvider:
                     file_id=media_id,
                     url_cache=bool(media_info.url_cache),
                     thumbnail=info,
+                    sha256=media_info.sha256,
                 )
 
                 responder = await self.media_storage.fetch_media(file_info)
@@ -480,7 +483,7 @@ class ThumbnailProvider:
                 return
 
         # if MSC3911 is enabled, check visibility of the media for the user
-        if self.enable_media_restriction and requester is not None:
+        if self.msc3911_config.enabled and requester is not None:
             # This will raise directly back to the client if not visible
             await self.media_repo.is_media_visible(requester.user, media_info)
 
@@ -505,6 +508,7 @@ class ThumbnailProvider:
                     server_name=server_name,
                     file_id=file_id,
                     thumbnail=info,
+                    sha256=media_info.sha256,
                 )
 
                 responder = await self.media_storage.fetch_media(file_info)
@@ -525,6 +529,7 @@ class ThumbnailProvider:
             desired_height,
             desired_method,
             desired_type,
+            media_info.sha256,
         )
 
         if file_path:
@@ -570,7 +575,7 @@ class ThumbnailProvider:
                 raise NotFoundError()
 
         # if MSC3911 is enabled, check visibility of the media for the user
-        if self.enable_media_restriction and requester is not None:
+        if self.msc3911_config.enabled and requester is not None:
             # This will raise directly back to the client if not visible
             await self.media_repo.is_media_visible(requester.user, media_info)
 
@@ -593,6 +598,7 @@ class ThumbnailProvider:
             url_cache=False,
             server_name=server_name,
             for_federation=False,
+            sha256=media_info.sha256,
         )
 
     async def _select_and_respond_with_thumbnail(
@@ -610,6 +616,7 @@ class ThumbnailProvider:
         media_info: Optional[LocalMedia] = None,
         server_name: Optional[str] = None,
         json_response: Optional[dict] = None,
+        sha256: Optional[str] = None,
     ) -> None:
         """
         Respond to a request with an appropriate thumbnail from the previously generated thumbnails.
@@ -626,6 +633,7 @@ class ThumbnailProvider:
             server_name: The server name, if this is a remote thumbnail.
             for_federation: whether the request is from the federation /thumbnail request
             media_info: metadata about the media being requested.
+            sha256: The sha256 of the original media that a thumbnail is being requested for.
         """
         logger.debug(
             "_select_and_respond_with_thumbnail: media_id=%s desired=%sx%s (%s) thumbnail_infos=%s",
@@ -650,6 +658,7 @@ class ThumbnailProvider:
                 file_id,
                 url_cache,
                 server_name,
+                sha256=sha256,
             )
             if not file_info:
                 logger.info("Couldn't find a thumbnail matching the desired inputs")
@@ -697,7 +706,7 @@ class ThumbnailProvider:
             # still. This will throw a 404 if we don't.
             # TODO: We should refetch the thumbnails for remote media.
             await self.media_storage.ensure_media_is_in_local_cache(
-                FileInfo(server_name, file_id, url_cache=url_cache)
+                FileInfo(server_name, file_id, url_cache=url_cache, sha256=sha256)
             )
 
             if server_name:
@@ -775,6 +784,7 @@ class ThumbnailProvider:
         file_id: str,
         url_cache: bool,
         server_name: Optional[str],
+        sha256: Optional[str] = None,
     ) -> Optional[FileInfo]:
         """
         Choose an appropriate thumbnail from the previously generated thumbnails.
@@ -788,6 +798,7 @@ class ThumbnailProvider:
             file_id: The ID of the media that a thumbnail is being requested for.
             url_cache: True if this is from a URL cache.
             server_name: The server name, if this is a remote thumbnail.
+            sha256: The sha256 of the original media that a thumbnail is being requested for.
 
         Returns:
              The thumbnail which best matches the desired parameters.
@@ -888,6 +899,7 @@ class ThumbnailProvider:
                 url_cache=url_cache,
                 server_name=server_name,
                 thumbnail=thumbnail_info,
+                sha256=sha256,
             )
 
         # No matching thumbnail was found.

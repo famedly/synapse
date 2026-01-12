@@ -63,6 +63,7 @@ class URLPreviewTests(unittest.HomeserverTestCase):
         b'<meta property="og:description" content="hi" />'
         b"</head></html>"
     )
+    use_isolated_media_paths = True
 
     def make_homeserver(self, reactor: MemoryReactor, clock: Clock) -> HomeServer:
         config = self.default_config()
@@ -82,18 +83,12 @@ class URLPreviewTests(unittest.HomeserverTestCase):
             "*;q=0.7",
         ]
 
-        self.storage_path = self.mktemp()
-        self.media_store_path = self.mktemp()
-        os.mkdir(self.storage_path)
-        os.mkdir(self.media_store_path)
-        config["media_store_path"] = self.media_store_path
-
         provider_config = {
             "module": "synapse.media.storage_provider.FileStorageProviderBackend",
             "store_local": True,
             "store_synchronous": False,
             "store_remote": True,
-            "config": {"directory": self.storage_path},
+            "config": {"directory": self._media_storage_provider_path},
         }
 
         config["media_storage_providers"] = [provider_config]
@@ -1269,8 +1264,10 @@ class URLPreviewTests(unittest.HomeserverTestCase):
 
         assert isinstance(self.media_repo, MediaRepository)
         rel_file_path = self.media_repo.filepaths.url_cache_filepath_rel(media_id)
-        media_store_path = os.path.join(self.media_store_path, rel_file_path)
-        storage_provider_path = os.path.join(self.storage_path, rel_file_path)
+        media_store_path = os.path.join(self._media_store_path, rel_file_path)
+        storage_provider_path = os.path.join(
+            self._media_storage_provider_path, rel_file_path
+        )
 
         # Check storage
         self.assertTrue(os.path.isfile(media_store_path))
@@ -1316,10 +1313,10 @@ class URLPreviewTests(unittest.HomeserverTestCase):
             self.media_repo.filepaths.url_cache_thumbnail_directory_rel(media_id)
         )
         media_store_thumbnail_path = os.path.join(
-            self.media_store_path, rel_thumbnail_path
+            self._media_store_path, rel_thumbnail_path
         )
         storage_provider_thumbnail_path = os.path.join(
-            self.storage_path, rel_thumbnail_path
+            self._media_storage_provider_path, rel_thumbnail_path
         )
 
         # Check storage
@@ -1342,7 +1339,7 @@ class URLPreviewTests(unittest.HomeserverTestCase):
         # Remove the original, otherwise thumbnails will regenerate
         assert isinstance(self.media_repo, MediaRepository)
         rel_file_path = self.media_repo.filepaths.url_cache_filepath_rel(media_id)
-        media_store_path = os.path.join(self.media_store_path, rel_file_path)
+        media_store_path = os.path.join(self._media_store_path, rel_file_path)
         os.remove(media_store_path)
 
         # Move cached thumbnails into the storage provider
@@ -1387,7 +1384,7 @@ class URLPreviewTests(unittest.HomeserverTestCase):
         for path in [file_path] + file_dirs + [thumbnail_dir] + thumbnail_dirs:
             self.assertFalse(
                 os.path.exists(path),
-                f"{os.path.relpath(path, self.media_store_path)} was not deleted",
+                f"{os.path.relpath(path, self._media_store_path)} was not deleted",
             )
 
     @unittest.override_config({"url_preview_url_blacklist": [{"port": "*"}]})

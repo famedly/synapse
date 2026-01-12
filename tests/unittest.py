@@ -25,6 +25,7 @@ import hashlib
 import hmac
 import json
 import logging
+import os
 import secrets
 import time
 from typing import (
@@ -373,11 +374,14 @@ class HomeserverTestCase(TestCase):
         user_id (str): The user ID to assume if auth is hijacked.
         hijack_auth: Whether to hijack auth to return the user specified
            in user_id.
+        use_isolated_media_paths: Boolean to setup strictly isolated directories for the
+            media paths, both local cache and storage providers
     """
 
     hijack_auth: ClassVar[bool] = True
     needs_threadpool: ClassVar[bool] = False
     servlets: ClassVar[List[RegisterServletsFunc]] = []
+    use_isolated_media_paths: ClassVar[bool] = False
 
     def __init__(self, methodName: str):
         super().__init__(methodName)
@@ -392,6 +396,18 @@ class HomeserverTestCase(TestCase):
         hijacking the authentication system to return a fixed user, and then
         calling the prepare function.
         """
+        # Prepare the media store directories. These are based on a relative path to the
+        # working directory
+        base_temp_path = ""
+        if self.use_isolated_media_paths:
+            base_temp_path = self.mktemp() + "/"
+        self._media_store_path = base_temp_path + "media"
+        os.makedirs(self._media_store_path, exist_ok=True)
+        # Not all tests have a media storage provider setup. Just in case they do
+        # provide them a standard place inside the isolated directory
+        self._media_storage_provider_path = base_temp_path + "media_storage"
+        os.makedirs(self._media_storage_provider_path, exist_ok=True)
+
         self.reactor, self.clock = get_clock()
         self._hs_args = {"clock": self.clock, "reactor": self.reactor}
         self.hs = self.make_homeserver(self.reactor, self.clock)
@@ -546,6 +562,9 @@ class HomeserverTestCase(TestCase):
         Get a default HomeServer config dict.
         """
         config = default_config("test")
+        # The media store path is now generated for each test run, and it will not be
+        # detected in the static method 'default_config()'. Overload it now
+        config["media_store_path"] = self._media_store_path
 
         # apply any additional config which was specified via the override_config
         # decorator.

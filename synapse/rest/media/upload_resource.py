@@ -53,9 +53,7 @@ class BaseUploadServlet(RestServlet):
         self._media_repository_callbacks = (
             hs.get_module_api_callbacks().media_repository
         )
-        self.msc3911_block_unrestricted_media_upload = (
-            hs.config.experimental.msc3911.block_unrestricted_media_upload
-        )
+        self.msc3911_config = hs.config.experimental.msc3911
 
     async def _get_file_metadata(
         self, request: SynapseRequest, user_id: str
@@ -116,7 +114,7 @@ class UploadServlet(BaseUploadServlet):
     PATTERNS = [re.compile("/_matrix/media/(r0|v3|v1)/upload$")]
 
     async def on_POST(self, request: SynapseRequest) -> None:
-        if self.msc3911_block_unrestricted_media_upload:
+        if self.msc3911_config.block_unrestricted_media_upload:
             raise SynapseError(
                 403,
                 "Unrestricted media upload is disabled",

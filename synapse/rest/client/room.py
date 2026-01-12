@@ -277,7 +277,7 @@ class RoomStateEventRestServlet(RestServlet):
         self._max_event_delay_ms = hs.config.server.max_event_delay_ms
         self._spam_checker_module_callbacks = hs.get_module_api_callbacks().spam_checker
         self.store = hs.get_datastores().main
-        self.enable_restricted_media = hs.config.experimental.msc3911.enabled
+        self.msc3911_config = hs.config.experimental.msc3911
         self.server_name = hs.config.server.server_name
 
     def register(self, http_server: HttpServer) -> None:
@@ -376,7 +376,7 @@ class RoomStateEventRestServlet(RestServlet):
             set_tag("txn_id", txn_id)
 
         media_info_for_attachment: set[LocalMedia] = set()
-        if self.enable_restricted_media:
+        if self.msc3911_config.enabled:
             # This will raise if any of the attachment parameters or the requester is
             # inappropriate
             media_info_for_attachment = (
@@ -486,7 +486,7 @@ class RoomSendEventRestServlet(TransactionRestServlet):
         self.auth = hs.get_auth()
         self._max_event_delay_ms = hs.config.server.max_event_delay_ms
         self.store = hs.get_datastores().main
-        self.enable_restricted_media = hs.config.experimental.msc3911.enabled
+        self.msc3911_config = hs.config.experimental.msc3911
         self.server_name = hs.config.server.server_name
 
     def register(self, http_server: HttpServer) -> None:
@@ -506,7 +506,7 @@ class RoomSendEventRestServlet(TransactionRestServlet):
         # Requirement is only to do this for PUT, but the POST also uses the same
         # abstraction. It appears the PUT variant includes a txn_id, perhaps use that?
         media_info_for_attachment: set[LocalMedia] = set()
-        if self.enable_restricted_media:
+        if self.msc3911_config.enabled:
             # This will raise if any of the attachment parameters or the requester is
             # inappropriate
             media_info_for_attachment = (

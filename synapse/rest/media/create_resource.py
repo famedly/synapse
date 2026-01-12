@@ -57,9 +57,7 @@ class CreateResource(RestServlet):
             cfg=hs.config.ratelimiting.rc_media_create,
         )
         # MSC3911: If this is enabled, this endpoint will not allow media creation,which is unrestricted.
-        self.msc3911_block_unrestricted_media_upload = (
-            hs.config.experimental.msc3911.block_unrestricted_media_upload
-        )
+        self.msc3911_config = hs.config.experimental.msc3911
         self.restricted = restricted
 
         if self.restricted:
@@ -70,7 +68,7 @@ class CreateResource(RestServlet):
             self.PATTERNS = [re.compile("/_matrix/media/v1/create")]
 
     async def on_POST(self, request: SynapseRequest) -> None:
-        if not self.restricted and self.msc3911_block_unrestricted_media_upload:
+        if not self.restricted and self.msc3911_config.block_unrestricted_media_upload:
             raise SynapseError(
                 403,
                 "Unrestricted media creation is disabled",

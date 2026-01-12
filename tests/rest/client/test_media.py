@@ -27,7 +27,17 @@ import shutil
 import time
 from contextlib import nullcontext
 from http import HTTPStatus
-from typing import Any, BinaryIO, ClassVar, Dict, List, Optional, Sequence, Tuple, Type
+from typing import (
+    Any,
+    BinaryIO,
+    ClassVar,
+    Dict,
+    List,
+    Optional,
+    Sequence,
+    Tuple,
+    Type,
+)
 from unittest.mock import MagicMock, Mock, patch
 from urllib import parse
 from urllib.parse import quote, urlencode
@@ -107,18 +117,12 @@ class MediaDomainBlockingTests(unittest.HomeserverTestCase):
     ) -> HomeServer:
         config = self.default_config()
 
-        self.storage_path = self.mktemp()
-        self.media_store_path = self.mktemp()
-        os.mkdir(self.storage_path)
-        os.mkdir(self.media_store_path)
-        config["media_store_path"] = self.media_store_path
-
         provider_config = {
             "module": "synapse.media.storage_provider.FileStorageProviderBackend",
             "store_local": True,
             "store_synchronous": False,
             "store_remote": True,
-            "config": {"directory": self.storage_path},
+            "config": {"directory": self._media_storage_provider_path},
         }
 
         config["media_storage_providers"] = [provider_config]
@@ -212,6 +216,7 @@ class URLPreviewTests(unittest.HomeserverTestCase):
         b'<meta property="og:description" content="hi" />'
         b"</head></html>"
     )
+    use_isolated_media_paths = True
 
     def make_homeserver(self, reactor: MemoryReactor, clock: Clock) -> HomeServer:
         config = self.default_config()
@@ -231,18 +236,12 @@ class URLPreviewTests(unittest.HomeserverTestCase):
             "*;q=0.7",
         ]
 
-        self.storage_path = self.mktemp()
-        self.media_store_path = self.mktemp()
-        os.mkdir(self.storage_path)
-        os.mkdir(self.media_store_path)
-        config["media_store_path"] = self.media_store_path
-
         provider_config = {
             "module": "synapse.media.storage_provider.FileStorageProviderBackend",
             "store_local": True,
             "store_synchronous": False,
             "store_remote": True,
-            "config": {"directory": self.storage_path},
+            "config": {"directory": self._media_storage_provider_path},
         }
 
         config["media_storage_providers"] = [provider_config]
@@ -1409,8 +1408,10 @@ class URLPreviewTests(unittest.HomeserverTestCase):
 
         assert isinstance(self.media_repo, MediaRepository)
         rel_file_path = self.media_repo.filepaths.url_cache_filepath_rel(media_id)
-        media_store_path = os.path.join(self.media_store_path, rel_file_path)
-        storage_provider_path = os.path.join(self.storage_path, rel_file_path)
+        media_store_path = os.path.join(self._media_store_path, rel_file_path)
+        storage_provider_path = os.path.join(
+            self._media_storage_provider_path, rel_file_path
+        )
 
         # Check storage
         self.assertTrue(os.path.isfile(media_store_path))
@@ -1455,10 +1456,10 @@ class URLPreviewTests(unittest.HomeserverTestCase):
             self.media_repo.filepaths.url_cache_thumbnail_directory_rel(media_id)
         )
         media_store_thumbnail_path = os.path.join(
-            self.media_store_path, rel_thumbnail_path
+            self._media_store_path, rel_thumbnail_path
         )
         storage_provider_thumbnail_path = os.path.join(
-            self.storage_path, rel_thumbnail_path
+            self._media_storage_provider_path, rel_thumbnail_path
         )
 
         # Check storage
@@ -1481,7 +1482,7 @@ class URLPreviewTests(unittest.HomeserverTestCase):
         # Remove the original, otherwise thumbnails will regenerate
         assert isinstance(self.media_repo, MediaRepository)
         rel_file_path = self.media_repo.filepaths.url_cache_filepath_rel(media_id)
-        media_store_path = os.path.join(self.media_store_path, rel_file_path)
+        media_store_path = os.path.join(self._media_store_path, rel_file_path)
         os.remove(media_store_path)
 
         # Move cached thumbnails into the storage provider
@@ -1526,7 +1527,7 @@ class URLPreviewTests(unittest.HomeserverTestCase):
         for path in [file_path] + file_dirs + [thumbnail_dir] + thumbnail_dirs:
             self.assertFalse(
                 os.path.exists(path),
-                f"{os.path.relpath(path, self.media_store_path)} was not deleted",
+                f"{os.path.relpath(path, self._media_store_path)} was not deleted",
             )
 
     @unittest.override_config({"url_preview_url_blacklist": [{"port": "*"}]})
@@ -1602,18 +1603,12 @@ class MediaConfigTest(unittest.HomeserverTestCase):
     ) -> HomeServer:
         config = self.default_config()
 
-        self.storage_path = self.mktemp()
-        self.media_store_path = self.mktemp()
-        os.mkdir(self.storage_path)
-        os.mkdir(self.media_store_path)
-        config["media_store_path"] = self.media_store_path
-
         provider_config = {
             "module": "synapse.media.storage_provider.FileStorageProviderBackend",
             "store_local": True,
             "store_synchronous": False,
             "store_remote": True,
-            "config": {"directory": self.storage_path},
+            "config": {"directory": self._media_storage_provider_path},
         }
 
         config["media_storage_providers"] = [provider_config]
@@ -1649,18 +1644,12 @@ class MediaConfigModuleCallbackTestCase(unittest.HomeserverTestCase):
     ) -> HomeServer:
         config = self.default_config()
 
-        self.storage_path = self.mktemp()
-        self.media_store_path = self.mktemp()
-        os.mkdir(self.storage_path)
-        os.mkdir(self.media_store_path)
-        config["media_store_path"] = self.media_store_path
-
         provider_config = {
             "module": "synapse.media.storage_provider.FileStorageProviderBackend",
             "store_local": True,
             "store_synchronous": False,
             "store_remote": True,
-            "config": {"directory": self.storage_path},
+            "config": {"directory": self._media_storage_provider_path},
         }
 
         config["media_storage_providers"] = [provider_config]
@@ -1704,18 +1693,12 @@ class RemoteDownloadLimiterTestCase(unittest.HomeserverTestCase):
     def make_homeserver(self, reactor: MemoryReactor, clock: Clock) -> HomeServer:
         config = self.default_config()
 
-        self.storage_path = self.mktemp()
-        self.media_store_path = self.mktemp()
-        os.mkdir(self.storage_path)
-        os.mkdir(self.media_store_path)
-        config["media_store_path"] = self.media_store_path
-
         provider_config = {
             "module": "synapse.media.storage_provider.FileStorageProviderBackend",
             "store_local": True,
             "store_synchronous": False,
             "store_remote": True,
-            "config": {"directory": self.storage_path},
+            "config": {"directory": self._media_storage_provider_path},
         }
 
         config["media_storage_providers"] = [provider_config]
@@ -2091,13 +2074,7 @@ class DownloadAndThumbnailTestCase(unittest.HomeserverTestCase):
         client.federation_get_file = federation_get_file
         client.get_file = get_file
 
-        self.storage_path = self.mktemp()
-        self.media_store_path = self.mktemp()
-        os.mkdir(self.storage_path)
-        os.mkdir(self.media_store_path)
-
         config = self.default_config()
-        config["media_store_path"] = self.media_store_path
         config["max_image_pixels"] = 2000000
 
         provider_config = {
@@ -2105,7 +2082,7 @@ class DownloadAndThumbnailTestCase(unittest.HomeserverTestCase):
             "store_local": True,
             "store_synchronous": False,
             "store_remote": True,
-            "config": {"directory": self.storage_path},
+            "config": {"directory": self._media_storage_provider_path},
         }
         config["media_storage_providers"] = [provider_config]
 
@@ -2568,11 +2545,6 @@ class AuthenticatedMediaTestCase(unittest.HomeserverTestCase):
         config = self.default_config()
 
         self.clock = clock
-        self.storage_path = self.mktemp()
-        self.media_store_path = self.mktemp()
-        os.mkdir(self.storage_path)
-        os.mkdir(self.media_store_path)
-        config["media_store_path"] = self.media_store_path
         config["enable_authenticated_media"] = True
 
         provider_config = {
@@ -2580,7 +2552,7 @@ class AuthenticatedMediaTestCase(unittest.HomeserverTestCase):
             "store_local": True,
             "store_synchronous": False,
             "store_remote": True,
-            "config": {"directory": self.storage_path},
+            "config": {"directory": self._media_storage_provider_path},
         }
 
         config["media_storage_providers"] = [provider_config]
@@ -2887,18 +2859,12 @@ class MediaUploadLimits(unittest.HomeserverTestCase):
     def make_homeserver(self, reactor: MemoryReactor, clock: Clock) -> HomeServer:
         config = self.default_config()
 
-        self.storage_path = self.mktemp()
-        self.media_store_path = self.mktemp()
-        os.mkdir(self.storage_path)
-        os.mkdir(self.media_store_path)
-        config["media_store_path"] = self.media_store_path
-
         provider_config = {
             "module": "synapse.media.storage_provider.FileStorageProviderBackend",
             "store_local": True,
             "store_synchronous": False,
             "store_remote": True,
-            "config": {"directory": self.storage_path},
+            "config": {"directory": self._media_storage_provider_path},
         }
 
         config["media_storage_providers"] = [provider_config]
@@ -3179,7 +3145,6 @@ class RestrictedResourceUploadTestCase(unittest.HomeserverTestCase):
         return config
 
     def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
-        self.media_repo = hs.get_media_repository_resource()
         self.register_user("creator", "testpass")
         self.creator_tok = self.login("creator", "testpass")
 
@@ -3319,6 +3284,7 @@ class CopyRestrictedResourceTestCase(unittest.HomeserverTestCase):
         admin.register_servlets,
         room.register_servlets,
     ]
+    use_isolated_media_paths = True
 
     def default_config(self) -> JsonDict:
         config = super().default_config()
@@ -4615,16 +4581,12 @@ class RestrictedMediaBackwardCompatTestCase(unittest.HomeserverTestCase):
         admin.register_servlets,
         room.register_servlets,
     ]
+    use_isolated_media_paths = True
 
     def make_homeserver(self, reactor: MemoryReactor, clock: Clock) -> HomeServer:
         config = self.default_config()
 
         self.clock = clock
-        self.storage_path = self.mktemp()
-        self.media_store_path = self.mktemp()
-        os.mkdir(self.storage_path)
-        os.mkdir(self.media_store_path)
-        config["media_store_path"] = self.media_store_path
         config["enable_authenticated_media"] = True
         config["experimental_features"] = {
             "msc3911": {"enabled": self.enable_restricted_media}
@@ -4635,7 +4597,7 @@ class RestrictedMediaBackwardCompatTestCase(unittest.HomeserverTestCase):
             "store_local": True,
             "store_synchronous": False,
             "store_remote": True,
-            "config": {"directory": self.storage_path},
+            "config": {"directory": self._media_storage_provider_path},
         }
 
         config["media_storage_providers"] = [provider_config]
@@ -5112,3 +5074,445 @@ class RestrictedMediaBackwardCompatTestCase(unittest.HomeserverTestCase):
             custom_headers=[("If-None-Match", etag)],
         )
         self.assertEqual(channel3.code, 404)
+
+
+class MediaStorageSha256PathCompatTestCase(unittest.HomeserverTestCase):
+    servlets = [
+        media.register_servlets,
+        login.register_servlets,
+        admin.register_servlets,
+    ]
+    use_isolated_media_paths = True
+
+    def default_config(self) -> JsonDict:
+        config = super().default_config()
+        config.setdefault("experimental_features", {})
+        config["experimental_features"].update({"msc3911": {"enabled": True}})
+        config["enable_local_media_storage_deduplication"] = True
+        return config
+
+    def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
+        super().prepare(reactor, clock, hs)
+        self.repo = hs.get_media_repository()
+        self.user = self.register_user("user", "pass")
+        self.tok = self.login("user", "pass")
+
+    def _create_local_media_with_sha256_path(self) -> str:
+        """Create local media with sha256 path."""
+        assert isinstance(self.repo, MediaRepository)
+        media_id = random_string(24)
+        # Curate a specialized FileInfo that includes sha256 data, then file will be
+        # forced to the new sha256 path
+        file_info = FileInfo(
+            server_name=None,
+            file_id=media_id,
+            sha256=SMALL_PNG_SHA256,
+        )
+
+        expected_path = self.repo.filepaths.filepath_sha(SMALL_PNG_SHA256)
+        ctx = self.repo.media_storage.store_into_file(file_info)
+        (f, fname) = self.get_success(ctx.__aenter__())
+        f.write(SMALL_PNG)
+        self.get_success(ctx.__aexit__(None, None, None))
+
+        # Insert the appropriate data into the database, so lookups work as expected
+        self.get_success(
+            self.repo.store.store_local_media(
+                media_id=media_id,
+                media_type="image/png",
+                time_now_ms=self.clock.time_msec(),
+                upload_name="original_media",
+                media_length=67,
+                user_id=UserID.from_string(self.user),
+                sha256=SMALL_PNG_SHA256,
+                quarantined_by=None,
+                restricted=False,
+            )
+        )
+        assert expected_path == fname
+        assert os.path.exists(fname), f"File does not exist: {fname}"
+        assert os.path.exists(expected_path), f"File does not exist: {expected_path}"
+
+        # Some tests expect thumbnails, remember to generate them
+        self.get_success(
+            self.repo._generate_thumbnails(
+                server_name=None,
+                media_id=media_id,
+                file_id=media_id,
+                media_type="image/png",
+                sha256=SMALL_PNG_SHA256,
+            )
+        )
+        return media_id
+
+    def _create_local_media_with_media_id_path(self) -> str:
+        """Create local media with media id path."""
+        assert isinstance(self.repo, MediaRepository)
+        media_id = random_string(24)
+        # Curate a specialized FileInfo that is lacking sha256 data, then file will be
+        # forced to the old media_id path
+        file_info = FileInfo(
+            server_name=None,
+            file_id=media_id,
+        )
+
+        expected_path = self.repo.filepaths.local_media_filepath(media_id)
+        ctx = self.repo.media_storage.store_into_file(file_info)
+        (f, fname) = self.get_success(ctx.__aenter__())
+        f.write(SMALL_PNG)
+        self.get_success(ctx.__aexit__(None, None, None))
+
+        # Insert the appropriate data into the database, so lookups work as expected
+        self.get_success(
+            self.repo.store.store_local_media(
+                media_id=media_id,
+                media_type="image/png",
+                time_now_ms=self.clock.time_msec(),
+                upload_name="original_media",
+                media_length=67,
+                user_id=UserID.from_string(self.user),
+                sha256=SMALL_PNG_SHA256,
+                quarantined_by=None,
+                restricted=False,
+            )
+        )
+        assert expected_path == fname
+        assert os.path.exists(fname), f"File does not exist: {fname}"
+        assert os.path.exists(expected_path), f"File does not exist: {expected_path}"
+
+        # Some tests expect thumbnails, remember to generate them
+        self.get_success(
+            self.repo._generate_thumbnails(
+                server_name=None,
+                media_id=media_id,
+                file_id=media_id,
+                media_type="image/png",
+                # We purposely do not use the sha256 here, as it directly causes the sha256
+                # path for thumbnails to be populated, and that is not what we are looking
+                # for.
+                sha256=None,
+            )
+        )
+        return media_id
+
+    async def _mock_federation_download_media(
+        self,
+        destination: str,
+        media_id: str,
+        output_stream: BinaryIO,
+        max_size: int,
+        max_timeout_ms: int,
+        download_ratelimiter: Ratelimiter,
+        ip_address: str,
+    ) -> Tuple[int, Dict[bytes, List[bytes]]]:
+        output_stream.write(SMALL_PNG)
+        output_stream.flush()
+        headers = {
+            b"Content-Type": [b"image/png"],
+            b"Content-Disposition": [b"attachment; filename=test.png"],
+            b"Content-Length": [b"67"],
+        }
+        return 67, headers
+
+    def test_download_remote_media_saves_file_in_sha256_path(self) -> None:
+        """Test downloading remote media using sha256 path via download endpoint."""
+        # Mock the federation download media
+        self.repo.client.federation_download_media = (  # type: ignore
+            self._mock_federation_download_media
+        )
+
+        # Download remote media with media_id path
+        remote_server = "remote.org"
+        media_id = random_string(24)
+        channel = self.make_request(
+            "GET",
+            f"/_matrix/client/v1/media/download/{remote_server}/{media_id}",
+            shorthand=False,
+            access_token=self.tok,
+        )
+        assert channel.code == 200
+        assert isinstance(self.repo, MediaRepository)
+        assert os.path.exists(self.repo.filepaths.filepath_sha(SMALL_PNG_SHA256))
+
+        # Check if the file is saved in the cached_remote_media table.
+        remote_media = self.get_success(
+            self.repo.store.get_cached_remote_media(remote_server, media_id)
+        )
+        assert remote_media is not None
+        # Make sure that the media_id path does not exist.
+        assert not os.path.exists(
+            self.repo.filepaths.remote_media_filepath(
+                remote_server, remote_media.filesystem_id
+            )
+        )
+
+    def test_download_local_media_with_media_id_path(
+        self,
+    ) -> None:
+        """Test that downloading local media with media_id path serves correct file.
+        Specifically, that a preexisting file on the media id path(legacy) can still be
+        served from its present location.
+        """
+        media_id = self._create_local_media_with_media_id_path()
+        channel = self.make_request(
+            "GET",
+            f"/_matrix/client/v1/media/download/{self.hs.hostname}/{media_id}",
+            shorthand=False,
+            access_token=self.tok,
+        )
+        assert channel.code == 200
+        assert channel.result["body"] == SMALL_PNG
+
+    def test_download_local_media_with_sha256_path(self) -> None:
+        """Test that downloading local media with sha256 path serves correct file."""
+        media_id = self._create_local_media_with_sha256_path()
+        channel = self.make_request(
+            "GET",
+            f"/_matrix/client/v1/media/download/{self.hs.hostname}/{media_id}",
+            shorthand=False,
+            access_token=self.tok,
+        )
+        assert channel.code == 200
+        assert channel.result["body"] == SMALL_PNG
+
+    def test_copy_remote_media_with_sha256_path(self) -> None:
+        """Test that copying remote media saves file in sha256 path."""
+        # Mock the federation download media
+        self.repo.client.federation_download_media = (  # type: ignore
+            self._mock_federation_download_media
+        )
+
+        # Copy remote media
+        remote_server = "remote.org"
+        media_id = random_string(24)
+        channel = self.make_request(
+            "POST",
+            f"/_matrix/client/unstable/org.matrix.msc3911/media/copy/{remote_server}/{media_id}",
+            shorthand=False,
+            access_token=self.tok,
+        )
+        assert channel.code == 200, channel.result
+        assert "content_uri" in channel.json_body
+        copied_media_mxc_uri = MXCUri.from_str(channel.json_body["content_uri"])
+        assert copied_media_mxc_uri.media_id != media_id
+
+        # Check if both original and copied media are stored in the media table.
+        remote_media = self.get_success(
+            self.repo.store.get_cached_remote_media(remote_server, media_id)
+        )
+        assert remote_media is not None
+        assert remote_media.sha256 == SMALL_PNG_SHA256
+
+        copied_media = self.get_success(
+            self.repo.store.get_local_media(copied_media_mxc_uri.media_id)
+        )
+        assert copied_media is not None
+        assert copied_media.sha256 == SMALL_PNG_SHA256
+
+        # Check if the file is saved in the sha256 path only.
+        assert isinstance(self.repo, MediaRepository)
+        assert os.path.exists(self.repo.filepaths.filepath_sha(SMALL_PNG_SHA256))
+        # It should NOT exist in either of the legacy paths
+        assert not os.path.exists(
+            self.repo.filepaths.remote_media_filepath(
+                remote_server, remote_media.filesystem_id
+            )
+        )
+        assert not os.path.exists(
+            self.repo.filepaths.local_media_filepath(copied_media_mxc_uri.media_id)
+        )
+
+    def test_copy_local_media_with_media_id(self) -> None:
+        """Test that copying media with media_id path works correctly, when sha256 path is enabled."""
+        # Create local media with media_id path.
+        media_id = self._create_local_media_with_media_id_path()
+
+        # Copy local media.
+        channel = self.make_request(
+            "POST",
+            f"/_matrix/client/unstable/org.matrix.msc3911/media/copy/{self.hs.hostname}/{media_id}",
+            shorthand=False,
+            access_token=self.tok,
+        )
+        assert channel.code == 200, channel.result
+        assert "content_uri" in channel.json_body
+        copied_media_mxc_uri = MXCUri.from_str(channel.json_body["content_uri"])
+        assert copied_media_mxc_uri.media_id != media_id
+
+        # Check if both original and copied media are stored in the media table.
+        original_media = self.get_success(self.repo.store.get_local_media(media_id))
+        assert original_media is not None
+        assert original_media.sha256 == SMALL_PNG_SHA256
+
+        copied_media = self.get_success(
+            self.repo.store.get_local_media(copied_media_mxc_uri.media_id)
+        )
+        assert copied_media is not None
+        assert copied_media.sha256 == SMALL_PNG_SHA256
+
+        # The copy should create a new media id, and recreate the file in the sha256 path.
+        assert isinstance(self.repo, MediaRepository)
+        assert os.path.exists(self.repo.filepaths.filepath_sha(SMALL_PNG_SHA256))
+        assert os.path.exists(self.repo.filepaths.local_media_filepath(media_id))
+        # Copy operation does not delete the original file with media_id path.
+        assert not os.path.exists(
+            self.repo.filepaths.local_media_filepath(copied_media_mxc_uri.media_id)
+        )
+
+    def test_copy_local_media_with_sha256_path(self) -> None:
+        """Test that copying media with sha256 path works correctly."""
+        # Create local media with sha256 path.
+        media_id = self._create_local_media_with_sha256_path()
+
+        # Copy local media.
+        channel = self.make_request(
+            "POST",
+            f"/_matrix/client/unstable/org.matrix.msc3911/media/copy/{self.hs.hostname}/{media_id}",
+            shorthand=False,
+            access_token=self.tok,
+        )
+        assert channel.code == 200, channel.result
+        assert "content_uri" in channel.json_body
+        copied_media_mxc_uri = MXCUri.from_str(channel.json_body["content_uri"])
+        assert copied_media_mxc_uri.media_id != media_id
+
+        # Check if both original and copied media are stored in the media table.
+        original_media = self.get_success(self.repo.store.get_local_media(media_id))
+        assert original_media is not None
+        assert original_media.sha256 == SMALL_PNG_SHA256
+
+        copied_media = self.get_success(
+            self.repo.store.get_local_media(copied_media_mxc_uri.media_id)
+        )
+        assert copied_media is not None
+        assert copied_media.sha256 == SMALL_PNG_SHA256
+
+        # The copy shouldn't create any new files, besides the one already in the sha256 path.
+        assert isinstance(self.repo, MediaRepository)
+        assert os.path.exists(self.repo.filepaths.filepath_sha(SMALL_PNG_SHA256))
+        assert not os.path.exists(self.repo.filepaths.local_media_filepath(media_id))
+        assert not os.path.exists(
+            self.repo.filepaths.local_media_filepath(copied_media_mxc_uri.media_id)
+        )
+
+    def test_upload_local_media_with_sha256_path(self) -> None:
+        """Test uploading local media with sha256 path."""
+        # Upload local media.
+        channel = self.make_request(
+            "POST",
+            "_matrix/client/unstable/org.matrix.msc3911/media/upload?filename=test_png_upload",
+            SMALL_PNG,
+            self.tok,
+            shorthand=False,
+            content_type=b"image/png",
+            custom_headers=[("Content-Length", str(67))],
+        )
+        self.assertEqual(channel.code, 200, channel.json_body)
+
+        res = channel.json_body.get("content_uri")
+        assert res is not None
+        _, media_id = res.rsplit("/", maxsplit=1)
+
+        # Check if the media is saved in the media table.
+        local_media_info = self.get_success(self.repo.store.get_local_media(media_id))
+        assert local_media_info is not None
+        assert local_media_info.sha256 == SMALL_PNG_SHA256
+
+        # Check if the file is saved in the sha256 path.
+        assert isinstance(self.repo, MediaRepository)
+        assert os.path.exists(self.repo.filepaths.filepath_sha(SMALL_PNG_SHA256))
+        # It should not be created on the legacy path
+        assert not os.path.exists(self.repo.filepaths.local_media_filepath(media_id))
+
+    def test_download_local_thumbnail_with_media_id(self) -> None:
+        """Test downloading thumbnail of local media with media_id path."""
+        # Create local media with media_id path.
+        media_id = self._create_local_media_with_media_id_path()
+
+        # Download thumbnail of the media.
+        channel = self.make_request(
+            "GET",
+            f"/_matrix/client/v1/media/thumbnail/{self.hs.hostname}/{media_id}?width=1&height=1&method=scale",
+            shorthand=False,
+            access_token=self.tok,
+        )
+        assert channel.code == 200, channel.result
+        assert channel.result["body"] is not None
+
+    def test_download_local_thumbnail_with_sha256_path(self) -> None:
+        """Test downloading thumbnail of local media with sha256 path."""
+        # Create local media with sha256 path.
+        media_id = self._create_local_media_with_sha256_path()
+
+        # Download thumbnail of the media.
+        channel = self.make_request(
+            "GET",
+            f"/_matrix/client/v1/media/thumbnail/{self.hs.hostname}/{media_id}?width=1&height=1&method=scale",
+            shorthand=False,
+            access_token=self.tok,
+        )
+        assert channel.code == 200, channel.result
+        assert channel.result["body"] is not None
+
+        # Check if the thumbnail is stored in the media table.
+        thumbnails = self.get_success(
+            self.repo.store.get_local_media_thumbnails(media_id)
+        )
+        assert thumbnails is not None
+        has_1x1_thumbnail = any(
+            thumb.width == 1 and thumb.height == 1 for thumb in thumbnails
+        )
+        assert has_1x1_thumbnail, "No 1x1 thumbnail found"
+
+        # Check if the thumbnail is saved in the sha256 path, not in the media_id path.
+        assert isinstance(self.repo, MediaRepository)
+        assert os.path.exists(
+            self.repo.filepaths.thumbnail_sha(
+                SMALL_PNG_SHA256, 1, 1, "image/png", "scale"
+            )
+        )
+        assert not os.path.exists(
+            self.repo.filepaths.local_media_thumbnail(
+                media_id, 1, 1, "image/png", "scale"
+            )
+        )
+
+    def test_download_remote_thumbnail_with_sha256_path(self) -> None:
+        """Test downloading thumbnail of remote media saves file in sha256 path."""
+        # Mock the federation download media
+        self.repo.client.federation_download_media = (  # type: ignore
+            self._mock_federation_download_media
+        )
+
+        # Download thumbnail of remote media.
+        remote_server = "remote.org"
+        media_id = random_string(24)
+        channel = self.make_request(
+            "GET",
+            f"/_matrix/client/v1/media/thumbnail/{remote_server}/{media_id}?width=1&height=1&method=scale",
+            shorthand=False,
+            access_token=self.tok,
+        )
+        assert channel.code == 200, channel.result
+        assert channel.result["body"] is not None
+
+        # Check if the thumbnail is saved in the sha256 path.
+        assert isinstance(self.repo, MediaRepository)
+        assert os.path.exists(
+            self.repo.filepaths.thumbnail_sha(
+                SMALL_PNG_SHA256, 1, 1, "image/png", "scale"
+            )
+        )
+        assert not os.path.exists(
+            self.repo.filepaths.remote_media_thumbnail(
+                remote_server, media_id, 1, 1, "image/png", "scale"
+            )
+        )
+
+        # Check if the thumbnail is stored in the media table.
+        thumbnail = self.get_success(
+            self.repo.store.get_remote_media_thumbnail(
+                remote_server, media_id, 1, 1, "image/png"
+            )
+        )
+        assert thumbnail is not None

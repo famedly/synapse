@@ -56,6 +56,8 @@ class _AdminMediaTests(unittest.HomeserverTestCase):
 
 
 class DeleteMediaByIDTestCase(_AdminMediaTests):
+    use_isolated_media_paths = True
+
     def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
         self.server_name = hs.hostname
 
@@ -210,6 +212,7 @@ class DeleteMediaByDateSizeTestCase(_AdminMediaTests):
         profile.register_servlets,
         room.register_servlets,
     ]
+    use_isolated_media_paths = True
 
     def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
         self.media_repo = hs.get_media_repository_resource()

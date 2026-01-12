@@ -109,7 +109,7 @@ class ProfileFieldRestServlet(RestServlet):
         self.hs = hs
         self.profile_handler = hs.get_profile_handler()
         self.auth = hs.get_auth()
-        self.enable_restricted_media = hs.config.experimental.msc3911.enabled
+        self.msc3911_config = hs.config.experimental.msc3911
 
     async def on_GET(
         self, request: SynapseRequest, user_id: str, field_name: str
@@ -203,7 +203,7 @@ class ProfileFieldRestServlet(RestServlet):
                 user, requester, input_value, is_admin, propagate=propagate
             )
         elif field_name == ProfileFields.AVATAR_URL:
-            if self.enable_restricted_media and input_value:
+            if self.msc3911_config.enabled and input_value:
                 current_avatar_url = (
                     await self.profile_handler.store.get_profile_avatar_url(
                         requester.user

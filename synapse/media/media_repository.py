@@ -112,7 +112,7 @@ class AbstractMediaRepository:
         self.server_name = hs.hostname
         self.store = hs.get_datastores().main
         self._is_mine_server_name = hs.is_mine_server_name
-        self.enable_media_restriction = self.hs.config.experimental.msc3911.enabled
+        self.msc3911_config = hs.config.experimental.msc3911
 
     @trace
     async def create_media_id_without_expiration(
@@ -319,7 +319,7 @@ class AbstractMediaRepository:
         the request
         """
 
-        if not self.enable_media_restriction:
+        if not self.msc3911_config.enabled:
             return
 
         if not media_info_object.restricted:
@@ -617,6 +617,8 @@ class MediaRepository(AbstractMediaRepository):
             hs.config.media.media_retention_remote_media_lifetime_ms
         )
 
+        self.use_sha256_path = hs.config.media.enable_local_media_storage_deduplication
+
         # Check whether local or remote media retention is configured
         if (
             hs.config.media.media_retention_local_media_lifetime_ms is not None
@@ -644,13 +646,13 @@ class MediaRepository(AbstractMediaRepository):
         )
 
         if (
-            self.hs.config.experimental.msc3911.purge_pending_unattached_media
+            self.msc3911_config.purge_pending_unattached_media
             and hs.config.media.media_instance_running_background_jobs
             == hs.config.worker.worker_name
         ):
             self.clock.looping_call(
                 self._pending_media_cleanup,
-                self.hs.config.experimental.msc3911.pending_media_cleanup_interval_ms,
+                self.msc3911_config.pending_media_cleanup_interval_ms,
             )
 
     def _start_update_recently_accessed(self) -> Deferred:
@@ -676,7 +678,7 @@ class MediaRepository(AbstractMediaRepository):
 
     async def _pending_media_cleanup(self) -> None:
         pending_media_ids = await self.store.get_pending_media_ids(
-            self.hs.config.experimental.msc3911.pending_media_cleanup_interval_ms
+            self.msc3911_config.pending_media_cleanup_interval_ms
         )
         if pending_media_ids:
             await self.delete_local_media_ids(pending_media_ids)
@@ -802,11 +804,14 @@ class MediaRepository(AbstractMediaRepository):
         if media_id is None:
             media_id = random_string(24)
 
-        file_info = FileInfo(server_name=None, file_id=media_id)
         sha256reader = SHA256TransparentIOReader(content)
-        # This implements all of IO as it has a passthrough
-        fname = await self.media_storage.store_file(sha256reader.wrap(), file_info)
+        # Do a read() before a hexdigest(), or the hash will not be of the complete file
+        sha256reader.read()
         sha256 = sha256reader.hexdigest()
+        file_info = FileInfo(server_name=None, file_id=media_id, sha256=sha256)
+
+        # store_file() has an inner function that does a seek(0) on the IO
+        fname = await self.media_storage.store_file(sha256reader.wrap(), file_info)
         should_quarantine = await self.store.get_is_hash_quarantined(sha256)
 
         logger.info("Stored local media in file %r", fname)
@@ -869,7 +874,13 @@ class MediaRepository(AbstractMediaRepository):
             )
 
         try:
-            await self._generate_thumbnails(None, media_id, media_id, media_type)
+            await self._generate_thumbnails(
+                server_name=None,
+                media_id=media_id,
+                file_id=media_id,
+                media_type=media_type,
+                sha256=sha256,
+            )
         except Exception as e:
             logger.info("Failed to generate thumbnails: %s", e)
 
@@ -892,9 +903,14 @@ class MediaRepository(AbstractMediaRepository):
             file_info = FileInfo(
                 server_name=old_media_info.media_origin,
                 file_id=old_media_info.filesystem_id,
+                sha256=old_media_info.sha256,
             )
         else:
-            file_info = FileInfo(server_name=None, file_id=old_media_info.media_id)
+            file_info = FileInfo(
+                server_name=None,
+                file_id=old_media_info.media_id,
+                sha256=old_media_info.sha256,
+            )
 
         # This will ensure that if there is another storage provider containing our old
         # media, it will be in our local cache before the copy takes place.
@@ -905,20 +921,17 @@ class MediaRepository(AbstractMediaRepository):
 
         # It may end up being that this needs to be pushed down into the MediaStorage
         # class. It needs abstraction badly, but that is beyond me at the moment.
-        io_object = open(local_path, "rb")
-
-        # Let existing methods handle creating the new file for us. By not passing a
-        # media id, one will be created.
-        new_mxc_uri = await self.create_or_update_content(
-            media_type=old_media_info.media_type,
-            upload_name=old_media_info.upload_name,
-            content=io_object,
-            content_length=old_media_info.media_length,
-            auth_user=auth_user,
-            restricted=True,
-        )
-        # I could not find a place this was close()'d explicitly, but this felt prudent
-        io_object.close()
+        with open(local_path, "rb") as io_object:
+            # Let existing methods handle creating the new file for us. By not passing a
+            # media id, one will be created.
+            new_mxc_uri = await self.create_or_update_content(
+                media_type=old_media_info.media_type,
+                upload_name=old_media_info.upload_name,
+                content=io_object,
+                content_length=old_media_info.media_length,
+                auth_user=auth_user,
+                restricted=True,
+            )
 
         return new_mxc_uri
 
@@ -1025,7 +1038,7 @@ class MediaRepository(AbstractMediaRepository):
         restrictions = None
         # if MSC3911 is enabled, check visibility of the media for the user and retrieve
         # any restrictions
-        if self.enable_media_restriction:
+        if self.msc3911_config.enabled:
             if requester is not None:
                 # Only check media visibility if this is for a local request. This will
                 # raise directly back to the client if not visible
@@ -1049,7 +1062,12 @@ class MediaRepository(AbstractMediaRepository):
         upload_name = name if name else media_info.upload_name
         url_cache = media_info.url_cache
 
-        file_info = FileInfo(None, media_id, url_cache=bool(url_cache))
+        file_info = FileInfo(
+            None,
+            media_id,
+            url_cache=bool(url_cache),
+            sha256=media_info.sha256,
+        )
 
         responder = await self.media_storage.fetch_media(file_info)
         if federation:
@@ -1257,7 +1275,7 @@ class MediaRepository(AbstractMediaRepository):
             # check exists twice in this function, once up here for when it already
             # exists in the local database and again further down for after it was
             # retrieved from the remote.
-            if self.enable_media_restriction and requester is not None:
+            if self.msc3911_config.enabled and requester is not None:
                 # This will raise directly back to the client if not visible
                 await self.is_media_visible(requester.user, media_info)
 
@@ -1265,7 +1283,7 @@ class MediaRepository(AbstractMediaRepository):
             # seen the file then reuse the existing ID, otherwise generate a new
             # one.
             file_id = media_info.filesystem_id
-            file_info = FileInfo(server_name, file_id)
+            file_info = FileInfo(server_name, file_id, sha256=media_info.sha256)
 
             if media_info.quarantined_by:
                 logger.info("Media is quarantined")
@@ -1283,6 +1301,8 @@ class MediaRepository(AbstractMediaRepository):
         # Failed to find the file anywhere, lets download it.
 
         try:
+            # Both of these retrieval functions will stage the file, so after they
+            # complete the migration function should be called below
             if not use_federation_endpoint:
                 media_info = await self._download_remote_file(
                     server_name,
@@ -1313,7 +1333,7 @@ class MediaRepository(AbstractMediaRepository):
         # Restricted media requires authentication to be enabled
         if (
             self.hs.config.media.enable_authenticated_media
-            and self.enable_media_restriction
+            and self.msc3911_config.enabled
             and requester is not None
         ):
             # This will raise directly back to the client if not visible
@@ -1322,7 +1342,13 @@ class MediaRepository(AbstractMediaRepository):
         file_id = media_info.filesystem_id
         if not media_info.media_type:
             media_info = attr.evolve(media_info, media_type="application/octet-stream")
-        file_info = FileInfo(server_name, file_id)
+
+        # Now that the file has been retrieved, need to see if it needs to be migrated.
+        # Should probably do this before generating thumbnails
+        file_info = FileInfo(
+            server_name=server_name, file_id=file_id, sha256=media_info.sha256
+        )
+        await self.media_storage.maybe_move_media_file_from_id_to_sha256_path(file_info)
 
         # We generate thumbnails even if another process downloaded the media
         # as a) it's conceivable that the other download request dies before it
@@ -1331,7 +1357,11 @@ class MediaRepository(AbstractMediaRepository):
         # otherwise they'll request thumbnails and get a 404 if they're not
         # ready yet.
         await self._generate_thumbnails(
-            server_name, media_id, file_id, media_info.media_type
+            server_name=server_name,
+            media_id=media_id,
+            file_id=file_id,
+            media_type=media_info.media_type,
+            sha256=media_info.sha256,
         )
 
         responder = await self.media_storage.fetch_media(file_info)
@@ -1420,6 +1450,7 @@ class MediaRepository(AbstractMediaRepository):
                 media_type = "application/octet-stream"
             upload_name = get_filename_from_headers(headers)
             time_now_ms = self.clock.time_msec()
+            sha256 = sha256writer.hexdigest()
 
             # Multiple remote media download requests can race (when using
             # multiple media repos), so this may throw a violation constraint
@@ -1439,7 +1470,7 @@ class MediaRepository(AbstractMediaRepository):
                 upload_name=upload_name,
                 media_length=length,
                 filesystem_id=file_id,
-                sha256=sha256writer.hexdigest(),
+                sha256=sha256,
             )
 
         logger.info("Stored remote media in file %r", fname)
@@ -1460,7 +1491,7 @@ class MediaRepository(AbstractMediaRepository):
             last_access_ts=time_now_ms,
             quarantined_by=None,
             authenticated=authenticated,
-            sha256=sha256writer.hexdigest(),
+            sha256=sha256,
             # The "pre-msc3916" method for downloading over federation, restricted
             # will always be false and attachments will always be None here
             restricted=False,
@@ -1564,6 +1595,8 @@ class MediaRepository(AbstractMediaRepository):
             upload_name = get_filename_from_headers(headers)
             time_now_ms = self.clock.time_msec()
 
+            sha256 = sha256writer.hexdigest()
+
             # Multiple remote media download requests can race (when using
             # multiple media repos), so this may throw a violation constraint
             # exception. If it does we'll delete the newly downloaded file from
@@ -1597,7 +1630,7 @@ class MediaRepository(AbstractMediaRepository):
                 upload_name=upload_name,
                 media_length=length,
                 filesystem_id=file_id,
-                sha256=sha256writer.hexdigest(),
+                sha256=sha256,
                 restricted=restricted,
             )
             # TODO: Decide about raising here? It will delete the media from the
@@ -1633,7 +1666,7 @@ class MediaRepository(AbstractMediaRepository):
             last_access_ts=time_now_ms,
             quarantined_by=None,
             authenticated=authenticated,
-            sha256=sha256writer.hexdigest(),
+            sha256=sha256,
             restricted=restricted,
             attachments=attachments,
         )
@@ -1687,9 +1720,15 @@ class MediaRepository(AbstractMediaRepository):
         t_method: str,
         t_type: str,
         url_cache: bool,
+        sha256: Optional[str] = None,
     ) -> Optional[Tuple[str, FileInfo]]:
         input_path = await self.media_storage.ensure_media_is_in_local_cache(
-            FileInfo(None, media_id, url_cache=url_cache)
+            FileInfo(
+                None,
+                media_id,
+                url_cache=url_cache,
+                sha256=sha256,
+            )
         )
 
         try:
@@ -1728,6 +1767,7 @@ class MediaRepository(AbstractMediaRepository):
                         type=t_type,
                         length=t_byte_source.tell(),
                     ),
+                    sha256=sha256,
                 )
 
                 output_path = await self.media_storage.store_file(
@@ -1763,9 +1803,14 @@ class MediaRepository(AbstractMediaRepository):
         t_height: int,
         t_method: str,
         t_type: str,
+        sha256: Optional[str] = None,
     ) -> Optional[str]:
         input_path = await self.media_storage.ensure_media_is_in_local_cache(
-            FileInfo(server_name, file_id)
+            FileInfo(
+                server_name,
+                file_id,
+                sha256=sha256,
+            )
         )
 
         try:
@@ -1804,6 +1849,7 @@ class MediaRepository(AbstractMediaRepository):
                         type=t_type,
                         length=t_byte_source.tell(),
                     ),
+                    sha256=sha256,
                 )
 
                 output_path = await self.media_storage.store_file(
@@ -1840,6 +1886,7 @@ class MediaRepository(AbstractMediaRepository):
         file_id: str,
         media_type: str,
         url_cache: bool = False,
+        sha256: Optional[str] = None,
     ) -> Optional[dict]:
         """Generate and store thumbnails for an image.
 
@@ -1847,10 +1894,11 @@ class MediaRepository(AbstractMediaRepository):
             server_name: The server name if remote media, else None if local
             media_id: The media ID of the content. (This is the same as
                 the file_id for local content)
-            file_id: Local file ID
+            file_id: Local file ID.
             media_type: The content type of the file
             url_cache: If we are thumbnailing images downloaded for the URL cache,
                 used exclusively by the url previewer
+            sha256: The sha256 of the media. This will be used as the path, if sha256 path is enabled.
 
         Returns:
             Dict with "width" and "height" keys of original image or None if the
@@ -1860,9 +1908,13 @@ class MediaRepository(AbstractMediaRepository):
         if not requirements:
             return None
 
-        input_path = await self.media_storage.ensure_media_is_in_local_cache(
-            FileInfo(server_name, file_id, url_cache=url_cache)
+        file_info = FileInfo(
+            server_name,
+            file_id,
+            url_cache=url_cache,
+            sha256=sha256,
         )
+        input_path = await self.media_storage.ensure_media_is_in_local_cache(file_info)
 
         try:
             thumbnailer = Thumbnailer(input_path)
@@ -1950,6 +2002,7 @@ class MediaRepository(AbstractMediaRepository):
                         type=t_type,
                         length=t_byte_source.tell(),
                     ),
+                    sha256=sha256,
                 )
 
                 async with self.media_storage.store_into_file(file_info) as (f, fname):
@@ -2062,22 +2115,23 @@ class MediaRepository(AbstractMediaRepository):
             logger.info("Deleting: %r", key)
 
             # TODO: Should we delete from the backup store
+            #  Jason: Probably, we literally don't delete from it anywhere else
 
             async with self.remote_media_linearizer.queue(key):
-                full_path = self.filepaths.remote_media_filepath(origin, file_id)
-                try:
-                    os.remove(full_path)
-                except OSError as e:
-                    logger.warning("Failed to remove file: %r", full_path)
-                    if e.errno == errno.ENOENT:
-                        pass
-                    else:
-                        continue
+                paths = [self.filepaths.remote_media_filepath(origin, file_id)]
+                thumbnail_paths = [
+                    self.filepaths.remote_media_thumbnail_dir(origin, file_id)
+                ]
 
-                thumbnail_dir = self.filepaths.remote_media_thumbnail_dir(
-                    origin, file_id
-                )
-                shutil.rmtree(thumbnail_dir, ignore_errors=True)
+                sha256 = await self.store.get_sha_for_remote_media_id(origin, media_id)
+                # In the interest of removing media that was de-duplicated, only purge
+                # the actual media object if there are no more references to it in the
+                # database.
+                if await self.store.get_media_reference_count_for_sha256(sha256) <= 1:
+                    paths.append(self.filepaths.filepath_sha(sha256))
+                    thumbnail_paths.append(self.filepaths.thumbnail_sha_dir(sha256))
+
+                _remove_media_files(paths, thumbnail_paths)
 
                 await self.store.delete_remote_media(origin, media_id)
                 deleted += 1
@@ -2091,7 +2145,7 @@ class MediaRepository(AbstractMediaRepository):
         Delete the given local or remote media ID from this server
 
         Args:
-            media_id: The media ID to delete.
+            media_ids: The list of media IDs to delete.
         Returns:
             A tuple of (list of deleted media IDs, total deleted media IDs).
         """
@@ -2145,24 +2199,53 @@ class MediaRepository(AbstractMediaRepository):
         removed_media = []
         for media_id in media_ids:
             logger.info("Deleting media with ID '%s'", media_id)
-            full_path = self.filepaths.local_media_filepath(media_id)
-            try:
-                os.remove(full_path)
-            except OSError as e:
-                logger.warning("Failed to remove file: %r: %s", full_path, e)
-                if e.errno == errno.ENOENT:
-                    pass
-                else:
-                    continue
+            paths = [
+                self.filepaths.local_media_filepath(media_id),
+            ]
+            thumbnail_paths = [self.filepaths.local_media_thumbnail_dir(media_id)]
 
-            thumbnail_dir = self.filepaths.local_media_thumbnail_dir(media_id)
-            shutil.rmtree(thumbnail_dir, ignore_errors=True)
+            sha256 = await self.store.get_sha_for_local_media_id(media_id)
+            # In the interest of removing media that was de-duplicated, only purge
+            # the actual media object if there are no more references to it in the
+            # database.
+            if await self.store.get_media_reference_count_for_sha256(sha256) <= 1:
+                paths.append(self.filepaths.filepath_sha(sha256))
+                thumbnail_paths.append(self.filepaths.thumbnail_sha_dir(sha256))
 
+            _remove_media_files(paths, thumbnail_paths)
+
+            # Poorly named, this deletes media *from this server* that is somehow
+            # considered "remote". Observe the server name argument below
             await self.store.delete_remote_media(self.server_name, media_id)
 
             await self.store.delete_url_cache((media_id,))
+            # Poorly named, but this is the one that cleans out local media metadata
             await self.store.delete_url_cache_media((media_id,))
 
             removed_media.append(media_id)
 
         return removed_media, len(removed_media)
+
+
+def _remove_media_files(paths: List[str], thumbnail_paths: List[str]) -> None:
+    """
+    Remove the select files from the filesystem. IO related errors, such as non-existent
+    files, will be ignored.
+
+    Args:
+        paths: The absolute path to a specific file to be removed
+        thumbnail_paths: The absolute path to a specific directory. The entire directory
+            will be removed.
+    """
+    for path in paths:
+        try:
+            os.remove(path)
+        except OSError as e:
+            logger.warning("Failed to remove file: %r: %s", path, e)
+            if e.errno == errno.ENOENT:
+                pass
+            else:
+                continue
+
+    for thumbnail_path in thumbnail_paths:
+        shutil.rmtree(thumbnail_path, ignore_errors=True)
