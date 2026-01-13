@@ -17,6 +17,10 @@ that disable that endpoint by default.
 No significant changes since 1.144.0rc1.
 
 
+### Famedly additions for v1.143.0_1
+- ci: generate requirements.txt file from synapse's poetry.lock for invite-checker and token-authenticator tests ([\#227(https://github.com/famedly/synapse/pull/227)]) (FrenchGithubUser)
+- ci: fix tests failing as the token-authenticator's synapse dependency is already pointing to the master branch ([\#226](https://github.com/famedly/synapse/pull/226)) (FrenchGithubUser)
+- chore: Remove unused make_release.sh script and update README.rst ([\#224](https://github.com/famedly/synapse/pull/224)) (Jason Little)
 
 
 # Synapse 1.144.0rc1 (2025-12-02)
