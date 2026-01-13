@@ -4,6 +4,7 @@ from synapse.rest import admin, login, register, room
 from synapse.server import HomeServer
 from synapse.types import create_requester
 from synapse.util.clock import Clock
+from synapse.util.duration import Duration
 
 from tests.unittest import FederatingHomeserverTestCase
 
@@ -159,7 +160,7 @@ class CommonUsageMetricsManagerTestCase(FederatingHomeserverTestCase):
         # start the user_daily_visits table update loop
         self.clock.looping_call(
             self.hs.get_datastores().main.generate_user_daily_visits,
-            5 * 60 * 1000,
+            Duration(minutes=5),
         )
         metrics = self.get_success(self.manager.get_metrics())
 
