@@ -386,8 +386,15 @@ jobs:
         with:
           python-version: "3.13"
 
-      - name: Install hatch
-        run: pip install hatch
+      - name: Install hatch and poetry
+        run: pip install hatch poetry poetry-plugin-export
+
+      - name: Generate requirements from Synapse lockfile
+        # hatch can't read synapse's lock file, we export it in a format hatch can use,
+        # this allows us to install synapse dependencies on the version they are locked at,
+        # this avoids errors due to new dependency versions with breaking changes.
+        run: |
+          poetry export --without-hashes --format requirements.txt --output "${{ github.workspace }}/synapse-invite-checker/synapse-requirements.txt"
 
       - name: Determine synapse git ref
         id: synapse-ref
@@ -402,17 +409,30 @@ jobs:
 
       - name: Update dependency to the current branch
         working-directory: synapse-invite-checker
+        # the synapse dependency of the invite-checker is already pointing to synapse's master branch
+        # we skip the branch update when the CI runs on master
         run: |
-          sed -i 's|"matrix-synapse[^"]*"|"matrix-synapse @ git+https://github.com/${{ steps.synapse-ref.outputs.repo }}.git@${{ steps.synapse-ref.outputs.ref }}"|' pyproject.toml
-          # Check if the file was actually modified
-          if git diff --exit-code pyproject.toml > /dev/null; then
-            echo "::error::The sed command did not modify pyproject.toml. Check if the 'matrix-synapse' dependency exists in the file."
-            exit 1
+          if [ "${{ steps.synapse-ref.outputs.ref }}" != "master" ]; then
+            sed -i 's|"matrix-synapse[^"]*"|"matrix-synapse @ git+https://github.com/${{ steps.synapse-ref.outputs.repo }}.git@${{ steps.synapse-ref.outputs.ref }}"|' pyproject.toml
+            # Check if the file was actually modified
+            if git diff --exit-code pyproject.toml > /dev/null; then
+              echo "::error::The sed command did not modify pyproject.toml. Check if the 'matrix-synapse' dependency exists in the file."
+              exit 1
+            fi
           fi
 
       - name: Run invite-checker tests
         working-directory: synapse-invite-checker
-        run: hatch run cov
+        run: hatch run pip install -r synapse-requirements.txt && hatch run cov
+
+      - name: Display Hatch Environment Info
+        if: always()
+        working-directory: synapse-invite-checker
+        run: |
+          echo "### Hatch Environment Details"
+          hatch env show
+          echo "### Installed Packages"
+          hatch run pip freeze
 
   token-authenticator:
     if: ${{ !failure() && !cancelled() }}
@@ -435,8 +455,15 @@ jobs:
         with:
           python-version: "3.13"
 
-      - name: Install hatch
-        run: pip install hatch
+      - name: Install hatch and poetry
+        run: pip install hatch poetry poetry-plugin-export
+
+      - name: Generate requirements from Synapse lockfile
+        # hatch can't read synapse's lock file, we export it in a format hatch can use
+        # this allows us to install synapse dependencies on the version they are locked at,
+        # this avoids errors due to new dependency versions with breaking changes
+        run: |
+          poetry export --without-hashes --format requirements.txt --output "${{ github.workspace }}/synapse-token-authenticator/synapse-requirements.txt"
 
       - name: Determine synapse git ref
         id: synapse-ref
@@ -451,21 +478,26 @@ jobs:
 
       - name: Update dependency to the current branch
         working-directory: synapse-token-authenticator
-        # the synapse dependency of the token-authenticator is already pointing to synapse's master branch
-        # we skip the branch update when the CI runs on master
         run: |
-          if [ "${{ steps.synapse-ref.outputs.ref }}" != "master" ]; then
-            sed -i 's|"matrix-synapse[^"]*"|"matrix-synapse @ git+https://github.com/${{ steps.synapse-ref.outputs.repo }}.git@${{ steps.synapse-ref.outputs.ref }}"|' pyproject.toml
-            # Check if the file was actually modified
-            if git diff --exit-code pyproject.toml > /dev/null; then
-              echo "::error::The sed command did not modify pyproject.toml. Check if the 'matrix-synapse' dependency exists in the file."
-              exit 1
-            fi
+          sed -i 's|"matrix-synapse[^"]*"|"matrix-synapse @ git+https://github.com/${{ steps.synapse-ref.outputs.repo }}.git@${{ steps.synapse-ref.outputs.ref }}"|' pyproject.toml
+          # Check if the file was actually modified
+          if git diff --exit-code pyproject.toml > /dev/null; then
+            echo "::error::The sed command did not modify pyproject.toml. Check if the 'matrix-synapse' dependency exists in the file."
+            exit 1
           fi
 
       - name: Run token-authenticator tests
         working-directory: synapse-token-authenticator
-        run: hatch run cov
+        run: hatch run pip install -r synapse-requirements.txt && hatch run cov
+
+      - name: Display Hatch Environment Info
+        if: always()
+        working-directory: synapse-token-authenticator
+        run: |
+          echo "### Hatch Environment Details"
+          hatch env show
+          echo "### Installed Packages"
+          hatch run pip freeze
 
   otlp:
     if: ${{ !failure() && !cancelled() }}
