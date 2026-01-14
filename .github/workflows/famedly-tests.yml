@@ -22,7 +22,7 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
-      - uses: Swatinem/rust-cache@68b3cb7503c78e67dae8373749990a220eb65352
+      - uses: Swatinem/rust-cache@98c8021b550208e191a6a3145459bfc9fb29c4c0 # v2.8.0
       - uses: matrix-org/setup-python-poetry@v2
         with:
           python-version: "3.13"
@@ -80,7 +80,7 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - uses: Swatinem/rust-cache@68b3cb7503c78e67dae8373749990a220eb65352
+      - uses: Swatinem/rust-cache@98c8021b550208e191a6a3145459bfc9fb29c4c0 # v2.8.0
 
       - name: Setup Poetry
         uses: matrix-org/setup-python-poetry@v2
@@ -121,7 +121,7 @@ jobs:
   #  steps:
   #    - uses: actions/checkout@v4
 
-  #    - uses: Swatinem/rust-cache@68b3cb7503c78e67dae8373749990a220eb65352
+  #    - uses: Swatinem/rust-cache@98c8021b550208e191a6a3145459bfc9fb29c4c0 # v2.8.0
 
   #    - run: cargo clippy -- -D warnings
 
@@ -137,7 +137,7 @@ jobs:
   #        # We use nightly so that it correctly groups together imports
   #        toolchain: nightly-2022-12-01
   #        components: rustfmt
-  #    - uses: Swatinem/rust-cache@v2
+  #    - uses: Swatinem/rust-cache@98c8021b550208e191a6a3145459bfc9fb29c4c0 # v2.8.0
 
   #    - run: cargo fmt --check
 
@@ -218,7 +218,7 @@ jobs:
             -e POSTGRES_INITDB_ARGS="--lc-collate C --lc-ctype C --encoding UTF8" \
             postgres:${{ matrix.job.postgres-version }}
 
-      - uses: Swatinem/rust-cache@68b3cb7503c78e67dae8373749990a220eb65352
+      - uses: Swatinem/rust-cache@98c8021b550208e191a6a3145459bfc9fb29c4c0 # v2.8.0
 
       - uses: matrix-org/setup-python-poetry@v2
         with:
@@ -291,7 +291,7 @@ jobs:
       - name: Prepare test blacklist
         run: cat sytest-blacklist .ci/worker-blacklist > synapse-blacklist-with-workers
 
-      - uses: Swatinem/rust-cache@68b3cb7503c78e67dae8373749990a220eb65352
+      - uses: Swatinem/rust-cache@98c8021b550208e191a6a3145459bfc9fb29c4c0 # v2.8.0
 
       - name: Run SyTest
         run: /bootstrap.sh synapse
@@ -333,7 +333,7 @@ jobs:
         with:
           path: synapse
 
-      - uses: Swatinem/rust-cache@68b3cb7503c78e67dae8373749990a220eb65352
+      - uses: Swatinem/rust-cache@98c8021b550208e191a6a3145459bfc9fb29c4c0 # v2.8.0
 
       - name: Prepare Complement's Prerequisites
         run: synapse/.ci/scripts/setup_complement_prerequisites.sh
@@ -361,7 +361,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: Swatinem/rust-cache@68b3cb7503c78e67dae8373749990a220eb65352
+      - uses: Swatinem/rust-cache@98c8021b550208e191a6a3145459bfc9fb29c4c0 # v2.8.0
 
       - run: cargo test
 
