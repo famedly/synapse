@@ -11,6 +11,11 @@ Ubuntu 25.04 (Plucky Puffin) will be end of life on Jan 17, 2026. Synapse will s
 The "Updates to locked dependencies" section has been removed from the changelog due to lack of use and the maintenance burden. ([\#19254](https://github.com/element-hq/synapse/issues/19254))
 
 
+### Famedly additions for v1.145.0_1
+- fix: typo in changelog (FrenchGithubUser)
+- chore: remove dependabot config as we use renovate instead (FrenchGithubUser)
+- chore: bump Github actions versions in Famedly workflows ([\#229](https://github.com/famedly/synapse/pull/229)) (jason-famedly)
+
 
 
 # Synapse 1.145.0rc4 (2026-01-08)
