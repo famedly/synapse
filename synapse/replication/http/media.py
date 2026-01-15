@@ -101,7 +101,7 @@ class ReplicationDeleteMediaServlet(ReplicationEndpoint):
 
     Request format:
 
-        DELETE /_synapse/replication/delete_media/
+        DELETE /_synapse/replication/delete_media
 
         {
             "media_ids": [...], # List of media IDs to delete
@@ -122,8 +122,7 @@ class ReplicationDeleteMediaServlet(ReplicationEndpoint):
     ) -> JsonDict:
         """
         Args:
-            server_name: The server_name that originated the media.
-            media_id: The individualized media id for the origin media.
+            media_ids: The list of media IDs to delete.
         """
         return {"media_ids": media_ids}
 

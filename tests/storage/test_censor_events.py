@@ -245,3 +245,9 @@ class MediaDeletionOnRedactionCensorshipTests(HomeserverTestCase):
                 access_token=self.admin_tok,
             )
             assert channel.code == 404, channel.json_body
+
+            # Check that the media has been deleted
+            deleted_media = self.get_success(
+                self.hs.get_datastores().main.get_local_media(media_id)
+            )
+            assert deleted_media is None

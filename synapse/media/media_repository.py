@@ -607,7 +607,10 @@ class MediaRepositoryWorker(AbstractMediaRepository):
         """
         Call out to the worker responsible for handling media to delete this media object
         """
-        result = await self.delete_media_client(media_ids)
+        result = await self.delete_media_client(
+            instance_name=self.hs.config.worker.workers_doing_media_duty[0],
+            media_ids=media_ids,
+        )
         return result["deleted"], result["count"]
 
 
