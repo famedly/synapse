@@ -141,7 +141,7 @@ oidc = ["authlib>=0.15.1"]
 systemd = ["systemd-python>=231"]
 url-preview = ["lxml>=4.6.3"]
 sentry = ["sentry-sdk>=0.7.2"]
-opentracing = [
+opentracing-jaeger = [
     "jaeger-client>=4.2.0",
     "opentracing>=2.2.0",
 

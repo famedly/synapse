@@ -963,7 +963,7 @@ description = "Jaeger Python OpenTracing Tracer implementation"
 optional = true
 python-versions = ">=3.7"
 groups = ["main"]
-markers = "extra == \"opentracing\" or extra == \"all\""
+markers = "extra == \"opentracing-jaeger\" or extra == \"all\""
 files = [
     {file = "jaeger-client-4.8.0.tar.gz", hash = "sha256:3157836edab8e2c209bd2d6ae61113db36f7ee399e66b1dcbb715d87ab49bfe0"},
 ]
@@ -1898,7 +1898,7 @@ description = "OpenTracing API for Python. See documentation at http://opentraci
 optional = true
 python-versions = "*"
 groups = ["main"]
-markers = "extra == \"opentracing\" or extra == \"all\" or extra == \"opentracing-otlp\""
+markers = "extra == \"opentracing-jaeger\" or extra == \"all\" or extra == \"opentracing-otlp\""
 files = [
     {file = "opentracing-2.4.0.tar.gz", hash = "sha256:a173117e6ef580d55874734d1fa7ecb6f3655160b8b8974a2a1e98e5ec9c840d"},
 ]
@@ -3210,7 +3210,7 @@ description = "Tornado IOLoop Backed Concurrent Futures"
 optional = true
 python-versions = "*"
 groups = ["main"]
-markers = "extra == \"opentracing\" or extra == \"all\""
+markers = "extra == \"opentracing-jaeger\" or extra == \"all\""
 files = [
     {file = "threadloop-1.0.2-py2-none-any.whl", hash = "sha256:5c90dbefab6ffbdba26afb4829d2a9df8275d13ac7dc58dccb0e279992679599"},
     {file = "threadloop-1.0.2.tar.gz", hash = "sha256:8b180aac31013de13c2ad5c834819771992d350267bddb854613ae77ef571944"},
@@ -3226,7 +3226,7 @@ description = "Python bindings for the Apache Thrift RPC system"
 optional = true
 python-versions = "*"
 groups = ["main"]
-markers = "extra == \"opentracing\" or extra == \"all\""
+markers = "extra == \"opentracing-jaeger\" or extra == \"all\""
 files = [
     {file = "thrift-0.16.0.tar.gz", hash = "sha256:2b5b6488fcded21f9d312aa23c9ff6a0195d0f6ae26ddbd5ad9e3e25dfc14408"},
 ]
@@ -3299,7 +3299,7 @@ description = "Tornado is a Python web framework and asynchronous networking lib
 optional = true
 python-versions = ">=3.9"
 groups = ["main"]
-markers = "extra == \"opentracing\" or extra == \"all\""
+markers = "extra == \"opentracing-jaeger\" or extra == \"all\""
 files = [
     {file = "tornado-6.5-cp39-abi3-macosx_10_9_universal2.whl", hash = "sha256:f81067dad2e4443b015368b24e802d0083fecada4f0a4572fdb72fc06e54a9a6"},
     {file = "tornado-6.5-cp39-abi3-macosx_10_9_x86_64.whl", hash = "sha256:9ac1cbe1db860b3cbb251e795c701c41d343f06a96049d6274e7c77559117e41"},
@@ -3803,7 +3803,7 @@ jwt = ["authlib"]
 matrix-synapse-ldap3 = ["matrix-synapse-ldap3"]
 oidc = ["authlib"]
 opentelemetry-log-handler = ["opentelemetry-api", "opentelemetry-exporter-otlp", "opentelemetry-sdk"]
-opentracing = ["jaeger-client", "opentracing", "thrift", "tornado"]
+opentracing-jaeger = ["jaeger-client", "opentracing", "thrift", "tornado"]
 opentracing-otlp = ["opentelemetry-api", "opentelemetry-exporter-otlp", "opentelemetry-opentracing-shim", "opentelemetry-sdk", "opentracing"]
 postgres = ["psycopg2", "psycopg2cffi", "psycopg2cffi-compat"]
 redis = ["hiredis", "txredisapi"]
@@ -3816,4 +3816,4 @@ url-preview = ["lxml"]
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.10.0,<4.0.0"
-content-hash = "829184e5297c858c398050e55f69f001b03ca5d2b3af38432b4bb54368fb55e0"
+content-hash = "0baec416520c1d2b9ec3d92d43dd26b27cce50a4b168a3cc6c6daa57df9f66da"
