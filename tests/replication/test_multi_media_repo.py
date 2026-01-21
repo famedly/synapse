@@ -33,6 +33,7 @@ from twisted.web.http import HTTPChannel
 from twisted.web.server import Request
 
 from synapse.api.constants import EventTypes, HistoryVisibility
+from synapse.config.workers import MAIN_PROCESS_INSTANCE_NAME
 from synapse.media._base import FileInfo
 from synapse.media.media_repository import MediaRepository
 from synapse.rest import admin
@@ -987,7 +988,7 @@ class DeleteRestrictedMediaOnEventRedactionReplicationTestCase(
             {
                 "experimental_features": {"msc3911": {"enabled": True}},
                 "media_repo_instances": ["media_worker_1"],
-                "run_background_tasks_on": "master",
+                "run_background_tasks_on": MAIN_PROCESS_INSTANCE_NAME,
                 "redaction_retention_period": "7d",
             }
         )
@@ -999,20 +1000,10 @@ class DeleteRestrictedMediaOnEventRedactionReplicationTestCase(
         return config
 
     def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
-        self.profile_handler = self.hs.get_profile_handler()
         self.user = self.register_user("user", "testpass")
         self.user_tok = self.login("user", "testpass")
-
-    def make_worker_hs(
-        self, worker_app: str, extra_config: Optional[dict] = None, **kwargs: Any
-    ) -> HomeServer:
-        worker_hs = super().make_worker_hs(worker_app, extra_config, **kwargs)
-        # Force the media paths onto the replication resource.
-        worker_hs.get_media_repository_resource().register_servlets(
-            self._hs_to_site[worker_hs].resource, worker_hs
-        )
-        media.register_servlets(worker_hs, self._hs_to_site[worker_hs].resource)
-        return worker_hs
+        self.admin_user = self.register_user("admin", "pass", admin=True)
+        self.admin_user_tok = self.login("admin", "pass")
 
     def test_delete_media_on_event_redaction(self) -> None:
         """
@@ -1029,9 +1020,17 @@ class DeleteRestrictedMediaOnEventRedactionReplicationTestCase(
         # Create media worker and it does not run the background tasks
         media_worker = self.make_worker_hs(
             "synapse.app.generic_worker",
-            {"worker_name": "media_worker_1", "run_background_tasks": False},
+            {
+                "worker_name": "media_worker_1",
+                "run_background_tasks_on": MAIN_PROCESS_INSTANCE_NAME,
+            },
         )
+        media_worker.get_media_repository_resource().register_servlets(
+            self._hs_to_site[media_worker].resource, media_worker
+        )
+        media.register_servlets(media_worker, self._hs_to_site[media_worker].resource)
         media_repo = media_worker.get_media_repository()
+
         assert not media_worker.config.worker.run_background_tasks, (
             "Worker should not run background tasks"
         )
@@ -1081,6 +1080,18 @@ class DeleteRestrictedMediaOnEventRedactionReplicationTestCase(
         event_dict = self.helper.get_event(room_id, event_id, self.user_tok)
         assert "redacted_because" in event_dict, "Event should be redacted"
 
+        # Media should still be accessible before retention period is over
+        channel = make_request(
+            self.reactor,
+            self._hs_to_site[media_worker],
+            "GET",
+            f"/_matrix/client/v1/media/download/{self.hs.hostname}/{media_id}?allow_redacted_media=true",
+            shorthand=False,
+            access_token=self.user_tok,
+        )
+        assert channel.code == 200, channel.result
+        assert channel.result["body"] == SMALL_PNG
+
         # Fast forward 7 days and 6 minutes to make sure the censor_redactions looping
         # call detects the events are eligible for censorship.
         self.reactor.advance(7 * 24 * 60 * 60 + 6 * 60)
@@ -1097,19 +1108,26 @@ class DeleteRestrictedMediaOnEventRedactionReplicationTestCase(
             "Redaction should have been censored by _censor_redactions loop"
         )
 
-        channel = self.make_request(
+        channel = make_request(
+            self.reactor,
+            self._hs_to_site[media_worker],
             "GET",
             f"/_matrix/client/v1/media/download/{self.hs.hostname}/{media_id}?allow_redacted_media=true",
             shorthand=False,
             access_token=self.user_tok,
         )
         assert channel.code == 404, channel.json_body
+        assert channel.json_body["errcode"] == "M_NOT_FOUND"
 
         # Check that the media has been deleted
         deleted_media = self.get_success(
             self.hs.get_datastores().main.get_local_media(media_id)
         )
         assert deleted_media is None, deleted_media
+
+        # Check if the file is deleted from the storage as well.
+        assert isinstance(media_repo, MediaRepository)
+        assert not os.path.exists(media_repo.filepaths.local_media_filepath(media_id))
 
 
 def _log_request(request: Request) -> None:

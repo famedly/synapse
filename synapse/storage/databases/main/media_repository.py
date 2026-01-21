@@ -1024,6 +1024,11 @@ class MediaRepositoryStore(MediaRepositoryBackgroundUpdateStore):
                 "remote_media_cache_thumbnails",
                 keyvalues={"media_origin": media_origin, "media_id": media_id},
             )
+            self.db_pool.simple_delete_txn(
+                txn,
+                "media_attachments",
+                keyvalues={"server_name": media_origin, "media_id": media_id},
+            )
 
         await self.db_pool.runInteraction(
             "delete_remote_media", delete_remote_media_txn
