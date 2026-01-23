@@ -33,6 +33,7 @@ from twisted.web.http import HTTPChannel
 from twisted.web.server import Request
 
 from synapse.api.constants import EventTypes, HistoryVisibility
+from synapse.config.workers import MAIN_PROCESS_INSTANCE_NAME
 from synapse.media._base import FileInfo
 from synapse.media.media_repository import MediaRepository
 from synapse.rest import admin
@@ -965,6 +966,172 @@ class CopyRestrictedResourceReplicationTestCase(BaseMultiWorkerStreamTestCase):
             access_token=self.other_user_tok,
         )
         self.assertEqual(channel.code, 403)
+
+
+class DeleteRestrictedMediaOnEventRedactionReplicationTestCase(
+    BaseMultiWorkerStreamTestCase
+):
+    """
+    Tests that delete API works when `msc3911.enabled` is configured to be True.
+    """
+
+    servlets = [
+        login.register_servlets,
+        admin.register_servlets,
+        room.register_servlets,
+    ]
+    use_isolated_media_paths = True
+
+    def default_config(self) -> Dict[str, Any]:
+        config = super().default_config()
+        config.update(
+            {
+                "experimental_features": {"msc3911": {"enabled": True}},
+                "media_repo_instances": ["media_worker_1"],
+                "run_background_tasks_on": MAIN_PROCESS_INSTANCE_NAME,
+                "redaction_retention_period": "7d",
+            }
+        )
+        config["instance_map"] = {
+            "main": {"host": "testserv", "port": 8765},
+            "media_worker_1": {"host": "testserv", "port": 1001},
+        }
+
+        return config
+
+    def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
+        self.user = self.register_user("user", "testpass")
+        self.user_tok = self.login("user", "testpass")
+        self.admin_user = self.register_user("admin", "pass", admin=True)
+        self.admin_user_tok = self.login("admin", "pass")
+
+    def test_delete_media_on_event_redaction(self) -> None:
+        """
+        Tests that media is deleted when its attached event is redacted.
+        """
+        # Make sure that censor_redaction loops runs on main hs
+        assert self.hs.config.worker.run_background_tasks, (
+            "Main HS should run background tasks"
+        )
+        assert self.hs.config.server.redaction_retention_period is not None, (
+            "Redaction retention should be configured"
+        )
+
+        # Create media worker and it does not run the background tasks
+        media_worker = self.make_worker_hs(
+            "synapse.app.generic_worker",
+            {
+                "worker_name": "media_worker_1",
+                "run_background_tasks_on": MAIN_PROCESS_INSTANCE_NAME,
+            },
+        )
+        media_worker.get_media_repository_resource().register_servlets(
+            self._hs_to_site[media_worker].resource, media_worker
+        )
+        media.register_servlets(media_worker, self._hs_to_site[media_worker].resource)
+        media_repo = media_worker.get_media_repository()
+
+        assert not media_worker.config.worker.run_background_tasks, (
+            "Worker should not run background tasks"
+        )
+
+        # Create a private room
+        room_id = self.helper.create_room_as(
+            self.user,
+            is_public=False,
+            tok=self.user_tok,
+        )
+
+        # The media is created with user_tok
+        content = io.BytesIO(SMALL_PNG)
+        content_uri = self.get_success(
+            media_repo.create_or_update_content(
+                "image/png",
+                "test_png_upload",
+                content,
+                67,
+                UserID.from_string(self.user),
+                restricted=True,
+            )
+        )
+        media_id = content_uri.media_id
+
+        # User sends a message with media
+        channel = self.make_request(
+            "PUT",
+            f"/rooms/{room_id}/send/m.room.message/{str(time.time())}?org.matrix.msc3911.attach_media={str(content_uri)}",
+            content={"msgtype": "m.text", "body": "Hi, this is a message"},
+            access_token=self.user_tok,
+        )
+        assert channel.code == HTTPStatus.OK, channel.json_body
+        assert "event_id" in channel.json_body
+        event_id = channel.json_body["event_id"]
+
+        # Redact the event
+        channel = self.make_request(
+            "POST",
+            f"/_matrix/client/r0/rooms/{room_id}/redact/{event_id}",
+            content={},
+            access_token=self.user_tok,
+        )
+        assert channel.code == HTTPStatus.OK, channel.json_body
+
+        # Verify the event is redacted before censoring
+        event_dict = self.helper.get_event(room_id, event_id, self.user_tok)
+        assert "redacted_because" in event_dict, "Event should be redacted"
+
+        # Media should still be accessible before retention period is over
+        channel = make_request(
+            self.reactor,
+            self._hs_to_site[media_worker],
+            "GET",
+            f"/_matrix/client/v1/media/download/{self.hs.hostname}/{media_id}?allow_redacted_media=true",
+            shorthand=False,
+            access_token=self.user_tok,
+        )
+        assert channel.code == 200, channel.result
+        assert channel.result["body"] == SMALL_PNG
+
+        # Fast forward 7 days and 6 minutes to make sure the censor_redactions looping
+        # call detects the events are eligible for censorship.
+        self.reactor.advance(7 * 24 * 60 * 60 + 6 * 60)
+
+        # Since we fast forward the reactor time, give some moment for the background
+        # task to caught up.
+        self.pump(0.01)
+
+        # Check that the media has been deleted from the database
+        deleted_media = self.get_success(
+            self.hs.get_datastores().main.get_local_media(media_id)
+        )
+        assert deleted_media is None, deleted_media
+
+        # Check if the file is deleted from the storage as well.
+        assert isinstance(media_repo, MediaRepository)
+        assert not os.path.exists(media_repo.filepaths.local_media_filepath(media_id))
+
+        # Verify the redaction was censored in the database
+        redaction_censored = self.get_success(
+            self.hs.get_datastores().main.db_pool.simple_select_one_onecol(
+                table="redactions",
+                keyvalues={"redacts": event_id},
+                retcol="have_censored",
+            )
+        )
+        assert redaction_censored, (
+            "Redaction should have been censored by _censor_redactions loop"
+        )
+
+        channel = make_request(
+            self.reactor,
+            self._hs_to_site[media_worker],
+            "GET",
+            f"/_matrix/client/v1/media/download/{self.hs.hostname}/{media_id}?allow_redacted_media=true",
+            shorthand=False,
+            access_token=self.user_tok,
+        )
+        assert channel.code == 404, channel.result
+        assert channel.json_body["errcode"] == "M_NOT_FOUND"
 
 
 def _log_request(request: Request) -> None:

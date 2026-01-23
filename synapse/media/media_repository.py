@@ -71,7 +71,10 @@ from synapse.media.storage_provider import StorageProviderWrapper
 from synapse.media.thumbnailer import Thumbnailer, ThumbnailError
 from synapse.media.url_previewer import UrlPreviewer
 from synapse.metrics.background_process_metrics import run_as_background_process
-from synapse.replication.http.media import ReplicationCopyMediaServlet
+from synapse.replication.http.media import (
+    ReplicationCopyMediaServlet,
+    ReplicationDeleteMediaServlet,
+)
 from synapse.state import CREATE_KEY, POWER_KEY
 from synapse.storage.databases.main.media_repository import (
     LocalMedia,
@@ -182,6 +185,13 @@ class AbstractMediaRepository:
     async def copy_media(
         self, existing_mxc: MXCUri, auth_user: UserID, max_timeout_ms: int
     ) -> MXCUri:
+        raise NotImplementedError(
+            "Sorry Mario, your MediaRepository related function is in another castle"
+        )
+
+    async def _remove_local_media_from_disk(
+        self, media_ids: List[str]
+    ) -> Tuple[List[str], int]:
         raise NotImplementedError(
             "Sorry Mario, your MediaRepository related function is in another castle"
         )
@@ -581,6 +591,7 @@ class MediaRepositoryWorker(AbstractMediaRepository):
         super().__init__(hs)
         # initialize replication endpoint here
         self.copy_media_client = ReplicationCopyMediaServlet.make_client(hs)
+        self.delete_media_client = ReplicationDeleteMediaServlet.make_client(hs)
 
     async def copy_media(
         self, existing_mxc: MXCUri, auth_user: UserID, max_timeout_ms: int
@@ -596,6 +607,18 @@ class MediaRepositoryWorker(AbstractMediaRepository):
             max_timeout_ms=max_timeout_ms,
         )
         return MXCUri.from_str(result["content_uri"])
+
+    async def _remove_local_media_from_disk(
+        self, media_ids: List[str]
+    ) -> Tuple[List[str], int]:
+        """
+        Call out to the worker responsible for handling media to delete this media object
+        """
+        result = await self.delete_media_client(
+            instance_name=self.hs.config.worker.workers_doing_media_duty[0],
+            media_ids=media_ids,
+        )
+        return result["deleted"], result["count"]
 
 
 class MediaRepository(AbstractMediaRepository):
