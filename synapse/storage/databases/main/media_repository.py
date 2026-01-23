@@ -1432,17 +1432,17 @@ class MediaRepositoryStore(MediaRepositoryBackgroundUpdateStore):
                 sql = """
                 SELECT media_id
                 FROM media_attachments
-                WHERE restrictions_json @> %s
+                WHERE restrictions_json @> %s AND server_name = %s
                 """
                 json_param = json.dumps({"restrictions": {"event_id": event_id}})
-                txn.execute(sql, (json_param,))
+                txn.execute(sql, (json_param, self.hs.hostname))
             else:
                 sql = """
                 SELECT media_id
                 FROM media_attachments
-                WHERE restrictions_json->'restrictions'->>'event_id' = ?
+                WHERE restrictions_json->'restrictions'->>'event_id' = ? AND server_name = ?
                 """
-                txn.execute(sql, (event_id,))
+                txn.execute(sql, (event_id, self.hs.hostname))
 
             return [row[0] for row in txn.fetchall()]
 

@@ -132,14 +132,7 @@ class ReplicationDeleteMediaServlet(ReplicationEndpoint):
         content: JsonDict,
     ) -> Tuple[int, JsonDict]:
         media_ids = content["media_ids"]
-        try:
-            deleted, count = await self.media_repo.delete_local_media_ids(media_ids)
-        except ValueError:
-            raise SynapseError(
-                HTTPStatus.BAD_REQUEST,
-                "Deletion of media failed.",
-                Codes.INVALID_PARAM,
-            )
+        deleted, count = await self.media_repo._remove_local_media_from_disk(media_ids)
         return 200, {"deleted": deleted, "count": count}
 
 

@@ -1096,6 +1096,20 @@ class DeleteRestrictedMediaOnEventRedactionReplicationTestCase(
         # call detects the events are eligible for censorship.
         self.reactor.advance(7 * 24 * 60 * 60 + 6 * 60)
 
+        # Since we fast forward the reactor time, give some moment for the background
+        # task to caught up.
+        self.pump(0.01)
+
+        # Check that the media has been deleted from the database
+        deleted_media = self.get_success(
+            self.hs.get_datastores().main.get_local_media(media_id)
+        )
+        assert deleted_media is None, deleted_media
+
+        # Check if the file is deleted from the storage as well.
+        assert isinstance(media_repo, MediaRepository)
+        assert not os.path.exists(media_repo.filepaths.local_media_filepath(media_id))
+
         # Verify the redaction was censored in the database
         redaction_censored = self.get_success(
             self.hs.get_datastores().main.db_pool.simple_select_one_onecol(
@@ -1116,18 +1130,8 @@ class DeleteRestrictedMediaOnEventRedactionReplicationTestCase(
             shorthand=False,
             access_token=self.user_tok,
         )
-        assert channel.code == 404, channel.json_body
+        assert channel.code == 404, channel.result
         assert channel.json_body["errcode"] == "M_NOT_FOUND"
-
-        # Check that the media has been deleted
-        deleted_media = self.get_success(
-            self.hs.get_datastores().main.get_local_media(media_id)
-        )
-        assert deleted_media is None, deleted_media
-
-        # Check if the file is deleted from the storage as well.
-        assert isinstance(media_repo, MediaRepository)
-        assert not os.path.exists(media_repo.filepaths.local_media_filepath(media_id))
 
 
 def _log_request(request: Request) -> None:

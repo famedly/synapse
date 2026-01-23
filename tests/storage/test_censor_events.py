@@ -135,12 +135,14 @@ class MediaDeletionOnRedactionCensorshipTests(HomeserverTestCase):
     def test_get_attached_media_ids(self) -> None:
         """Test db function `get_attached_media_ids`"""
         # Create events with media attached
-        media_ids, event_ids = self._create_test_resource()
+        _, event_ids = self._create_test_resource()
 
         # Check if `get_attached_media_ids` can get media ids attached to an event
         for event_id in event_ids:
-            media_ids = self.get_success(self.store.get_attached_media_ids(event_id))
-            assert len(media_ids) == 1
+            attached_media_ids = self.get_success(
+                self.store.get_attached_media_ids(event_id)
+            )
+            assert len(attached_media_ids) == 1
 
     def test_redacting_media_deletes_attached_media(self) -> None:
         """Test that censor_redactions looping call(every 5 minutes) deletes media that has been
@@ -233,7 +235,7 @@ class MediaDeletionOnRedactionCensorshipTests(HomeserverTestCase):
             assert channel.code == 200, channel.json_body
 
         # After 7 days and 6 minutes, media that are attached to the redacted events
-        # should be permanatly deleted from disk and moderators no longer have access to
+        # should be permanently deleted from disk and moderators no longer have access to
         # them
         self.reactor.advance(7 * 24 * 60 * 60 + 6 * 60)
 

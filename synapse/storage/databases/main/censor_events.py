@@ -150,7 +150,7 @@ class CensorEventsStore(EventsWorkerStore, CacheInvalidationWorkerStore, SQLBase
                 )
 
         await self.db_pool.runInteraction("_update_censor_txn", _update_censor_txn)
-        await self.hs.get_media_repository().delete_local_media_ids(media)
+        await self.hs.get_media_repository()._remove_local_media_from_disk(media)
 
     def _censor_event_txn(
         self, txn: LoggingTransaction, event_id: str, pruned_json: str

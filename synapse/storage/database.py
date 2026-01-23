@@ -24,6 +24,7 @@ import logging
 import time
 import types
 from collections import defaultdict
+from functools import partial
 from time import monotonic as monotonic_time
 from typing import (
     TYPE_CHECKING,
@@ -383,9 +384,7 @@ class LoggingTransaction:
             # TODO: is it safe for values to be Iterable[Iterable[Any]] here?
             # https://www.psycopg.org/docs/extras.html?highlight=execute_batch#psycopg2.extras.execute_batch
             # suggests each arg in args should be a sequence or mapping
-            self._do_execute(
-                lambda the_sql: execute_batch(self.txn, the_sql, args), sql
-            )
+            self._do_execute(partial(execute_batch, self.txn), sql, args)
         else:
             # TODO: is it safe for values to be Iterable[Iterable[Any]] here?
             # https://docs.python.org/3/library/sqlite3.html?highlight=sqlite3#sqlite3.Cursor.executemany

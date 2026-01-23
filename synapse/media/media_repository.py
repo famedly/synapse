@@ -189,6 +189,13 @@ class AbstractMediaRepository:
             "Sorry Mario, your MediaRepository related function is in another castle"
         )
 
+    async def _remove_local_media_from_disk(
+        self, media_ids: List[str]
+    ) -> Tuple[List[str], int]:
+        raise NotImplementedError(
+            "Sorry Mario, your MediaRepository related function is in another castle"
+        )
+
     async def reached_pending_media_limit(self, auth_user: UserID) -> Tuple[bool, int]:
         raise NotImplementedError(
             "Sorry Mario, your MediaRepository related function is in another castle"
@@ -601,7 +608,7 @@ class MediaRepositoryWorker(AbstractMediaRepository):
         )
         return MXCUri.from_str(result["content_uri"])
 
-    async def delete_local_media_ids(
+    async def _remove_local_media_from_disk(
         self, media_ids: List[str]
     ) -> Tuple[List[str], int]:
         """
