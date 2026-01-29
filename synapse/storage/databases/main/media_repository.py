@@ -19,6 +19,7 @@
 # [This file includes modifications made by New Vector Limited]
 #
 #
+import json
 import logging
 from enum import Enum
 from http import HTTPStatus
@@ -45,6 +46,7 @@ from synapse.storage.database import (
     LoggingDatabaseConnection,
     LoggingTransaction,
 )
+from synapse.storage.engines import PostgresEngine
 from synapse.types import JsonDict, UserID
 from synapse.util import json_encoder
 
@@ -1022,6 +1024,11 @@ class MediaRepositoryStore(MediaRepositoryBackgroundUpdateStore):
                 "remote_media_cache_thumbnails",
                 keyvalues={"media_origin": media_origin, "media_id": media_id},
             )
+            self.db_pool.simple_delete_txn(
+                txn,
+                "media_attachments",
+                keyvalues={"server_name": media_origin, "media_id": media_id},
+            )
 
         await self.db_pool.runInteraction(
             "delete_remote_media", delete_remote_media_txn
@@ -1412,4 +1419,34 @@ class MediaRepositoryStore(MediaRepositoryBackgroundUpdateStore):
 
         return await self.db_pool.runInteraction(
             "get_media_reference_count_for_sha256", _get_reference_count_txn
+        )
+
+    async def get_attached_media_ids(self, event_id: str) -> list[str]:
+        """
+        Get a list of media_ids that are attached to a specific event_id.
+        """
+
+        def get_attached_media_ids_txn(txn: LoggingTransaction) -> list[str]:
+            if isinstance(self.db_pool.engine, PostgresEngine):
+                # Use GIN index for Postgres
+                sql = """
+                SELECT media_id
+                FROM media_attachments
+                WHERE restrictions_json @> %s AND server_name = %s
+                """
+                json_param = json.dumps({"restrictions": {"event_id": event_id}})
+                txn.execute(sql, (json_param, self.hs.hostname))
+            else:
+                sql = """
+                SELECT media_id
+                FROM media_attachments
+                WHERE restrictions_json->'restrictions'->>'event_id' = ? AND server_name = ?
+                """
+                txn.execute(sql, (event_id, self.hs.hostname))
+
+            return [row[0] for row in txn.fetchall()]
+
+        return await self.db_pool.runInteraction(
+            "get_attached_media_ids",
+            get_attached_media_ids_txn,
         )
