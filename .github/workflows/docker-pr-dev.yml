@@ -3,10 +3,11 @@ name: Build Dev Docker Image on PR
 
 on:
   pull_request:
+  merge_group:
   workflow_dispatch:
     inputs:
       pr_number:
-        description: 'Pull request number. Be sure to match it to the correct branch selected'
+        description: "Pull request number. Be sure to match it to the correct branch selected"
         required: true
         type: string
 
