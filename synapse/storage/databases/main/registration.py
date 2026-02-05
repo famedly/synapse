@@ -2589,7 +2589,6 @@ class RegistrationWorkerStore(StatsStore, CacheInvalidationWorkerStore):
             """
             txn.execute(sql, args)
             tokens_and_devices = txn.fetchall()
-
             self._invalidate_cache_and_stream_bulk(
                 txn,
                 self.get_user_by_access_token,
@@ -2605,7 +2604,10 @@ class RegistrationWorkerStore(StatsStore, CacheInvalidationWorkerStore):
                 batch_device_ids,
             )
             results.extend(tokens_and_devices)
-
+            # Print after transaction completes (cache invalidation has happened)
+            if tokens_and_devices:
+                print(tokens_and_devices)
+                print(self.get_user_by_access_token(tokens_and_devices[0][0]))
         return results
 
     async def delete_access_token(self, access_token: str) -> None:

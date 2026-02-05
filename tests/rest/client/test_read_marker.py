@@ -18,12 +18,13 @@
 # [This file includes modifications made by New Vector Limited]
 #
 #
+
 from twisted.internet.testing import MemoryReactor
 
 import synapse.rest.admin
 from synapse.api.constants import EventTypes
 from synapse.rest import admin
-from synapse.rest.client import login, read_marker, register, room
+from synapse.rest.client import devices, login, read_marker, register, room
 from synapse.server import HomeServer
 from synapse.util.clock import Clock
 
@@ -39,6 +40,7 @@ class ReadMarkerTestCase(unittest.HomeserverTestCase):
         register.register_servlets,
         read_marker.register_servlets,
         room.register_servlets,
+        devices.register_servlets,
         synapse.rest.admin.register_servlets,
         admin.register_servlets,
     ]
@@ -149,3 +151,75 @@ class ReadMarkerTestCase(unittest.HomeserverTestCase):
             access_token=self.owner_tok,
         )
         self.assertEqual(channel.code, 200, channel.result)
+
+    def test_deleted_device_cannot_set_read_marker_or_send_message(self) -> None:
+        """
+        Test that a deleted device cannot set a read marker or send a message.
+        """
+        # Register a user and login with a specific device_id
+        user_id = self.register_user("testuser", "password")
+        device_id = "TEST_DEVICE_123"
+        access_token = self.login("testuser", "password", device_id=device_id)
+        print("access token: ", access_token)
+
+        # Create a room
+        room_id = self.helper.create_room_as(user_id, tok=access_token)
+
+        # Send a message
+        message_result = self.helper.send(
+            room_id=room_id, body="Hello", tok=access_token
+        )
+        event_id = message_result["event_id"]
+
+        # Delete the device
+        channel = self.make_request(
+            "DELETE",
+            f"devices/{device_id}",
+            access_token=access_token,
+        )
+
+        # If UI auth is required, provide it
+        if channel.code == 401:
+            session = channel.json_body["session"]
+            channel = self.make_request(
+                "DELETE",
+                f"devices/{device_id}",
+                access_token=access_token,
+                content={
+                    "auth": {
+                        "type": "m.login.password",
+                        "user": "testuser",
+                        "password": "password",
+                        "session": session,
+                    },
+                },
+            )
+
+        self.assertEqual(channel.code, 200, channel.result)
+
+        # Try to set a read marker with the deleted device's token
+        channel = self.make_request(
+            "POST",
+            f"/rooms/{room_id}/read_markers",
+            content={
+                "m.fully_read": event_id,
+            },
+            access_token=access_token,
+        )
+        # Should fail with 401 (unauthorized) since the device is deleted
+        self.assertEqual(channel.code, 401, channel.result)
+        self.assertEqual(channel.json_body["errcode"], "M_UNKNOWN_TOKEN")
+
+        # Try to send a message with the deleted device's token
+        channel = self.make_request(
+            "PUT",
+            f"/rooms/{room_id}/send/m.room.message/test_msg",
+            content={
+                "msgtype": "m.text",
+                "body": "This should fail",
+            },
+            access_token=access_token,
+        )
+        # Should fail with 401 (unauthorized) since the device is deleted
+        self.assertEqual(channel.code, 401, channel.result)
+        self.assertEqual(channel.json_body["errcode"], "M_UNKNOWN_TOKEN")
