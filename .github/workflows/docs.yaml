@@ -69,15 +69,12 @@ jobs:
         env:
           MDBOOK_VERSION: "0.5.2"
         run: |
-          cargo install mdbook-linkcheck mdbook-mermaid mdbook-admonish
+          cargo install mdbook-linkcheck mdbook-mermaid
           cargo install mdbook --no-default-features --features search --vers "${{ env.MDBOOK_VERSION }}" --locked
 
       - name: Setup Pages
         id: pages
         uses: actions/configure-pages@v5
-
-      - name: Setup mdbook-admonish
-        run: mdbook-admonish install
 
       - name: Set version of docs
         run: echo 'window.SYNAPSE_VERSION = "${{ needs.pre.outputs.branch-version }}";' > ./docs/website_files/version.js
