@@ -2607,7 +2607,7 @@ class RegistrationWorkerStore(StatsStore, CacheInvalidationWorkerStore):
             # Print after transaction completes (cache invalidation has happened)
             if tokens_and_devices:
                 print(tokens_and_devices)
-                print(self.get_user_by_access_token(tokens_and_devices[0][0]))
+                print(await self.get_user_by_access_token(tokens_and_devices[0][0]))
         return results
 
     async def delete_access_token(self, access_token: str) -> None:

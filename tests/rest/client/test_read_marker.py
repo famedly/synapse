@@ -29,12 +29,14 @@ from synapse.server import HomeServer
 from synapse.util.clock import Clock
 
 from tests import unittest
+from tests.replication._base import BaseMultiWorkerStreamTestCase
+from tests.server import make_request
 
 ONE_HOUR_MS = 3600000
 ONE_DAY_MS = ONE_HOUR_MS * 24
 
 
-class ReadMarkerTestCase(unittest.HomeserverTestCase):
+class ReadMarkerTestCase(BaseMultiWorkerStreamTestCase):
     servlets = [
         login.register_servlets,
         register.register_servlets,
@@ -155,12 +157,17 @@ class ReadMarkerTestCase(unittest.HomeserverTestCase):
     def test_deleted_device_cannot_set_read_marker_or_send_message(self) -> None:
         """
         Test that a deleted device cannot set a read marker or send a message.
+        This test removes the first device on one worker and tries the next requests on another worker.
+        It also verifies that a second device (not deleted) can still make requests successfully.
         """
         # Register a user and login with a specific device_id
         user_id = self.register_user("testuser", "password")
         device_id = "TEST_DEVICE_123"
         access_token = self.login("testuser", "password", device_id=device_id)
-        print("access token: ", access_token)
+
+        # Login with a second device to get a second access token
+        device_id_2 = "TEST_DEVICE_456"
+        access_token_2 = self.login("testuser", "password", device_id=device_id_2)
 
         # Create a room
         room_id = self.helper.create_room_as(user_id, tok=access_token)
@@ -171,8 +178,24 @@ class ReadMarkerTestCase(unittest.HomeserverTestCase):
         )
         event_id = message_result["event_id"]
 
-        # Delete the device
-        channel = self.make_request(
+        # Create two workers
+        worker1 = self.make_worker_hs(
+            "synapse.app.generic_worker",
+            extra_config={"worker_name": "worker1"},
+        )
+        worker2 = self.make_worker_hs(
+            "synapse.app.generic_worker",
+            extra_config={"worker_name": "worker2"},
+        )
+
+        # Get the sites for the workers
+        worker1_site = self._hs_to_site[worker1]
+        worker2_site = self._hs_to_site[worker2]
+
+        # Delete the first device on worker1
+        channel = make_request(
+            self.reactor,
+            worker1_site,
             "DELETE",
             f"devices/{device_id}",
             access_token=access_token,
@@ -181,7 +204,9 @@ class ReadMarkerTestCase(unittest.HomeserverTestCase):
         # If UI auth is required, provide it
         if channel.code == 401:
             session = channel.json_body["session"]
-            channel = self.make_request(
+            channel = make_request(
+                self.reactor,
+                worker1_site,
                 "DELETE",
                 f"devices/{device_id}",
                 access_token=access_token,
@@ -197,8 +222,13 @@ class ReadMarkerTestCase(unittest.HomeserverTestCase):
 
         self.assertEqual(channel.code, 200, channel.result)
 
-        # Try to set a read marker with the deleted device's token
-        channel = self.make_request(
+        # Replicate to ensure the deletion propagates to other workers
+        # self.replicate()
+
+        # Try to set a read marker with the deleted device's token on worker2
+        channel = make_request(
+            self.reactor,
+            worker2_site,
             "POST",
             f"/rooms/{room_id}/read_markers",
             content={
@@ -210,8 +240,10 @@ class ReadMarkerTestCase(unittest.HomeserverTestCase):
         self.assertEqual(channel.code, 401, channel.result)
         self.assertEqual(channel.json_body["errcode"], "M_UNKNOWN_TOKEN")
 
-        # Try to send a message with the deleted device's token
-        channel = self.make_request(
+        # Try to send a message with the deleted device's token on worker2
+        channel = make_request(
+            self.reactor,
+            worker2_site,
             "PUT",
             f"/rooms/{room_id}/send/m.room.message/test_msg",
             content={
@@ -223,3 +255,32 @@ class ReadMarkerTestCase(unittest.HomeserverTestCase):
         # Should fail with 401 (unauthorized) since the device is deleted
         self.assertEqual(channel.code, 401, channel.result)
         self.assertEqual(channel.json_body["errcode"], "M_UNKNOWN_TOKEN")
+
+        # Verify that the second device's token still works - it should be able to set a read marker
+        channel = make_request(
+            self.reactor,
+            worker2_site,
+            "POST",
+            f"/rooms/{room_id}/read_markers",
+            content={
+                "m.fully_read": event_id,
+            },
+            access_token=access_token_2,
+        )
+        # Should succeed since the second device is not deleted
+        self.assertEqual(channel.code, 200, channel.result)
+
+        # Verify that the second device's token can still send a message
+        channel = make_request(
+            self.reactor,
+            worker2_site,
+            "PUT",
+            f"/rooms/{room_id}/send/m.room.message/test_msg_2",
+            content={
+                "msgtype": "m.text",
+                "body": "This should work",
+            },
+            access_token=access_token_2,
+        )
+        # Should succeed since the second device is not deleted
+        self.assertEqual(channel.code, 200, channel.result)
