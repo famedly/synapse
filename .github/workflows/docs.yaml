@@ -66,9 +66,11 @@ jobs:
           save-if: ${{ ! startsWith(github.ref, 'gh-readonly-queue/') }}
 
       - name: Install required tooling
+        env:
+          MDBOOK_VERSION: "0.5.2"
         run: |
           cargo install mdbook-linkcheck mdbook-mermaid mdbook-admonish
-          cargo install mdbook --no-default-features --features search --vers "^0.4" --locked
+          cargo install mdbook --no-default-features --features search --vers "${{ env.MDBOOK_VERSION }}" --locked
 
       - name: Setup Pages
         id: pages

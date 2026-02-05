@@ -31,11 +31,11 @@ site-url = "/synapse/"
 # More information available in docs/website_files/README.md
 additional-css = [
     "docs/website_files/indent-section-headers.css",
-    "docs/website_files/version-picker.css",
+    "docs/website_files/version-picker.css"
 ]
 additional-js = [
     "docs/website_files/version-picker.js",
-    "docs/website_files/version.js",
+    "docs/website_files/version.js"
 ]
 theme = "docs/website_files/theme"
 
