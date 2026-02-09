@@ -1423,7 +1423,7 @@ class RefreshAuthTests(unittest.HomeserverTestCase):
         # Login with device2 and request a refresh token
         login_response = self.make_request(
             "POST",
-            "/_matrix/client/r0/login",
+            "/_matrix/client/v3/login",
             {
                 "type": "m.login.password",
                 "user": "test",
@@ -1492,7 +1492,7 @@ class RefreshAuthTests(unittest.HomeserverTestCase):
             access_token=device2_tok,
         )
         self.assertEqual(channel.code, HTTPStatus.UNAUTHORIZED, channel.result)
-        self.assertEqual(channel.json_body["errcode"], "M_UNKNOWN_TOKEN")
+        self.assertEqual(channel.json_body["errcode"], Codes.UNKNOWN_TOKEN)
 
 
 def oidc_config(
