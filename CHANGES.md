@@ -1,3 +1,11 @@
+# Synapse 1.145.0_1 (2026-02-09)
+
+### Famedly additions for v1.145.0_2
+
+- fix: invalidate access token cache on device deletion (FrenchGithubUser)
+
+
+
 # Synapse 1.145.0 (2026-01-13)
 
 No significant changes since 1.145.0rc4.
