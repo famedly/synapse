@@ -2119,8 +2119,7 @@ class RegistrationWorkerStore(StatsStore, CacheInvalidationWorkerStore):
     async def expire_refresh_tokens_for_device(
         self, user_id: str, device_id: str
     ) -> None:
-        """
-        Expires all refresh tokens for a specific user and device.
+        """Expires all refresh tokens for a specific user and device.
 
         Args:
             user_id: the ID of the user owning the refresh token
@@ -2138,7 +2137,7 @@ class RegistrationWorkerStore(StatsStore, CacheInvalidationWorkerStore):
     async def set_device_for_refresh_token(
         self, user_id: str, old_device_id: str, device_id: str
     ) -> None:
-        """Moves refresh tokens from old device to current device
+        """Moves refresh tokens from old device to current device.
 
         Args:
             user_id: The user of the devices.
