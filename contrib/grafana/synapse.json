@@ -414,6 +414,10 @@
               {
                 "id": "custom.axisPlacement",
                 "value": "right"
+              },
+              {
+                "id": "custom.fillOpacity",
+                "value": 0
               }
             ]
           },
@@ -441,6 +445,10 @@
               {
                 "id": "custom.axisPlacement",
                 "value": "right"
+              },
+              {
+                "id": "custom.fillOpacity",
+                "value": 0
               }
             ]
           }
@@ -2266,7 +2274,7 @@
               "datasource": {
                 "uid": "${DS_PROMETHEUS}"
               },
-              "expr": "sum(avg_over_time(synapse_http_server_in_flight_requests_count{job=\"$job\",index=~\"$index\",server_name=\"$server_name\"}[$bucket_size]))",
+              "expr": "sum(avg_over_time(synapse_http_server_in_flight_requests_count{job=~\"$job\",index=~\"$index\",server_name=\"$server_name\"}[$bucket_size]))",
               "interval": "",
               "legendFormat": "Total",
               "refId": "B"
@@ -4161,7 +4169,7 @@
                 "uid": "${DS_PROMETHEUS}"
               },
               "exemplar": true,
-              "expr": "sum(rate(synapse_push_bulk_push_rule_evaluator_push_rules_state_size_counter_total{job=\"$job\",index=~\"$index\",server_name=\"$server_name\"}[$bucket_size]))",
+              "expr": "sum(rate(synapse_push_bulk_push_rule_evaluator_push_rules_state_size_counter_total{job=~\"$job\",index=~\"$index\",server_name=\"$server_name\"}[$bucket_size]))",
               "format": "time_series",
               "interval": "",
               "intervalFactor": 2,
@@ -4204,7 +4212,7 @@
                 "uid": "${DS_PROMETHEUS}"
               },
               "exemplar": true,
-              "expr": "sum(rate(synapse_push_bulk_push_rule_evaluator_push_rules_invalidation_counter_total{job=\"$job\",index=~\"$index\",server_name=\"$server_name\"}[$bucket_size]))",
+              "expr": "sum(rate(synapse_push_bulk_push_rule_evaluator_push_rules_invalidation_counter_total{job=~\"$job\",index=~\"$index\",server_name=\"$server_name\"}[$bucket_size]))",
               "format": "time_series",
               "interval": "",
               "intervalFactor": 2,
@@ -4247,7 +4255,7 @@
                 "uid": "${DS_PROMETHEUS}"
               },
               "exemplar": true,
-              "expr": "sum(rate(synapse_util_caches_cache_hits{job=\"$job\",index=~\"$index\",name=\"push_rules_delta_state_cache_metric\",server_name=\"$server_name\"}[$bucket_size]))/sum(rate(synapse_util_caches_cache{job=\"$job\",index=~\"$index\", name=\"push_rules_delta_state_cache_metric\",server_name=\"$server_name\"}[$bucket_size]))",
+              "expr": "sum(rate(synapse_util_caches_cache_hits{job=~\"$job\",index=~\"$index\",name=\"push_rules_delta_state_cache_metric\",server_name=\"$server_name\"}[$bucket_size]))/sum(rate(synapse_util_caches_cache{job=~\"$job\",index=~\"$index\", name=\"push_rules_delta_state_cache_metric\",server_name=\"$server_name\"}[$bucket_size]))",
               "format": "time_series",
               "interval": "",
               "intervalFactor": 2,
@@ -4262,7 +4270,7 @@
                 "uid": "${DS_PROMETHEUS}"
               },
               "exemplar": true,
-              "expr": "sum(rate(synapse_util_caches_cache{job=\"$job\",index=~\"$index\", name=\"push_rules_delta_state_cache_metric\",server_name=\"$server_name\"}[$bucket_size]))",
+              "expr": "sum(rate(synapse_util_caches_cache{job=~\"$job\",index=~\"$index\", name=\"push_rules_delta_state_cache_metric\",server_name=\"$server_name\"}[$bucket_size]))",
               "format": "time_series",
               "interval": "",
               "intervalFactor": 2,
@@ -4304,7 +4312,7 @@
                 "uid": "${DS_PROMETHEUS}"
               },
               "exemplar": true,
-              "expr": "sum(rate(synapse_util_caches_cache_hits{job=\"$job\",index=~\"$index\",name=\"room_push_rule_cache\",server_name=\"$server_name\"}[$bucket_size]))/sum(rate(synapse_util_caches_cache{job=\"$job\",index=~\"$index\", name=\"room_push_rule_cache\",server_name=\"$server_name\"}[$bucket_size]))",
+              "expr": "sum(rate(synapse_util_caches_cache_hits{job=~\"$job\",index=~\"$index\",name=\"room_push_rule_cache\",server_name=\"$server_name\"}[$bucket_size]))/sum(rate(synapse_util_caches_cache{job=~\"$job\",index=~\"$index\", name=\"room_push_rule_cache\",server_name=\"$server_name\"}[$bucket_size]))",
               "format": "time_series",
               "interval": "",
               "intervalFactor": 2,
@@ -4319,7 +4327,7 @@
                 "uid": "${DS_PROMETHEUS}"
               },
               "exemplar": true,
-              "expr": "sum(rate(synapse_util_caches_cache{job=\"$job\",index=~\"$index\", name=\"room_push_rule_cache\",server_name=\"$server_name\"}[$bucket_size]))",
+              "expr": "sum(rate(synapse_util_caches_cache{job=~\"$job\",index=~\"$index\", name=\"room_push_rule_cache\",server_name=\"$server_name\"}[$bucket_size]))",
               "format": "time_series",
               "interval": "",
               "intervalFactor": 2,
@@ -4361,7 +4369,7 @@
                 "uid": "${DS_PROMETHEUS}"
               },
               "exemplar": true,
-              "expr": "sum(rate(synapse_util_caches_cache_hits{job=\"$job\",index=~\"$index\",name=\"_get_rules_for_room\",server_name=\"$server_name\"}[$bucket_size]))/sum(rate(synapse_util_caches_cache{job=\"$job\",index=~\"$index\", name=\"_get_rules_for_room\",server_name=\"$server_name\"}[$bucket_size]))",
+              "expr": "sum(rate(synapse_util_caches_cache_hits{job=~\"$job\",index=~\"$index\",name=\"_get_rules_for_room\",server_name=\"$server_name\"}[$bucket_size]))/sum(rate(synapse_util_caches_cache{job=~\"$job\",index=~\"$index\", name=\"_get_rules_for_room\",server_name=\"$server_name\"}[$bucket_size]))",
               "format": "time_series",
               "interval": "",
               "intervalFactor": 2,
@@ -4376,7 +4384,7 @@
                 "uid": "${DS_PROMETHEUS}"
               },
               "exemplar": true,
-              "expr": "sum(rate(synapse_util_caches_cache{job=\"$job\",index=~\"$index\", name=\"_get_rules_for_room\",server_name=\"$server_name\"}[$bucket_size]))",
+              "expr": "sum(rate(synapse_util_caches_cache{job=~\"$job\",index=~\"$index\", name=\"_get_rules_for_room\",server_name=\"$server_name\"}[$bucket_size]))",
               "format": "time_series",
               "interval": "",
               "intervalFactor": 2,
@@ -4706,7 +4714,7 @@
               "datasource": {
                 "uid": "${DS_PROMETHEUS}"
               },
-              "expr": "histogram_quantile(0.99, sum(rate(synapse_storage_schedule_time_bucket{index=~\"$index\",server_name=\"$server_name\",job=\"$job\"}[$bucket_size])) by (le))",
+              "expr": "histogram_quantile(0.99, sum(rate(synapse_storage_schedule_time_bucket{index=~\"$index\",server_name=\"$server_name\",job=~\"$job\"}[$bucket_size])) by (le))",
               "format": "time_series",
               "intervalFactor": 1,
               "legendFormat": "99%",
@@ -4716,7 +4724,7 @@
               "datasource": {
                 "uid": "${DS_PROMETHEUS}"
               },
-              "expr": "histogram_quantile(0.9, sum(rate(synapse_storage_schedule_time_bucket{index=~\"$index\",server_name=\"$server_name\",job=\"$job\"}[$bucket_size])) by (le))",
+              "expr": "histogram_quantile(0.9, sum(rate(synapse_storage_schedule_time_bucket{index=~\"$index\",server_name=\"$server_name\",job=~\"$job\"}[$bucket_size])) by (le))",
               "format": "time_series",
               "intervalFactor": 1,
               "legendFormat": "90%",
@@ -4726,7 +4734,7 @@
               "datasource": {
                 "uid": "${DS_PROMETHEUS}"
               },
-              "expr": "histogram_quantile(0.75, sum(rate(synapse_storage_schedule_time_bucket{index=~\"$index\",server_name=\"$server_name\",job=\"$job\"}[$bucket_size])) by (le))",
+              "expr": "histogram_quantile(0.75, sum(rate(synapse_storage_schedule_time_bucket{index=~\"$index\",server_name=\"$server_name\",job=~\"$job\"}[$bucket_size])) by (le))",
               "format": "time_series",
               "intervalFactor": 1,
               "legendFormat": "75%",
@@ -4736,7 +4744,7 @@
               "datasource": {
                 "uid": "${DS_PROMETHEUS}"
               },
-              "expr": "histogram_quantile(0.5, sum(rate(synapse_storage_schedule_time_bucket{index=~\"$index\",server_name=\"$server_name\",job=\"$job\"}[$bucket_size])) by (le))",
+              "expr": "histogram_quantile(0.5, sum(rate(synapse_storage_schedule_time_bucket{index=~\"$index\",server_name=\"$server_name\",job=~\"$job\"}[$bucket_size])) by (le))",
               "format": "time_series",
               "intervalFactor": 1,
               "legendFormat": "50%",
@@ -6937,7 +6945,7 @@
                 "uid": "${DS_PROMETHEUS}"
               },
               "editorMode": "code",
-              "expr": "rate(synapse_notifier_users_woken_by_stream_total{job=\"$job\",index=~\"$index\",server_name=\"$server_name\"}[$bucket_size])",
+              "expr": "rate(synapse_notifier_users_woken_by_stream_total{job=~\"$job\",index=~\"$index\",server_name=\"$server_name\"}[$bucket_size])",
               "format": "time_series",
               "hide": false,
               "intervalFactor": 2,
@@ -7116,7 +7124,7 @@
               "datasource": {
                 "uid": "${DS_PROMETHEUS}"
               },
-              "expr": "rate(synapse_handler_presence_notified_presence_total{job=\"$job\",index=~\"$index\",server_name=\"$server_name\"}[$bucket_size])",
+              "expr": "rate(synapse_handler_presence_notified_presence_total{job=~\"$job\",index=~\"$index\",server_name=\"$server_name\"}[$bucket_size])",
               "interval": "",
               "legendFormat": "Notified",
               "refId": "A"
@@ -7125,7 +7133,7 @@
               "datasource": {
                 "uid": "${DS_PROMETHEUS}"
               },
-              "expr": "rate(synapse_handler_presence_federation_presence_out_total{job=\"$job\",index=~\"$index\",server_name=\"$server_name\"}[$bucket_size])",
+              "expr": "rate(synapse_handler_presence_federation_presence_out_total{job=~\"$job\",index=~\"$index\",server_name=\"$server_name\"}[$bucket_size])",
               "interval": "",
               "legendFormat": "Remote ping",
               "refId": "B"
@@ -7134,7 +7142,7 @@
               "datasource": {
                 "uid": "${DS_PROMETHEUS}"
               },
-              "expr": "rate(synapse_handler_presence_presence_updates_total{job=\"$job\",index=~\"$index\",server_name=\"$server_name\"}[$bucket_size])",
+              "expr": "rate(synapse_handler_presence_presence_updates_total{job=~\"$job\",index=~\"$index\",server_name=\"$server_name\"}[$bucket_size])",
               "interval": "",
               "legendFormat": "Total updates",
               "refId": "C"
@@ -7143,7 +7151,7 @@
               "datasource": {
                 "uid": "${DS_PROMETHEUS}"
               },
-              "expr": "rate(synapse_handler_presence_federation_presence_total{job=\"$job\",index=~\"$index\",server_name=\"$server_name\"}[$bucket_size])",
+              "expr": "rate(synapse_handler_presence_federation_presence_total{job=~\"$job\",index=~\"$index\",server_name=\"$server_name\"}[$bucket_size])",
               "interval": "",
               "legendFormat": "Remote updates",
               "refId": "D"
@@ -7152,7 +7160,7 @@
               "datasource": {
                 "uid": "${DS_PROMETHEUS}"
               },
-              "expr": "rate(synapse_handler_presence_bump_active_time_total{job=\"$job\",index=~\"$index\",server_name=\"$server_name\"}[$bucket_size])",
+              "expr": "rate(synapse_handler_presence_bump_active_time_total{job=~\"$job\",index=~\"$index\",server_name=\"$server_name\"}[$bucket_size])",
               "interval": "",
               "legendFormat": "Bump active time",
               "refId": "E"
@@ -7187,7 +7195,7 @@
                 "uid": "${DS_PROMETHEUS}"
               },
               "editorMode": "code",
-              "expr": "rate(synapse_handler_presence_state_transition_total{job=\"$job\",index=~\"$index\",server_name=\"$server_name\"}[$bucket_size])",
+              "expr": "rate(synapse_handler_presence_state_transition_total{job=~\"$job\",index=~\"$index\",server_name=\"$server_name\"}[$bucket_size])",
               "interval": "",
               "legendFormat": "{{from}} -> {{to}}",
               "range": true,
@@ -7223,7 +7231,7 @@
                 "uid": "${DS_PROMETHEUS}"
               },
               "editorMode": "code",
-              "expr": "rate(synapse_handler_presence_notify_reason_total{job=\"$job\",index=~\"$index\",server_name=\"$server_name\"}[$bucket_size])",
+              "expr": "rate(synapse_handler_presence_notify_reason_total{job=~\"$job\",index=~\"$index\",server_name=\"$server_name\"}[$bucket_size])",
               "interval": "",
               "legendFormat": "{{reason}}",
               "range": true,

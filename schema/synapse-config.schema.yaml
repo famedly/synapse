@@ -1,5 +1,5 @@
 $schema: https://famedly.github.io/synapse/latest/schema/v1/meta.schema.json
-$id: https://famedly.github.io/synapse/schema/synapse/v1.146/synapse-config.schema.json
+$id: https://famedly.github.io/synapse/schema/synapse/v1.147/synapse-config.schema.json
 type: object
 properties:
   famedly_maximum_refresh_token_lifetime:
@@ -2373,7 +2373,7 @@ properties:
       Enable the local on-disk media storage provider. When disabled, media is
       stored only in configured `media_storage_providers` and temporary files are
       used for processing.
-      
+
       **Warning:** If this option is set to `false` and no `media_storage_providers`
       are configured, all media requests will return 404 errors as there will be
       no storage backend available.
