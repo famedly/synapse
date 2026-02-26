@@ -5,6 +5,8 @@
 ARG STA_VERSION
 # Synapse Invite Checker
 ARG SIC_VERSION
+# Famedly Control Synapse
+ARG FCS_VERSION
 
 ARG SYNAPSE_VERSION=latest
 
@@ -13,6 +15,7 @@ FROM ghcr.io/famedly/synapse:$SYNAPSE_VERSION
 # Install Famedly required addons
 ARG STA_VERSION
 ARG SIC_VERSION
+ARG FCS_VERSION
 
 # To avoid having to install git, pip install directly from the source repository using
 # it's auto generated zip file for the two non-pypa modules below.
@@ -22,6 +25,7 @@ RUN --mount=type=cache,target=/root/.cache/pip \
     synapse-token-authenticator==${STA_VERSION} \
     synapse-s3-storage-provider \
     synapse-invite-checker==${SIC_VERSION} \
+    famedly-control-synapse==${FCS_VERSION} \
     https://github.com/famedly/synapse-invite-policies/archive/refs/heads/main.zip \
     https://github.com/famedly/synapse-domain-rule-checker/archive/refs/heads/main.zip
 
