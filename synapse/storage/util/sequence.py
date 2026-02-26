@@ -44,9 +44,9 @@ This is likely a programming error and should be reported at
 https://github.com/matrix-org/synapse. Please include the following data with
 your report:
 -----
-last_value: '%(last_value)',    is_called: '%(is_called)',
-max_stream_id: '%(max_stream_id)',
-max_in_stream_positions: '%(max_in_stream_positions)'
+last_value: '%(last_value)s',    is_called: '%(is_called)s',
+max_stream_id: '%(max_stream_id)s',
+max_in_stream_positions: '%(max_in_stream_positions)s'
 -----
 
 A temporary workaround to fix this error is to shut down Synapse (including

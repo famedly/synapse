@@ -604,7 +604,7 @@ class HomeserverTestCase(TestCase):
             shorthand: Whether to try and be helpful and prefix the given URL
             with the usual REST API path, if it doesn't contain it.
             federation_auth_origin: if set to not-None, we will add a fake
-                Authorization header pretenting to be the given server name.
+                Authorization header pretending to be the given server name.
 
             content_type: The content-type to use for the request. If not set then will default to
                 application/json unless content_is_form is true.

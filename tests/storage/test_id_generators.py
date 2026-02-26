@@ -30,13 +30,14 @@ from synapse.storage.database import (
 from synapse.storage.types import Cursor
 from synapse.storage.util.id_generators import MultiWriterIdGenerator
 from synapse.storage.util.sequence import (
+    _INCONSISTENT_STREAM_ERROR,
     LocalSequenceGenerator,
     PostgresSequenceGenerator,
     SequenceGenerator,
 )
 from synapse.util.clock import Clock
 
-from tests.unittest import HomeserverTestCase
+from tests.unittest import HomeserverTestCase, TestCase
 from tests.utils import USE_POSTGRES_FOR_TESTS
 
 
@@ -789,3 +790,28 @@ class MultiTableMultiWriterIdGeneratorTestCase(MultiWriterIdGeneratorBase):
         self.assertEqual(second_id_gen.get_current_token_for_writer("first"), 7)
         self.assertEqual(second_id_gen.get_current_token_for_writer("second"), 7)
         self.assertEqual(second_id_gen.get_persisted_upto_position(), 7)
+
+
+class InconsistentStreamErrorFormatTest(TestCase):
+    """Test that _INCONSISTENT_STREAM_ERROR can be formatted without raising a
+    ValueError.
+    """
+
+    def test_format_with_all_parameters(self) -> None:
+        params = {
+            "seq": "events_sequence",
+            "stream_name": "events",
+            "last_value": 42,
+            "is_called": True,
+            "max_stream_id": 50,
+            "max_in_stream_positions": 55,
+        }
+
+        result = _INCONSISTENT_STREAM_ERROR % params
+
+        self.assertIn("events_sequence", result)
+        self.assertIn("events", result)
+        self.assertIn("42", result)
+        self.assertIn("True", result)
+        self.assertIn("50", result)
+        self.assertIn("55", result)
