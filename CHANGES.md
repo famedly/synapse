@@ -1,3 +1,11 @@
+# Synapse 1.148.0 (2026-02-24)
+
+### Famedly additions for v1.148.0_1
+- chore: fix the inconsistent stream error log message to contain the proper information instead of rasing value error ([\#238](https://github.com/famedly/synapse/pull/238)) (itsoyou & FrenchGithubUser)
+
+
+
+
 # Synapse 1.148.0rc1 (2026-02-17)
 
 ## Features
