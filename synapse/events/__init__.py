@@ -329,6 +329,7 @@ class EventBase(metaclass=abc.ABCMeta):
 
         # this will be a no-op if the event dict is not frozen.
         self._dict = unfreeze(self._dict)
+
     def sticky_duration(self) -> Duration | None:
         """
         Returns the effective sticky duration of this event, or None
