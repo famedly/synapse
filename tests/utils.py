@@ -66,6 +66,9 @@ POSTGRES_BASE_DB = "_synapse_unit_tests_base_%s" % (os.getpid(),)
 # DB to disk and query it with the sqlite CLI.
 SQLITE_PERSIST_DB = os.environ.get("SYNAPSE_TEST_PERSIST_SQLITE_DB") is not None
 
+# Defaults to 1.1
+TIM_VERSION_FOR_TESTS = os.environ.get("SYNAPSE_TIM_VERSION", "1.1")
+
 # the dbname we will connect to in order to create the base database.
 POSTGRES_DBNAME_FOR_INITIAL_CREATE = "postgres"
 
@@ -219,6 +222,7 @@ def default_config(
         "update_user_directory_from_worker": "does_not_exist_worker_name",
         "caches": {"global_factor": 1, "sync_response_cache_duration": 0},
         "listeners": [{"port": 0, "type": "http"}],
+        "tim_version": TIM_VERSION_FOR_TESTS,
     }
 
     if parse:

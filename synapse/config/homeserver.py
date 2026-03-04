@@ -59,6 +59,7 @@ from .spam_checker import SpamCheckerConfig
 from .sso import SSOConfig
 from .stats import StatsConfig
 from .third_party_event_rules import ThirdPartyRulesConfig
+from .tim import TimConfig
 from .tls import TlsConfig
 from .tracer import TracerConfig
 from .user_directory import UserDirectoryConfig
@@ -117,6 +118,7 @@ class HomeServerConfig(RootConfig):
         BackgroundUpdateConfig,
         AutoAcceptInvitesConfig,
         UserTypesConfig,
+        TimConfig,
         # This must be last, as it checks for conflicts with other config options.
         MasConfig,
     ]
