@@ -11,7 +11,7 @@ on:
     # Manually trigger to build and push docker image with modules to nightly Harbor registry.
     inputs:
       tag:
-        description: 'Provide tag name with work package. Tag must only contain ASCII letters, digits, underscores, periods, or dashes.'
+        description: "Provide tag name with work package. Tag must only contain ASCII letters, digits, underscores, periods, or dashes."
         required: true
         type: string
 
@@ -84,7 +84,7 @@ jobs:
       - calculate_mod_build
     strategy:
       matrix:
-        job:  ${{ fromJson(needs.calculate_mod_build.outputs.build_matrix) }}
+        job: ${{ fromJson(needs.calculate_mod_build.outputs.build_matrix) }}
     uses: famedly/github-workflows/.github/workflows/docker.yml@jason-docker-namespace
     with:
       push: ${{ github.event_name != 'pull_request' }} # Always build, don't publish on pull requests
@@ -98,6 +98,7 @@ jobs:
         "SYNAPSE_VERSION=sha-${{ github.sha }}"
         "STA_VERSION=${{ matrix.job.sta-version }}"
         "SIC_VERSION=${{ matrix.job.sic-version }}"
+        "FCS_VERSION=${{ matrix.job.fcs-version }}"
       # Tag the production image used for famedly deployments.
       tags: |
         type=ref,event=tag,suffix=-${{ matrix.job.mod_pack_name }}
