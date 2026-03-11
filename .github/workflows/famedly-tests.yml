@@ -511,6 +511,75 @@ jobs:
           echo "### Installed Packages"
           hatch run pip freeze
 
+  famedly-control:
+    if: ${{ !failure() && !cancelled() }}
+    needs:
+      - linting-done
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout synapse
+        uses: actions/checkout@v4
+
+      - name: Checkout famedly-control-synapse
+        uses: actions/checkout@v4
+        with:
+          repository: famedly/famedly-control-synapse
+          path: famedly-control-synapse
+
+      - name: Setup Python
+        uses: actions/setup-python@83679a892e2d95755f2dac6acb0bfd1e9ac5d548 # v6.1.0
+        with:
+          python-version: "3.13"
+
+      - name: Install hatch and poetry
+        run: pip install hatch poetry poetry-plugin-export
+
+      - name: Generate requirements from Synapse lockfile
+        # hatch can't read synapse's lock file, we export it in a format hatch can use,
+        # this allows us to install synapse dependencies on the version they are locked at,
+        # this avoids errors due to new dependency versions with breaking changes.
+        run: |
+          poetry export --without-hashes --format requirements.txt --output "${{ github.workspace }}/famedly-control-synapse/synapse-requirements.txt"
+
+      - name: Determine synapse git ref
+        id: synapse-ref
+        run: |
+          if [ "${{ github.event_name }}" == "pull_request" ]; then
+            echo "ref=${{ github.event.pull_request.head.ref }}" >> "$GITHUB_OUTPUT"
+            echo "repo=${{ github.event.pull_request.head.repo.full_name }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "ref=${{ github.ref_name }}" >> "$GITHUB_OUTPUT"
+            echo "repo=${{ github.repository }}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Update dependency to the current branch
+        working-directory: famedly-control-synapse
+        # the synapse dependency of the famedly-control is already pointing to synapse's master branch
+        # we skip the branch update when the CI runs on master
+        run: |
+          if [ "${{ steps.synapse-ref.outputs.ref }}" != "master" ]; then
+            sed -i 's|"matrix-synapse[^"]*"|"matrix-synapse @ git+https://github.com/${{ steps.synapse-ref.outputs.repo }}.git@${{ steps.synapse-ref.outputs.ref }}"|' pyproject.toml
+            # Check if the file was actually modified
+            if git diff --exit-code pyproject.toml > /dev/null; then
+              echo "::error::The sed command did not modify pyproject.toml. Check if the 'matrix-synapse' dependency exists in the file."
+              exit 1
+            fi
+          fi
+
+      - name: Run famedly-control tests
+        working-directory: famedly-control-synapse
+        run: hatch run pip install -r synapse-requirements.txt && hatch run cov
+
+      - name: Display Hatch Environment Info
+        if: always()
+        working-directory: famedly-control-synapse
+        run: |
+          echo "### Hatch Environment Details"
+          hatch env show
+          echo "### Installed Packages"
+          hatch run pip freeze
+
   otlp:
     if: ${{ !failure() && !cancelled() }}
     runs-on: ubuntu-latest
@@ -539,6 +608,7 @@ jobs:
       - cargo-test
       - invite-checker
       - token-authenticator
+      - famedly-control
       - linting-done
     runs-on: ubuntu-latest
     steps:
