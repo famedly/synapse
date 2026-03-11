@@ -136,7 +136,6 @@ RUN \
   apt-get update -qq && \
   apt-cache depends --recurse --no-recommends --no-suggests --no-conflicts --no-breaks --no-replaces --no-enhances --no-pre-depends \
       curl \
-      gosu \
       libjpeg62-turbo \
       libpq5 \
       libwebp7 \

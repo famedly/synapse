@@ -29,13 +29,18 @@ COPY --from=postgres_base --chown=postgres /var/run/postgresql /var/run/postgres
 ENV PATH="${PATH}:/usr/lib/postgresql/14/bin"
 ENV PGDATA=/var/lib/postgresql/data
 
+# Switch to the postgres user so setup commands on the database use the correct user
+USER postgres
+
 # We also initialize the database at build time, rather than runtime, so that it's faster to spin up the image.
-RUN gosu postgres initdb --locale=C --encoding=UTF-8 --auth-host password
+RUN initdb --locale=C --encoding=UTF-8 --auth-host password
 
 # Configure a password and create a database for Synapse
-RUN echo "ALTER USER postgres PASSWORD 'somesecret'" | gosu postgres postgres --single
-RUN echo "CREATE DATABASE synapse" | gosu postgres postgres --single
+RUN echo "ALTER USER postgres PASSWORD 'somesecret'" | postgres --single
+RUN echo "CREATE DATABASE synapse" | postgres --single
 
+# Go back to the root user for the rest of the setup
+USER root
 # Extend the shared homeserver config to disable rate-limiting,
 # set Complement's static shared secret, enable registration, amongst other
 # tweaks to get Synapse ready for testing.

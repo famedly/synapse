@@ -69,7 +69,8 @@ def generate_config_from_template(
     config_dir: str,
     config_path: str,
     os_environ: Mapping[str, str],
-    ownership: str | None,
+    user: int | None = None,
+    group: int | None = None,
 ) -> None:
     """Generate a homeserver.yaml from environment variables
 
@@ -77,8 +78,10 @@ def generate_config_from_template(
         config_dir: where to put generated config files
         config_path: where to put the main config file
         os_environ: environment mapping
-        ownership: "<user>:<group>" string which will be used to set
-            ownership of the generated configs. If None, ownership will not change.
+        user: int of the user ID which will be used to set ownership of the generated
+            configs. If None, will not change.
+        group: int of the group ID which will be used to set ownership of the generated
+            configs. If None, will not change.
     """
     for v in ("SYNAPSE_SERVER_NAME", "SYNAPSE_REPORT_STATS"):
         if v not in os_environ:
@@ -155,20 +158,27 @@ def generate_config_from_template(
         "--generate-keys",
     ]
 
-    if ownership is not None:
+    if user:
+        ownership = f"{user}{':' + str(group) if group else ''}"
         log(f"Setting ownership on /data to {ownership}")
         subprocess.run(["chown", "-R", ownership, "/data"], check=True)
-        args = ["gosu", ownership] + args
 
-    subprocess.run(args, check=True)
+    subprocess.run(args, check=True, user=user, group=group)
 
 
-def run_generate_config(environ: Mapping[str, str], ownership: str | None) -> None:
+def run_generate_config(
+    environ: Mapping[str, str],
+    user: int | None = None,
+    group: int | None = None,
+) -> None:
     """Run synapse with a --generate-config param to generate a template config file
 
     Args:
         environ: env vars from `os.enrivon`.
-        ownership: "userid:groupid" arg for chmod. If None, ownership will not change.
+        user: int of the user ID which will be used to set ownership of the generated
+            configs. If None, will not change.
+        group: int of the group ID which will be used to set ownership of the generated
+            configs. If None, will not change.
 
     Never returns.
     """
@@ -221,34 +231,40 @@ def run_generate_config(environ: Mapping[str, str], ownership: str | None) -> No
     if enable_metrics:
         args.append("--enable-metrics")
 
-    if ownership is not None:
+    if user:
         # make sure that synapse has perms to write to the data dir.
+        ownership = f"{user}{':' + str(group) if group else ''}"
         log(f"Setting ownership on {data_dir} to {ownership}")
         subprocess.run(["chown", ownership, data_dir], check=True)
-        args = ["gosu", ownership] + args
 
     # log("running %s" % (args, ))
-    subprocess.run(args, check=True)
+    subprocess.run(args, check=True, user=user, group=group)
 
 
 def main(args: list[str], environ: MutableMapping[str, str]) -> None:
     mode = args[1] if len(args) > 1 else "run"
 
+    # ownership adjustment is used in 3 instances:
+    # 1. for the recursive chown ran on the relevant data dir(such as "/data")
+    # 2. running the subprocess that is responsible for generating the configuration
+    # 3. starting the actual server itself
+    # None represents there should be no change to the current user/group
+    desired_uid = None
+    desired_gid = None
     # if we were given an explicit user to switch to, do so
-    ownership = None
     if "UID" in environ:
         desired_uid = int(environ["UID"])
         desired_gid = int(environ.get("GID", "991"))
-        ownership = f"{desired_uid}:{desired_gid}"
     elif os.getuid() == 0:
         # otherwise, if we are running as root, use user 991
-        ownership = "991:991"
+        desired_uid = 991
+        desired_gid = 991
 
     synapse_worker = environ.get("SYNAPSE_WORKER", "synapse.app.homeserver")
 
     # In generate mode, generate a configuration and missing keys, then exit
     if mode == "generate":
-        return run_generate_config(environ, ownership)
+        return run_generate_config(environ, desired_uid, desired_gid)
 
     if mode == "migrate_config":
         # generate a config based on environment vars.
@@ -257,7 +273,7 @@ def main(args: list[str], environ: MutableMapping[str, str]) -> None:
             "SYNAPSE_CONFIG_PATH", config_dir + "/homeserver.yaml"
         )
         return generate_config_from_template(
-            config_dir, config_path, environ, ownership
+            config_dir, config_path, environ, desired_uid, desired_gid
         )
 
     if mode != "run":
@@ -308,13 +324,17 @@ running with 'migrate_config'. See the README for more details.
     log("Starting synapse with args " + " ".join(args))
 
     args = [sys.executable] + args
-    if ownership is not None:
-        args = ["gosu", ownership] + args
-        flush_buffers()
-        os.execve("/usr/sbin/gosu", args, environ)
-    else:
-        flush_buffers()
-        os.execve(sys.executable, args, environ)
+
+    if desired_gid:
+        # Try and set the group first, because if the user is changed first you may not
+        # have permission to change the group
+        os.setgid(desired_gid)
+
+    if desired_uid:
+        os.setuid(desired_uid)
+
+    flush_buffers()
+    os.execve(sys.executable, args, environ)
 
 
 if __name__ == "__main__":
