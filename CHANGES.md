@@ -4,6 +4,13 @@
 
 - Bump `matrix-synapse-ldap3` to `0.4.0` to support `setuptools>=82.0.0`. Fixes [\#19541](https://github.com/element-hq/synapse/issues/19541). ([\#19543](https://github.com/element-hq/synapse/issues/19543))
 
+### Famedly additions for v1.149.1_1
+
+- chore: Remove gosu usage from Synapse (Jason Little)
+- chore: Add in CI testing of the module based on its own test suite (Jason Little)
+- fix: include modpack build for TIM 1.1 and adjust for actual version that exists (Jason Little)
+- feat: add famedly control module in docker image (FrenchGithubUser)
+
 
 
 
@@ -49,6 +56,7 @@ No significant changes since 1.149.0rc1.
 No significant changes since 1.148.0rc1.
 
 ### Famedly additions for v1.148.0_1
+
 - chore: fix the inconsistent stream error log message to contain the proper information instead of rasing value error ([\#238](https://github.com/famedly/synapse/pull/238)) (itsoyou & FrenchGithubUser)
 
 
