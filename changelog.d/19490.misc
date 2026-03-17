@@ -1,1 +1,0 @@
-Migrate `dev` dependencies to [PEP 735](https://peps.python.org/pep-0735/) dependency groups.

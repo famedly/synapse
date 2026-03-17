@@ -1,1 +1,0 @@
-In the Admin API documentation, always express path parameters as `/<param>` instead of as `/$param`.
