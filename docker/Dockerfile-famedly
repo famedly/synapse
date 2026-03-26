@@ -26,7 +26,7 @@ RUN --mount=type=cache,target=/root/.cache/pip \
     synapse-s3-storage-provider \
     synapse-invite-checker==${SIC_VERSION} \
     famedly-control-synapse==${FCS_VERSION} \
-    https://github.com/famedly/synapse-invite-policies/archive/refs/heads/main.zip \
+    https://github.com/famedly/synapse-invite-policies/archive/8c26a3e6fd6c7992d02c70efcf4102d9d706ffb2.zip \
     https://github.com/famedly/synapse-domain-rule-checker/archive/refs/heads/main.zip
 
 EXPOSE 8008/tcp 8009/tcp 8448/tcp
