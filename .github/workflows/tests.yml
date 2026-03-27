@@ -95,7 +95,7 @@ jobs:
       - uses: matrix-org/setup-python-poetry@5bbf6603c5c930615ec8a29f1b5d7d258d905aa4 # v2.0.0
         with:
           python-version: "3.x"
-          poetry-version: "2.1.1"
+          poetry-version: "2.2.1"
           extras: "all"
       - run: poetry run scripts-dev/generate_sample_config.sh --check
       - run: poetry run scripts-dev/config-lint.sh
@@ -134,7 +134,7 @@ jobs:
       - name: Setup Poetry
         uses: matrix-org/setup-python-poetry@5bbf6603c5c930615ec8a29f1b5d7d258d905aa4 # v2.0.0
         with:
-          poetry-version: "2.1.1"
+          poetry-version: "2.2.1"
           install-project: "false"
 
       - name: Run ruff check
@@ -169,7 +169,7 @@ jobs:
           # https://github.com/matrix-org/synapse/pull/15376#issuecomment-1498983775
           # To make CI green, err towards caution and install the project.
           install-project: "true"
-          poetry-version: "2.1.1"
+          poetry-version: "2.2.1"
 
       # Cribbed from
       # https://github.com/AustinScola/mypy-cache-github-action/blob/85ea4f2972abed39b33bd02c36e341b28ca59213/src/restore.ts#L10-L17
@@ -265,7 +265,7 @@ jobs:
           # Install like a normal project from source with all optional dependencies
           extras: all
           install-project: "true"
-          poetry-version: "2.1.1"
+          poetry-version: "2.2.1"
 
       - name: Ensure `Cargo.lock` is up to date (no stray changes after install)
         # The `::error::` syntax is using GitHub Actions' error annotations, see
@@ -398,7 +398,7 @@ jobs:
       - uses: matrix-org/setup-python-poetry@5bbf6603c5c930615ec8a29f1b5d7d258d905aa4 # v2.0.0
         with:
           python-version: ${{ matrix.job.python-version }}
-          poetry-version: "2.1.1"
+          poetry-version: "2.2.1"
           extras: ${{ matrix.job.extras }}
       - name: Await PostgreSQL
         if: ${{ matrix.job.postgres-version }}
@@ -500,7 +500,7 @@ jobs:
       - uses: matrix-org/setup-python-poetry@5bbf6603c5c930615ec8a29f1b5d7d258d905aa4 # v2.0.0
         with:
           python-version: ${{ matrix.python-version }}
-          poetry-version: "2.1.1"
+          poetry-version: "2.2.1"
           extras: ${{ matrix.extras }}
       - run: poetry run trial --jobs=2 tests
       - name: Dump logs
@@ -595,7 +595,7 @@ jobs:
       - run: sudo apt-get -qq install xmlsec1 postgresql-client
       - uses: matrix-org/setup-python-poetry@5bbf6603c5c930615ec8a29f1b5d7d258d905aa4 # v2.0.0
         with:
-          poetry-version: "2.1.1"
+          poetry-version: "2.2.1"
           extras: "postgres"
       - run: .ci/scripts/test_export_data_command.sh
         env:
@@ -648,7 +648,7 @@ jobs:
       - uses: matrix-org/setup-python-poetry@5bbf6603c5c930615ec8a29f1b5d7d258d905aa4 # v2.0.0
         with:
           python-version: ${{ matrix.python-version }}
-          poetry-version: "2.1.1"
+          poetry-version: "2.2.1"
           extras: "postgres"
       - run: .ci/scripts/test_synapse_port_db.sh
         id: run_tester_script
@@ -705,6 +705,13 @@ jobs:
           toolchain: ${{ env.RUST_VERSION }}
       - uses: Swatinem/rust-cache@779680da715d629ac1d338a641029a2f4372abb5 # v2.8.2
 
+      # We use `poetry` in `complement.sh`
+      - uses: matrix-org/setup-python-poetry@5bbf6603c5c930615ec8a29f1b5d7d258d905aa4 # v2.0.0
+        with:
+          poetry-version: "2.2.1"
+          # Matches the `path` where we checkout Synapse above
+          working-directory: "synapse"
+
       - name: Prepare Complement's Prerequisites
         run: synapse/.ci/scripts/setup_complement_prerequisites.sh
 
@@ -712,6 +719,32 @@ jobs:
         with:
           cache-dependency-path: complement/go.sum
           go-version-file: complement/go.mod
+
+      # Run the image sanity check test first as this is the first thing we want to know
+      # about (are we actually testing what we expect?) and we don't want to debug
+      # downstream failures (wild goose chase).
+      - name: Sanity check Complement image
+        id: run_sanity_check_complement_image_test
+        # -p=1: We're using `-p 1` to force the test packages to run serially as GHA boxes
+        #     are underpowered and don't like running tons of Synapse instances at once.
+        # -json: Output JSON format so that gotestfmt can parse it.
+        #
+        # tee /tmp/gotest-complement.log: We tee the output to a file so that we can re-process it
+        # later on for better formatting with gotestfmt. But we still want the command
+        # to output to the terminal as it runs so we can see what's happening in
+        # real-time.
+        run: |
+          set -o pipefail
+          COMPLEMENT_DIR=`pwd`/complement synapse/scripts-dev/complement.sh --in-repo -p 1 -json -run 'TestSynapseVersion/Synapse_version_matches_current_git_checkout' 2>&1 | tee /tmp/gotest-sanity-check-complement.log
+        shell: bash
+        env:
+          POSTGRES: ${{ (matrix.database == 'Postgres') && 1 || '' }}
+          WORKERS: ${{ (matrix.arrangement == 'workers') && 1 || '' }}
+
+      - name: Formatted sanity check Complement test logs
+        # Always run this step if we attempted to run the Complement tests.
+        if: always() && steps.run_sanity_check_complement_image_test.outcome != 'skipped'
+        run: cat /tmp/gotest-sanity-check-complement.log | gotestfmt -hide "successful-downloads,empty-packages"
 
       - name: Run Complement Tests
         id: run_complement_tests
