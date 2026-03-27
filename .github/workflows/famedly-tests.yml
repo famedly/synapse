@@ -26,7 +26,7 @@ jobs:
       - uses: matrix-org/setup-python-poetry@v2
         with:
           python-version: "3.13"
-          poetry-version: "2.1.1"
+          poetry-version: "2.2.1"
           extras: "all"
       - run: poetry run scripts-dev/generate_sample_config.sh --check
       - run: poetry run scripts-dev/config-lint.sh
@@ -62,7 +62,7 @@ jobs:
       - name: Setup Poetry
         uses: matrix-org/setup-python-poetry@v2
         with:
-          poetry-version: "2.1.1"
+          poetry-version: "2.2.1"
           python-version: "3.13"
           install-project: "false"
 
@@ -93,7 +93,7 @@ jobs:
           # To make CI green, err towards caution and install the project.
           install-project: "true"
           python-version: "3.13"
-          poetry-version: "2.1.1"
+          poetry-version: "2.2.1"
 
       # Cribbed from
       # https://github.com/AustinScola/mypy-cache-github-action/blob/85ea4f2972abed39b33bd02c36e341b28ca59213/src/restore.ts#L10-L17
@@ -223,7 +223,7 @@ jobs:
       - uses: matrix-org/setup-python-poetry@v2
         with:
           python-version: ${{ matrix.job.python-version }}
-          poetry-version: "2.1.1"
+          poetry-version: "2.2.1"
           extras: ${{ matrix.job.extras }}
       - name: Await PostgreSQL
         if: ${{ matrix.job.postgres-version }}
