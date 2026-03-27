@@ -1,5 +1,5 @@
 $schema: https://famedly.github.io/synapse/latest/schema/v1/meta.schema.json
-$id: https://famedly.github.io/synapse/schema/synapse/v1.149.1/synapse-config.schema.json
+$id: https://famedly.github.io/synapse/schema/synapse/v1.150/synapse-config.schema.json
 type: object
 properties:
   famedly_maximum_refresh_token_lifetime:
@@ -5544,11 +5544,13 @@ properties:
   outbound_federation_restricted_to:
     type: array
     description: >-
-      When using workers, you can restrict outbound federation traffic to only
-      go through a specific subset of workers. Any worker specified here must
-      also be in the [`instance_map`](#instance_map).
-      [`worker_replication_secret`](#worker_replication_secret) must also be
-      configured to authorize inter-worker communication.
+      You can restrict outbound federation traffic to only go through a specific subset
+      of workers including the [Secure Border Gateway
+      (SBG)](https://element.io/en/server-suite/secure-border-gateways). Any worker
+      specified here (including the SBG) must also be in the
+      [`instance_map`](#instance_map).
+      [`worker_replication_secret`](#worker_replication_secret) must also be configured
+      to authorize inter-worker communication.
 
 
       Also see the [worker
