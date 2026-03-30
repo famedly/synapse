@@ -19,9 +19,11 @@ ARG FCS_VERSION
 
 # To avoid having to install git, pip install directly from the source repository using
 # it's auto generated zip file for the two non-pypa modules below.
+RUN pip freeze > constraints.txt
+
 RUN --mount=type=cache,target=/root/.cache/pip \
   pip install setuptools \
-  && pip install --no-warn-script-location \
+  && pip install --no-warn-script-location -c constraints.txt \
     synapse-token-authenticator==${STA_VERSION} \
     synapse-s3-storage-provider \
     synapse-invite-checker==${SIC_VERSION} \
