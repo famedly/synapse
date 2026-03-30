@@ -220,9 +220,7 @@ class ProfileHandler:
         if not by_admin and target_user != requester.user:
             raise AuthError(400, "Cannot set another user's displayname")
 
-        if (
-            not by_admin and not self.hs.config.registration.enable_set_displayname
-        ) and not (deactivation and new_displayname == ""):
+        if not by_admin and not self.hs.config.registration.enable_set_displayname:
             profile = await self.store.get_profileinfo(target_user)
             if profile.display_name:
                 raise SynapseError(
@@ -333,9 +331,7 @@ class ProfileHandler:
         if not by_admin and target_user != requester.user:
             raise AuthError(400, "Cannot set another user's avatar_url")
 
-        if (
-            not by_admin and not self.hs.config.registration.enable_set_avatar_url
-        ) and not (deactivation and new_avatar_url == ""):
+        if not by_admin and not self.hs.config.registration.enable_set_avatar_url:
             profile = await self.store.get_profileinfo(target_user)
             if profile.avatar_url:
                 raise SynapseError(
@@ -409,28 +405,6 @@ class ProfileHandler:
             # methods have these checks, it'd be even stranger to be inconsistent and not
             # have it.
             raise AuthError(400, "Cannot remove another user's profile")
-
-        if not by_admin:
-            current_profile = await self.store.get_profileinfo(target_user)
-            if not self.hs.config.registration.enable_set_displayname:
-                if current_profile.display_name:
-                    # SUSPICIOUS: It seems strange to block deactivation on this,
-                    # though this is preserving previous behaviour.
-                    raise SynapseError(
-                        400,
-                        "Changing display name is disabled on this server",
-                        Codes.FORBIDDEN,
-                    )
-
-            if not self.hs.config.registration.enable_set_avatar_url:
-                if current_profile.avatar_url:
-                    # SUSPICIOUS: It seems strange to block deactivation on this,
-                    # though this is preserving previous behaviour.
-                    raise SynapseError(
-                        400,
-                        "Changing avatar is disabled on this server",
-                        Codes.FORBIDDEN,
-                    )
 
         await self.store.delete_profile(target_user)
 
