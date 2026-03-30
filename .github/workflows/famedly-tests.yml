@@ -333,6 +333,13 @@ jobs:
         with:
           path: synapse
 
+      # `poetry` is used in `complement.sh`
+      - uses: matrix-org/setup-python-poetry@v2
+        with:
+          poetry-version: "2.2.1"
+          # Matches the `path` where we checkout Synapse above
+          working-directory: "synapse"
+
       - name: Prepare Complement's Prerequisites
         run: synapse/.ci/scripts/setup_complement_prerequisites.sh
 
