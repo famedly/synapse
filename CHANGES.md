@@ -2,7 +2,10 @@
 
 No significant changes since 1.150.0rc1.
 
+### Famedly additions for v1.150.0_1
 
+- chore: Prohibit dependencies on included modules from causing unexpected version changes ([\#247](https://github.com/famedly/synapse/pull/247))
+- fix(again): Allow account deactivation even with disabled profile changes ([\#248](https://github.com/famedly/synapse/pull/249))
 
 
 # Synapse 1.150.0rc1 (2026-03-17)
