@@ -45,22 +45,32 @@
     # Output a development shell for x86_64/aarch64 Linux/Darwin (MacOS).
     systems.url = "github:nix-systems/default";
     # A development environment manager built on Nix. See https://devenv.sh.
-    devenv.url = "github:cachix/devenv/v0.6.3";
+    devenv.url = "github:cachix/devenv/v2.0.6";
     # Rust toolchain.
     rust-overlay.url = "github:oxalica/rust-overlay";
   };
 
-  outputs = { nixpkgs, devenv, systems, rust-overlay, ... } @ inputs:
+  outputs =
+    {
+      nixpkgs,
+      devenv,
+      systems,
+      rust-overlay,
+      ...
+    }@inputs:
     let
       forEachSystem = nixpkgs.lib.genAttrs (import systems);
-    in {
-      devShells = forEachSystem (system:
+    in
+    {
+      devShells = forEachSystem (
+        system:
         let
           overlays = [ (import rust-overlay) ];
           pkgs = import nixpkgs {
             inherit system overlays;
           };
-        in {
+        in
+        {
           # Everything is configured via devenv - a Nix module for creating declarative
           # developer environments. See https://devenv.sh/reference/options/ for a list
           # of all possible options.
@@ -68,11 +78,6 @@
             inherit inputs pkgs;
             modules = [
               {
-                # Make use of the Starship command prompt when this development environment
-                # is manually activated (via `nix develop --impure`).
-                # See https://starship.rs/ for details on the prompt itself.
-                starship.enable = true;
-
                 # Configure packages to install.
                 # Search for package names at https://search.nixos.org/packages?channel=unstable
                 packages = with pkgs; [
@@ -82,7 +87,7 @@
                   #
                   # NOTE: We currently need to set the Rust version unnecessarily high
                   # in order to work around https://github.com/matrix-org/synapse/issues/15939
-                  (rust-bin.stable."1.82.0".default.override {
+                  (rust-bin.stable."1.89.0".default.override {
                     # Additionally install the "rust-src" extension to allow diving into the
                     # Rust source code in an IDE (rust-analyzer will also make use of it).
                     extensions = [ "rust-src" ];
@@ -125,7 +130,7 @@
                 languages.python.poetry.activate.enable = true;
                 # Install all extra Python dependencies; this is needed to run the unit
                 # tests and utilise all Synapse features.
-                languages.python.poetry.install.arguments = ["--extras all"];
+                languages.python.poetry.install.arguments = [ "--extras all" ];
                 # Install the 'matrix-synapse' package from the local checkout.
                 languages.python.poetry.install.installRootPackage = true;
 
@@ -154,7 +159,10 @@
 
                 # On the first invocation of `devenv up`, create a database for
                 # Synapse to store data in.
-                services.postgres.initdbArgs = ["--locale=C" "--encoding=UTF8"];
+                services.postgres.initdbArgs = [
+                  "--locale=C"
+                  "--encoding=UTF8"
+                ];
                 services.postgres.initialDatabases = [
                   { name = "synapse"; }
                 ];
@@ -173,7 +181,7 @@
                 #  * ensures a directory containing two additional homeserver config files exists;
                 #    one to configure using the development environment's PostgreSQL as the
                 #    database backend and another for enabling Redis support.
-                process.before = ''
+                process.manager.before = ''
                   python -m synapse.app.homeserver -c homeserver.yaml --generate-config --server-name=synapse.dev --report-stats=no
                   mkdir -p homeserver-config-overrides.d
                   cat > homeserver-config-overrides.d/database.yaml << EOF
@@ -203,42 +211,45 @@
                 # corresponding Nix packages on https://search.nixos.org/packages.
                 #
                 # This was done until `./install-deps.pl --dryrun` produced no output.
-                env.PERL5LIB = "${with pkgs.perl538Packages; makePerlPath [
-                  DBI
-                  ClassMethodModifiers
-                  CryptEd25519
-                  DataDump
-                  DBDPg
-                  DigestHMAC
-                  DigestSHA1
-                  EmailAddressXS
-                  EmailMIME
-                  EmailSimple  # required by Email::Mime
-                  EmailMessageID  # required by Email::Mime
-                  EmailMIMEContentType  # required by Email::Mime
-                  TextUnidecode  # required by Email::Mime
-                  ModuleRuntime  # required by Email::Mime
-                  EmailMIMEEncodings  # required by Email::Mime
-                  FilePath
-                  FileSlurper
-                  Future
-                  GetoptLong
-                  HTTPMessage
-                  IOAsync
-                  IOAsyncSSL
-                  IOSocketSSL
-                  NetSSLeay
-                  JSON
-                  ListUtilsBy
-                  ScalarListUtils
-                  ModulePluggable
-                  NetAsyncHTTP
-                  MetricsAny  # required by Net::Async::HTTP
-                  NetAsyncHTTPServer
-                  StructDumb
-                  URI
-                  YAMLLibYAML
-                ]}";
+                env.PERL5LIB = "${
+                  with pkgs.perl5Packages;
+                  makePerlPath [
+                    DBI
+                    ClassMethodModifiers
+                    CryptEd25519
+                    DataDump
+                    DBDPg
+                    DigestHMAC
+                    DigestSHA1
+                    EmailAddressXS
+                    EmailMIME
+                    EmailSimple # required by Email::Mime
+                    EmailMessageID # required by Email::Mime
+                    EmailMIMEContentType # required by Email::Mime
+                    TextUnidecode # required by Email::Mime
+                    ModuleRuntime # required by Email::Mime
+                    EmailMIMEEncodings # required by Email::Mime
+                    FilePath
+                    FileSlurper
+                    Future
+                    GetoptLong
+                    HTTPMessage
+                    IOAsync
+                    IOAsyncSSL
+                    IOSocketSSL
+                    NetSSLeay
+                    JSON
+                    ListUtilsBy
+                    ScalarListUtils
+                    ModulePluggable
+                    NetAsyncHTTP
+                    MetricsAny # required by Net::Async::HTTP
+                    NetAsyncHTTPServer
+                    StructDumb
+                    URI
+                    YAMLLibYAML
+                  ]
+                }";
 
                 # Clear the LD_LIBRARY_PATH environment variable on shell init.
                 #
@@ -255,6 +266,7 @@
               }
             ];
           };
-        });
+        }
+      );
     };
 }
