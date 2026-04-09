@@ -78,11 +78,7 @@ all_mod_pack_versions = {
         "fcs-version": "0.0.2",
     },
     "mod026": {"sic-version": "0.2.2", "sta-version": "0.13.1", "fcs-version": "0.0.2"},
-    "mod027": {
-        "sic-version": "0.4.13",
-        "sta-version": "0.13.1",
-        "fcs-version": "0.0.2",
-    },
+    "mod027": {"sic-version": "0.5.0", "sta-version": "0.13.1", "fcs-version": "0.0.2"},
 }
 
 # Adjust this section to decide what gets built and layered on top
