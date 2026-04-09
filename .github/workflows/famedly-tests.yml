@@ -507,7 +507,7 @@ jobs:
 
       - name: Run token-authenticator tests
         working-directory: synapse-token-authenticator
-        run: hatch run pip install -r synapse-requirements.txt && hatch run cov
+        run: hatch run pip install -r synapse-requirements.txt && hatch test -p -c
 
       - name: Display Hatch Environment Info
         if: always()
