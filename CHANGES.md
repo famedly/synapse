@@ -4,7 +4,10 @@
 
 - Fix `KNOWN_ROOM_VERSIONS.__contains__` raising `TypeError` for non-string keys, which could cause `/sync` to fail for rooms with a `NULL` room version in the database. Bug introduced in [#19589](https://github.com/element-hq/synapse/pull/19589) as part of v1.151.0rc1. ([\#19649](https://github.com/element-hq/synapse/issues/19649))
 
+### Famedly additions for v1.151.0_1
 
+- bump: Synapse Token Authenticator to `v0.13.1` in the Famedly docker image
+- bump: Synapse Invite Checker to `0.5.0` in the Famedly docker image
 
 
 # Synapse 1.151.0rc1 (2026-03-31)
