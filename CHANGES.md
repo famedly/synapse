@@ -1,3 +1,33 @@
+# Synapse 1.152.0rc1 (2026-04-14)
+
+## Features
+
+- Add a ["Listing quarantined media changes" Admin API](https://element-hq.github.io/synapse/latest/admin_api/media_admin_api.html#listing-quarantined-media-changes) for retrieving a paginated record of when media became (un)quarantined. ([\#19558](https://github.com/element-hq/synapse/issues/19558), [\#19677](https://github.com/element-hq/synapse/issues/19677))
+- Advertise [MSC4445](https://github.com/matrix-org/matrix-spec-proposals/pull/4445) sync timeline order in `unstable_features`. ([\#19642](https://github.com/element-hq/synapse/issues/19642))
+- Report the Rust compiler version used in the Prometheus metrics. Contributed by Noah Markert. ([\#19643](https://github.com/element-hq/synapse/issues/19643))
+- Passthrough 'article' and 'profile' OpenGraph metadata on URL preview requests. ([\#19659](https://github.com/element-hq/synapse/issues/19659))
+
+## Bugfixes
+
+- Reject `device_keys: null` in the request to [`POST /_matrix/client/v3/keys/upload`](https://spec.matrix.org/v1.16/client-server-api/#post_matrixclientv3keysupload), as per the spec. This was temporarily allowed as a workaround for misbehaving clients. ([\#19637](https://github.com/element-hq/synapse/issues/19637))
+
+## Improved Documentation
+
+- Include a workaround for running the unit tests with SQLite under recent versions of MacOS. ([\#19615](https://github.com/element-hq/synapse/issues/19615))
+- Fix Docker image link typo in worker docs. ([\#19645](https://github.com/element-hq/synapse/issues/19645))
+- Update developer stream docs for creating a new stream to point out `_setup_sequence(...)` in `portdb`. ([\#19675](https://github.com/element-hq/synapse/issues/19675))
+
+## Internal Changes
+
+- Update CI to use re-usable Complement GitHub CI workflow. ([\#19533](https://github.com/element-hq/synapse/issues/19533))
+- Fix docstring for `limit` argument in `_maybe_backfill_inner(...)`. ([\#19630](https://github.com/element-hq/synapse/issues/19630))
+- Document context for why increase timeout for policy server requests. ([\#19633](https://github.com/element-hq/synapse/issues/19633))
+- Run lint script to format Complement tests introduced in [#19509](https://github.com/element-hq/synapse/pull/19509). ([\#19636](https://github.com/element-hq/synapse/issues/19636))
+- Small simplifications to the events class. ([\#19680](https://github.com/element-hq/synapse/issues/19680))
+
+
+
+
 # Synapse 1.151.0 (2026-04-07)
 
 ## Bugfixes
