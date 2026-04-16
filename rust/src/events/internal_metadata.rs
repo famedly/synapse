@@ -65,6 +65,7 @@ enum EventInternalMetadataData {
     DelayId(Box<str>),
     TokenId(i64),
     DeviceId(Box<str>),
+    CalculatedAuthEventIDs(Vec<String>), // MSC4242: State DAGs
 }
 
 impl EventInternalMetadataData {
@@ -139,6 +140,10 @@ impl EventInternalMetadataData {
             EventInternalMetadataData::DeviceId(o) => (
                 pyo3::intern!(py, "device_id"),
                 o.into_pyobject(py).unwrap_infallible().into_any(),
+            ),
+            EventInternalMetadataData::CalculatedAuthEventIDs(o) => (
+                pyo3::intern!(py, "calculated_auth_event_ids"),
+                o.into_pyobject(py).unwrap().into_any(),
             ),
         }
     }
@@ -216,6 +221,11 @@ impl EventInternalMetadataData {
                 value
                     .extract()
                     .map(String::into_boxed_str)
+                    .with_context(|| format!("'{key_str}' has invalid type"))?,
+            ),
+            "calculated_auth_event_ids" => EventInternalMetadataData::CalculatedAuthEventIDs(
+                value
+                    .extract()
                     .with_context(|| format!("'{key_str}' has invalid type"))?,
             ),
             _ => return Ok(None),
@@ -395,6 +405,10 @@ impl EventInternalMetadataInner {
         get_property_opt!(self, DelayId).map(|s| s.deref())
     }
 
+    pub fn get_calculated_auth_event_ids(&self) -> Option<&Vec<String>> {
+        get_property_opt!(self, CalculatedAuthEventIDs)
+    }
+
     pub fn get_token_id(&self) -> Option<i64> {
         get_property_opt!(self, TokenId).copied()
     }
@@ -455,6 +469,10 @@ impl EventInternalMetadataInner {
 
     pub fn set_device_id(&mut self, obj: String) {
         set_property!(self, DeviceId, obj.into_boxed_str());
+    }
+
+    pub fn set_calculated_auth_event_ids(&mut self, obj: Vec<String>) {
+        set_property!(self, CalculatedAuthEventIDs, obj);
     }
 }
 
@@ -719,6 +737,21 @@ impl EventInternalMetadata {
     #[setter]
     fn set_txn_id(&self, obj: String) -> PyResult<()> {
         self.write_inner()?.set_txn_id(obj);
+        Ok(())
+    }
+
+    /// The calculated auth event IDs, if it was set when the event was created.
+    #[getter]
+    fn get_calculated_auth_event_ids(&self) -> PyResult<Vec<String>> {
+        let guard = self.read_inner()?;
+        attr_err(
+            guard.get_calculated_auth_event_ids().cloned(),
+            "calculated_auth_event_ids",
+        )
+    }
+    #[setter]
+    fn set_calculated_auth_event_ids(&self, obj: Vec<String>) -> PyResult<()> {
+        self.write_inner()?.set_calculated_auth_event_ids(obj);
         Ok(())
     }
 
