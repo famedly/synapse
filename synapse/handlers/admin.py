@@ -32,7 +32,7 @@ import attr
 
 from synapse.api.constants import Direction, EventTypes, Membership
 from synapse.api.errors import SynapseError
-from synapse.events import EventBase
+from synapse.events import EventBase, FrozenEventVMSC4242
 from synapse.events.utils import FilteredEvent
 from synapse.types import (
     JsonMapping,
@@ -494,9 +494,16 @@ class AdminHandler:
                     event_dict["redacts"] = event.event_id
 
                 try:
+                    prev_state_events = None
+                    if room_version.msc4242_state_dags:
+                        assert isinstance(event, FrozenEventVMSC4242)
+                        prev_state_events = event.prev_state_events
+                        assert prev_state_events is not None, (
+                            "Parent event of redaction has no `prev_state_events` which should be impossible as `prev_state_events` is a required field in MSC4242 rooms"
+                        )
                     # set the prev event to the offending message to allow for redactions
                     # to be processed in the case where the user has been kicked/banned before
-                    # redactions are requested
+                    # redactions are requested.
                     (
                         redaction,
                         _,
@@ -505,6 +512,7 @@ class AdminHandler:
                         event_dict,
                         prev_event_ids=[event.event_id],
                         ratelimit=False,
+                        prev_state_events=prev_state_events,
                     )
                 except Exception as ex:
                     logger.info(
