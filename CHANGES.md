@@ -18,6 +18,7 @@ Without configuring this new stream writer, only the main process will be able t
 - Add experimental support for [MSC4242](https://github.com/matrix-org/matrix-spec-proposals/pull/4242): State DAGs. Excludes federation support. ([\#19424](https://github.com/element-hq/synapse/issues/19424))
 - Adds [Admin API](https://element-hq.github.io/synapse/latest/usage/administration/admin_api/index.html) endpoints to
   list, fetch and delete user reports. ([\#19657](https://github.com/element-hq/synapse/issues/19657))
+- Reduce database disk space usage by pruning old rows from `device_lists_changes_in_room`. ([\#19473](https://github.com/element-hq/synapse/issues/19473), [\#19709](https://github.com/element-hq/synapse/issues/19709))
 
 ## Bugfixes
 
@@ -42,7 +43,6 @@ Without configuring this new stream writer, only the main process will be able t
 - Introduce `spam_checker_spammy` internal event metadata. ([\#19453](https://github.com/element-hq/synapse/issues/19453))
 - Add a `FilteredEvent` class that saves us copying events. ([\#19640](https://github.com/element-hq/synapse/issues/19640))
 - Convert `EventInternalMetadata` to use `Arc<RwLock<_>>`. ([\#19669](https://github.com/element-hq/synapse/issues/19669))
-- Reduce database disk space usage by pruning old rows from `device_lists_changes_in_room`. ([\#19473](https://github.com/element-hq/synapse/issues/19473), [\#19709](https://github.com/element-hq/synapse/issues/19709))
 
 
 # Synapse 1.151.0 (2026-04-07)
