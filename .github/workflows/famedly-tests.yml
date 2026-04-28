@@ -442,7 +442,7 @@ jobs:
 
       - name: Run invite-checker tests
         working-directory: synapse-invite-checker
-        run: hatch run pip install -r synapse-requirements.txt && hatch run cov
+        run: hatch run pip install -r synapse-requirements.txt && hatch test -p -c
 
       - name: Display Hatch Environment Info
         if: always()
@@ -576,7 +576,7 @@ jobs:
 
       - name: Run famedly-control tests
         working-directory: famedly-control-synapse
-        run: hatch run pip install -r synapse-requirements.txt && hatch run cov
+        run: hatch run pip install -r synapse-requirements.txt && hatch test -p -c
 
       - name: Display Hatch Environment Info
         if: always()
