@@ -1,10 +1,15 @@
-# Synapse 1.152.0rc1 (2026-04-22)
+# Synapse 1.152.0 (2026-04-28)
+
+No significant changes since 1.152.0rc1.
+
+## Configuration changes needed for deployments using workers
 
 For deployments using workers, please note that this version introduces a new `quarantined_media_changes` stream writer, which may require configuration changes.
 Please see the [the relevant section in the upgrade notes](https://github.com/element-hq/synapse/blob/develop/docs/upgrade.md#upgrading-to-v11520) for details.
 
 Without configuring this new stream writer, only the main process will be able to handle the `/media/quarantine` admin API endpoints for quarantining media.
 
+# Synapse 1.152.0rc1 (2026-04-22)
 
 ## Features
 
