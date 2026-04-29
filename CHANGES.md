@@ -9,6 +9,8 @@ Please see the [the relevant section in the upgrade notes](https://github.com/el
 
 Without configuring this new stream writer, only the main process will be able to handle the `/media/quarantine` admin API endpoints for quarantining media.
 
+## No Famedly additions for v1.152.0_1
+
 # Synapse 1.152.0rc1 (2026-04-22)
 
 ## Features
