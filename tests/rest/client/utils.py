@@ -26,6 +26,7 @@ import re
 import time
 import urllib.parse
 from http import HTTPStatus
+from random import random
 from typing import (
     Any,
     AnyStr,
@@ -135,6 +136,18 @@ class RestHelper:
         Returns:
             The ID of the newly created room, or None if the request failed.
         """
+        # Now that the default room version is at a minimum "12", the timestamp of
+        # creation event is the influence for any given room being different when all
+        # other fields are equal. Give a random(float between 0 and 1) and a multiplier
+        # of 3 to provide a variable 3000 different timestamps *per TestCase*. Each test
+        # has its own reactor, so starts at 0.
+        # Otherwise, a wall is hit quickly when a bunch of rooms are created with the
+        # same timestamp. If all the creation events have matching hashes, then they
+        # will have the same room_id.
+        # `synapse.storage.databases.main.room - 377 - ERROR - POST-222 - store_room
+        # with room_id=!8WygW2Qt9zh4NwtFYczgybArQtJyshCEOnmkuXb-ebQ failed: UNIQUE
+        # constraint failed: rooms.room_id`
+        self.reactor.advance(random() * 3.0)
         temp_id = self.auth_user_id
         self.auth_user_id = room_creator
         path = "/_matrix/client/r0/createRoom"
