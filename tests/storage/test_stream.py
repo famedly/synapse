@@ -1370,7 +1370,6 @@ class GetCurrentStateDeltaMembershipChangesForUserFederationTestCase(
         create_event_source = {
             "auth_events": [],
             "content": {
-                "creator": f"@creator:{self.OTHER_SERVER_NAME}",
                 "room_version": self.hs.config.server.default_room_version.identifier,
             },
             "depth": 0,
