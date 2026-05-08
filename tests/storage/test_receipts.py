@@ -60,7 +60,7 @@ class ReceiptTestCase(HomeserverTestCase):
         self.room_id1, _, _ = self.get_success(
             self.room_creator.create_room(self.ourRequester, {})
         )
-
+        self.reactor.advance(0.001)
         # Create a second test room
         self.room_id2, _, _ = self.get_success(
             self.room_creator.create_room(self.ourRequester, {})
