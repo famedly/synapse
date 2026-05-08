@@ -4662,10 +4662,16 @@ class MSC4293RedactOnBanKickTestCase(unittest.FederatingHomeserverTestCase):
         self.assertEqual(r[("m.room.member", bad_user)].membership, "join")
 
         auth_ids = [
-            r[("m.room.create", "")].event_id,
             r[("m.room.power_levels", "")].event_id,
             r[("m.room.member", "@remote_bad_user:other.example.com")].event_id,
         ]
+        if not self.room_version.msc4291_room_ids_as_hashes:
+            # Prior to msc4291, the creation event was included in auth_ids. For
+            # backwards compatibility, include it if appropriate. Make sure it is the
+            # first event in the list
+            auth_ids = [
+                r[("m.room.create", "")].event_id,
+            ] + auth_ids
         original_messages = []
         for i in range(5):
             remote_message = make_event_from_dict(
@@ -4781,10 +4787,16 @@ class MSC4293RedactOnBanKickTestCase(unittest.FederatingHomeserverTestCase):
         self.assertEqual(r[("m.room.member", bad_user)].membership, "join")
 
         auth_ids = [
-            r[("m.room.create", "")].event_id,
             r[("m.room.power_levels", "")].event_id,
             r[("m.room.member", "@remote_bad_user:other.example.com")].event_id,
         ]
+        if not self.room_version.msc4291_room_ids_as_hashes:
+            # Prior to msc4291, the creation event was included in auth_ids. For
+            # backwards compatibility, include it if appropriate. Make sure it is the
+            # first event in the list
+            auth_ids = [
+                r[("m.room.create", "")].event_id,
+            ] + auth_ids
         original_messages = []
         for i in range(5):
             remote_message = make_event_from_dict(
@@ -4868,10 +4880,16 @@ class MSC4293RedactOnBanKickTestCase(unittest.FederatingHomeserverTestCase):
             self._storage_controllers.state.get_current_state(self.room_id)
         )
         auth_ids = [
-            new_state[("m.room.create", "")].event_id,
             new_state[("m.room.power_levels", "")].event_id,
             new_state[("m.room.member", "@remote_bad_user:other.example.com")].event_id,
         ]
+        if not self.room_version.msc4291_room_ids_as_hashes:
+            # Prior to msc4291, the creation event was included in auth_ids. For
+            # backwards compatibility, include it if appropriate. Make sure it is the
+            # first event in the list
+            auth_ids = [
+                new_state[("m.room.create", "")].event_id,
+            ] + auth_ids
 
         # messages after unban and join proceed unredacted
         new_original_messages = []
@@ -5027,10 +5045,16 @@ class MSC4293RedactOnBanKickTestCase(unittest.FederatingHomeserverTestCase):
         self.assertEqual(r[("m.room.member", bad_user)].membership, "join")
 
         auth_ids = [
-            r[("m.room.create", "")].event_id,
             r[("m.room.power_levels", "")].event_id,
             r[("m.room.member", "@remote_bad_user:other.example.com")].event_id,
         ]
+        if not self.room_version.msc4291_room_ids_as_hashes:
+            # Prior to msc4291, the creation event was included in auth_ids. For
+            # backwards compatibility, include it if appropriate. Make sure it is the
+            # first event in the list
+            auth_ids = [
+                r[("m.room.create", "")].event_id,
+            ] + auth_ids
         original_messages = []
         for i in range(5):
             remote_message = make_event_from_dict(
@@ -5143,10 +5167,16 @@ class MSC4293RedactOnBanKickTestCase(unittest.FederatingHomeserverTestCase):
         self.assertEqual(r[("m.room.member", bad_user)].membership, "join")
 
         auth_ids = [
-            r[("m.room.create", "")].event_id,
             r[("m.room.power_levels", "")].event_id,
             r[("m.room.member", "@remote_bad_user:other.example.com")].event_id,
         ]
+        if not self.room_version.msc4291_room_ids_as_hashes:
+            # Prior to msc4291, the creation event was included in auth_ids. For
+            # backwards compatibility, include it if appropriate. Make sure it is the
+            # first event in the list
+            auth_ids = [
+                r[("m.room.create", "")].event_id,
+            ] + auth_ids
         original_messages = []
         for i in range(5):
             remote_message = make_event_from_dict(
@@ -5225,10 +5255,16 @@ class MSC4293RedactOnBanKickTestCase(unittest.FederatingHomeserverTestCase):
             self._storage_controllers.state.get_current_state(self.room_id)
         )
         auth_ids = [
-            new_state[("m.room.create", "")].event_id,
             new_state[("m.room.power_levels", "")].event_id,
             new_state[("m.room.member", "@remote_bad_user:other.example.com")].event_id,
         ]
+        if not self.room_version.msc4291_room_ids_as_hashes:
+            # Prior to msc4291, the creation event was included in auth_ids. For
+            # backwards compatibility, include it if appropriate. Make sure it is the
+            # first event in the list
+            auth_ids = [
+                r[("m.room.create", "")].event_id,
+            ] + auth_ids
 
         # messages after kick and re-join proceed unredacted
         new_original_messages = []
