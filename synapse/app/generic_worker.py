@@ -193,7 +193,15 @@ class GenericWorkerServer(HomeServer):
         for res in listener_config.http_options.resources:
             for name in res.names:
                 if name == "metrics":
-                    resources[METRICS_PREFIX] = MetricsResource(RegistryProxy)
+                    from synapse.metrics.instruments import METRICS_BACKEND
+
+                    if METRICS_BACKEND == "otlp":
+                        logger.info(
+                            "Not exposing Prometheus /metrics resource because "
+                            "SYNAPSE_METRICS_BACKEND=otlp; metrics are exported via OTLP"
+                        )
+                    else:
+                        resources[METRICS_PREFIX] = MetricsResource(RegistryProxy)
                 elif name == "client":
                     resource: Resource = ClientRestResource(self)
 

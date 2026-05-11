@@ -173,6 +173,11 @@ opentelemetry-log-handler = [
     "opentelemetry-sdk==1.40.0",
     "opentelemetry-exporter-otlp==1.40.0",
 ]
+opentelemetry-metrics = [
+    "opentelemetry-api==1.40.0",
+    "opentelemetry-sdk==1.40.0",
+    "opentelemetry-exporter-otlp==1.40.0",
+]
 
 # The duplication here is awful.
 #

@@ -26,10 +26,11 @@ import re
 from typing import Iterable, Literal, overload
 
 import attr
-from prometheus_client import REGISTRY, Metric
+from prometheus_client import Metric
 
 from synapse.metrics import GaugeMetricFamily
 from synapse.metrics._types import Collector
+from synapse.metrics.instruments import REGISTRY
 
 logger = logging.getLogger(__name__)
 

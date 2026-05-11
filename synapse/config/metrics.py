@@ -20,6 +20,7 @@
 #
 #
 
+import os
 from typing import Any
 
 import attr
@@ -49,6 +50,25 @@ class MetricsConfig(Config):
 
     def read_config(self, config: JsonDict, **kwargs: Any) -> None:
         self.enable_metrics = config.get("enable_metrics", False)
+
+        # The metrics backend is authoritative from the env var because metric
+        # objects are created at import time (before config is read).  The yaml
+        # value is accepted for documentation / validation purposes.
+        env_backend = os.environ.get("SYNAPSE_METRICS_BACKEND", "prometheus").lower()
+        yaml_backend = config.get("metrics_backend", "prometheus").lower()
+        if yaml_backend not in ("prometheus", "otlp"):
+            raise ConfigError(
+                "Invalid metrics_backend %r (must be 'prometheus' or 'otlp')"
+                % yaml_backend
+            )
+        if yaml_backend == "otlp" and env_backend != "otlp":
+            raise ConfigError(
+                "metrics_backend is set to 'otlp' in config but the "
+                "SYNAPSE_METRICS_BACKEND env var is %r. The env var must also "
+                "be set to 'otlp' because metrics are initialised at import "
+                "time (before config is read)." % env_backend
+            )
+        self.metrics_backend: str = env_backend
 
         self.report_stats = config.get("report_stats", None)
         self.report_stats_endpoint = config.get(

@@ -90,8 +90,6 @@ from typing import (
     Iterable,
 )
 
-from prometheus_client import Counter
-
 import synapse.metrics
 from synapse.api.constants import EduTypes, EventTypes, Membership, PresenceState
 from synapse.api.errors import SynapseError
@@ -103,6 +101,7 @@ from synapse.metrics import SERVER_NAME_LABEL, LaterGauge
 from synapse.metrics.background_process_metrics import (
     wrap_as_background_process,
 )
+from synapse.metrics.instruments import Counter
 from synapse.replication.http.presence import (
     ReplicationBumpPresenceActiveTime,
     ReplicationPresenceSetState,

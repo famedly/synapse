@@ -34,13 +34,12 @@ from typing import (
     cast,
 )
 
-from prometheus_client import Gauge
-
 from twisted.internet import defer
 from twisted.python.failure import Failure
 
 from synapse.logging.context import PreserveLoggingContext
 from synapse.metrics import SERVER_NAME_LABEL
+from synapse.metrics.instruments import Gauge
 from synapse.util.async_helpers import ObservableDeferred
 from synapse.util.caches.lrucache import LruCache
 from synapse.util.caches.treecache import TreeCache, iterate_tree_cache_entry

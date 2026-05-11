@@ -29,7 +29,7 @@ from synapse.util.duration import Duration
 if TYPE_CHECKING:
     from synapse.server import HomeServer
 
-from prometheus_client import Gauge
+from synapse.metrics.instruments import Gauge
 
 # Gauge to expose daily active users metrics
 current_dau_gauge = Gauge(

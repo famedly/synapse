@@ -24,12 +24,11 @@ import logging
 import random
 from typing import TYPE_CHECKING
 
-from prometheus_client import Counter
-
 from twisted.internet.interfaces import IAddress
 from twisted.internet.protocol import ServerFactory
 
 from synapse.metrics import SERVER_NAME_LABEL
+from synapse.metrics.instruments import Counter
 from synapse.replication.tcp.commands import PositionCommand
 from synapse.replication.tcp.protocol import ServerReplicationStreamProtocol
 from synapse.replication.tcp.streams import EventsStream

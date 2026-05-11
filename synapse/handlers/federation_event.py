@@ -31,8 +31,6 @@ from typing import (
     Sequence,
 )
 
-from prometheus_client import Counter, Histogram
-
 from synapse import event_auth
 from synapse.api.constants import (
     EventContentFields,
@@ -76,6 +74,7 @@ from synapse.logging.opentracing import (
     trace,
 )
 from synapse.metrics import SERVER_NAME_LABEL
+from synapse.metrics.instruments import Counter, Histogram
 from synapse.replication.http.federation import (
     ReplicationFederationSendEventsRestServlet,
 )

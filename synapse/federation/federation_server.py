@@ -31,8 +31,6 @@ from typing import (
     Mapping,
 )
 
-from prometheus_client import Counter, Gauge, Histogram
-
 from twisted.python import failure
 
 from synapse.api.constants import (
@@ -80,6 +78,7 @@ from synapse.logging.opentracing import (
 )
 from synapse.metrics import SERVER_NAME_LABEL
 from synapse.metrics.background_process_metrics import wrap_as_background_process
+from synapse.metrics.instruments import Counter, Gauge, Histogram
 from synapse.replication.http.federation import (
     ReplicationFederationSendEduRestServlet,
 )

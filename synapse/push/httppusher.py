@@ -23,8 +23,6 @@ import random
 import urllib.parse
 from typing import TYPE_CHECKING, Optional
 
-from prometheus_client import Counter
-
 from twisted.internet.error import AlreadyCalled, AlreadyCancelled
 from twisted.internet.interfaces import IDelayedCall
 
@@ -32,6 +30,7 @@ from synapse.api.constants import EventTypes
 from synapse.events import EventBase
 from synapse.logging import opentracing
 from synapse.metrics import SERVER_NAME_LABEL
+from synapse.metrics.instruments import Counter
 from synapse.push import Pusher, PusherConfig, PusherConfigException
 from synapse.storage.databases.main.event_push_actions import HttpPushAction
 from synapse.types import JsonDict, JsonMapping

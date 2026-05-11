@@ -22,11 +22,10 @@
 import logging
 from typing import TYPE_CHECKING, Any
 
-from prometheus_client import Counter, Histogram
-
 from synapse.logging import opentracing
 from synapse.logging.context import make_deferred_yieldable
 from synapse.metrics import SERVER_NAME_LABEL
+from synapse.metrics.instruments import Counter, Histogram
 from synapse.util.json import json_decoder, json_encoder
 
 if TYPE_CHECKING:

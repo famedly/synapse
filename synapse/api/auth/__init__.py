@@ -20,13 +20,12 @@
 #
 from typing import TYPE_CHECKING, Protocol
 
-from prometheus_client import Histogram
-
 from twisted.web.server import Request
 
 from synapse.appservice import ApplicationService
 from synapse.http.site import SynapseRequest
 from synapse.metrics import SERVER_NAME_LABEL
+from synapse.metrics.instruments import Histogram
 from synapse.types import Requester
 
 if TYPE_CHECKING:

@@ -141,7 +141,6 @@ from typing import (
 )
 
 import attr
-from prometheus_client import Counter
 
 from twisted.internet import defer
 
@@ -166,6 +165,7 @@ from synapse.metrics import (
 from synapse.metrics.background_process_metrics import (
     wrap_as_background_process,
 )
+from synapse.metrics.instruments import Counter
 from synapse.types import (
     JsonDict,
     ReadReceipt,

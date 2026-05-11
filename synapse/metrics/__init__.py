@@ -41,15 +41,10 @@ from typing import (
 import attr
 from packaging.version import parse as parse_version
 from prometheus_client import (
-    CollectorRegistry,
-    Counter,
-    Gauge,
-    Histogram,
     Metric,
     generate_latest,
 )
 from prometheus_client.core import (
-    REGISTRY,
     GaugeHistogramMetricFamily,
     GaugeMetricFamily,
 )
@@ -62,6 +57,13 @@ from twisted.web.server import Request
 import synapse.metrics._reactor_metrics  # noqa: F401
 from synapse.metrics._gc import MIN_TIME_BETWEEN_GCS, install_gc_manager
 from synapse.metrics._types import Collector
+from synapse.metrics.instruments import (
+    REGISTRY,
+    CollectorRegistry,
+    Counter,
+    Gauge,
+    Histogram,
+)
 from synapse.synapse_rust import get_rustc_version
 from synapse.types import StrSequence
 from synapse.util import SYNAPSE_VERSION

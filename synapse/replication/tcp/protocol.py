@@ -30,7 +30,6 @@ import struct
 from inspect import isawaitable
 from typing import TYPE_CHECKING, Any, Collection
 
-from prometheus_client import Counter
 from zope.interface import Interface, implementer
 
 from twisted.internet import task
@@ -43,6 +42,7 @@ from synapse.metrics import SERVER_NAME_LABEL, LaterGauge
 from synapse.metrics.background_process_metrics import (
     BackgroundProcessLoggingContext,
 )
+from synapse.metrics.instruments import Counter
 from synapse.replication.tcp.commands import (
     VALID_CLIENT_COMMANDS,
     VALID_SERVER_COMMANDS,

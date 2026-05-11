@@ -22,13 +22,12 @@
 import logging
 from typing import TYPE_CHECKING, Iterable
 
-from prometheus_client import Gauge
-
 from synapse.api.errors import Codes, SynapseError
 from synapse.metrics import SERVER_NAME_LABEL
 from synapse.metrics.background_process_metrics import (
     wrap_as_background_process,
 )
+from synapse.metrics.instruments import Gauge
 from synapse.push import Pusher, PusherConfig, PusherConfigException
 from synapse.push.pusher import PusherFactory
 from synapse.replication.http.push import (

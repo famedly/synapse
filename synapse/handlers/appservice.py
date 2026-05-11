@@ -26,8 +26,6 @@ from typing import (
     Mapping,
 )
 
-from prometheus_client import Counter
-
 from twisted.internet import defer
 
 import synapse
@@ -44,6 +42,7 @@ from synapse.metrics import (
 from synapse.metrics.background_process_metrics import (
     wrap_as_background_process,
 )
+from synapse.metrics.instruments import Counter
 from synapse.storage.databases.main.directory import RoomAliasMapping
 from synapse.types import (
     DeviceListUpdates,

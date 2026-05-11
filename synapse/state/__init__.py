@@ -33,7 +33,6 @@ from typing import (
 
 import attr
 from immutabledict import immutabledict
-from prometheus_client import Counter, Histogram
 
 from synapse.api.constants import EventTypes
 from synapse.api.room_versions import KNOWN_ROOM_VERSIONS, StateResolutionVersions
@@ -46,6 +45,7 @@ from synapse.events.snapshot import (
 from synapse.logging.context import ContextResourceUsage
 from synapse.logging.opentracing import tag_args, trace
 from synapse.metrics import SERVER_NAME_LABEL
+from synapse.metrics.instruments import Counter, Histogram
 from synapse.replication.http.state import ReplicationUpdateCurrentStateRestServlet
 from synapse.state import v1, v2
 from synapse.storage.databases.main.event_federation import StateDifference

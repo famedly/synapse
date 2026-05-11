@@ -29,12 +29,11 @@ from typing import (
     TypeVar,
 )
 
-from prometheus_client import Gauge
-
 from twisted.internet import defer
 
 from synapse.logging.context import PreserveLoggingContext, make_deferred_yieldable
 from synapse.metrics import SERVER_NAME_LABEL
+from synapse.metrics.instruments import Gauge
 from synapse.util.clock import Clock
 from synapse.util.duration import Duration
 

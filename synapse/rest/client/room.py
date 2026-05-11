@@ -29,7 +29,6 @@ from typing import TYPE_CHECKING, Awaitable
 from urllib import parse as urlparse
 
 import attr
-from prometheus_client.core import Histogram
 
 from twisted.web.server import Request
 
@@ -75,6 +74,7 @@ from synapse.http.site import SynapseRequest
 from synapse.logging.context import make_deferred_yieldable, run_in_background
 from synapse.logging.opentracing import set_tag, trace
 from synapse.metrics import SERVER_NAME_LABEL
+from synapse.metrics.instruments import Histogram
 from synapse.rest.client._base import client_patterns
 from synapse.rest.client.transactions import HttpTransactionCache
 from synapse.state import CREATE_KEY, POWER_KEY

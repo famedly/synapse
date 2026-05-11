@@ -29,8 +29,6 @@ from typing import (
     TypedDict,
 )
 
-from prometheus_client import Counter
-
 from synapse import types
 from synapse.api.constants import (
     MAX_USERID_LENGTH,
@@ -50,6 +48,7 @@ from synapse.appservice import ApplicationService
 from synapse.config.server import is_threepid_reserved
 from synapse.http.servlet import assert_params_in_dict
 from synapse.metrics import SERVER_NAME_LABEL
+from synapse.metrics.instruments import Counter
 from synapse.replication.http.login import RegisterDeviceReplicationServlet
 from synapse.replication.http.register import (
     ReplicationPostRegisterActionsServlet,

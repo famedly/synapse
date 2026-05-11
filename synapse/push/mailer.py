@@ -26,13 +26,13 @@ from typing import TYPE_CHECKING, Iterable, TypeVar
 import bleach
 import jinja2
 from markupsafe import Markup
-from prometheus_client import Counter
 
 from synapse.api.constants import EventContentFields, EventTypes, Membership, RoomTypes
 from synapse.api.errors import StoreError
 from synapse.config.emailconfig import EmailSubjectConfig
 from synapse.events import EventBase
 from synapse.metrics import SERVER_NAME_LABEL
+from synapse.metrics.instruments import Counter
 from synapse.push.presentable_names import (
     calculate_room_name,
     descriptor_from_member_events,
