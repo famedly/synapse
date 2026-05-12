@@ -52,7 +52,7 @@ logger = logging.getLogger(__name__)
 # Global OTel meter – created eagerly so that module-level metric definitions
 # (the common pattern in Synapse) can use it immediately.
 
-_resource = Resource(attributes={"service.name": "synapse"})
+_resource = Resource.create(attributes={"service.name": "synapse"})
 _exporter = OTLPMetricExporter()
 _reader = PeriodicExportingMetricReader(_exporter)
 _meter_provider = MeterProvider(resource=_resource, metric_readers=[_reader])
