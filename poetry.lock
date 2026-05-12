@@ -606,7 +606,7 @@ description = "Common protobufs used in Google APIs"
 optional = true
 python-versions = ">=3.7"
 groups = ["main"]
-markers = "extra == \"opentracing-otlp\" or extra == \"opentelemetry-log-handler\" or extra == \"all\""
+markers = "extra == \"opentracing-otlp\" or extra == \"opentelemetry-log-handler\" or extra == \"opentelemetry-metrics\" or extra == \"all\""
 files = [
     {file = "googleapis_common_protos-1.70.0-py3-none-any.whl", hash = "sha256:b8bfcca8c25a2bb253e0e0b0adaf8c00773e5e6af6fd92397576680b807e0fd8"},
     {file = "googleapis_common_protos-1.70.0.tar.gz", hash = "sha256:0e1b44e0ea153e6594f9f394fef15193a68aaaea2d843f83e2742717ca753257"},
@@ -625,7 +625,7 @@ description = "HTTP/2-based RPC framework"
 optional = true
 python-versions = ">=3.9"
 groups = ["main"]
-markers = "extra == \"opentracing-otlp\" or extra == \"opentelemetry-log-handler\" or extra == \"all\""
+markers = "extra == \"opentracing-otlp\" or extra == \"opentelemetry-log-handler\" or extra == \"opentelemetry-metrics\" or extra == \"all\""
 files = [
     {file = "grpcio-1.78.0-cp310-cp310-linux_armv7l.whl", hash = "sha256:7cc47943d524ee0096f973e1081cb8f4f17a4615f2116882a5f1416e4cfe92b5"},
     {file = "grpcio-1.78.0-cp310-cp310-macosx_11_0_universal2.whl", hash = "sha256:c3f293fdc675ccba4db5a561048cca627b5e7bd1c8a6973ffedabe7d116e22e2"},
@@ -990,7 +990,7 @@ files = [
     {file = "importlib_metadata-8.7.1-py3-none-any.whl", hash = "sha256:5a1f80bf1daa489495071efbb095d75a634cf28a8bc299581244063b53176151"},
     {file = "importlib_metadata-8.7.1.tar.gz", hash = "sha256:49fef1ae6440c182052f407c8d34a68f72efc36db9ca90dc0113398f2fdde8bb"},
 ]
-markers = {main = "extra == \"opentracing-otlp\" or extra == \"opentelemetry-log-handler\" or extra == \"all\"", dev = "python_version < \"3.12\" and platform_machine != \"ppc64le\" and platform_machine != \"s390x\""}
+markers = {main = "extra == \"opentracing-otlp\" or extra == \"opentelemetry-log-handler\" or extra == \"opentelemetry-metrics\" or extra == \"all\"", dev = "python_version < \"3.12\" and platform_machine != \"ppc64le\" and platform_machine != \"s390x\""}
 
 [package.dependencies]
 zipp = ">=3.20"
@@ -1931,7 +1931,7 @@ description = "OpenTelemetry Python API"
 optional = true
 python-versions = ">=3.9"
 groups = ["main"]
-markers = "extra == \"opentracing-otlp\" or extra == \"opentelemetry-log-handler\" or extra == \"all\""
+markers = "extra == \"opentracing-otlp\" or extra == \"opentelemetry-log-handler\" or extra == \"opentelemetry-metrics\" or extra == \"all\""
 files = [
     {file = "opentelemetry_api-1.40.0-py3-none-any.whl", hash = "sha256:82dd69331ae74b06f6a874704be0cfaa49a1650e1537d4a813b86ecef7d0ecf9"},
     {file = "opentelemetry_api-1.40.0.tar.gz", hash = "sha256:159be641c0b04d11e9ecd576906462773eb97ae1b657730f0ecf64d32071569f"},
@@ -1948,7 +1948,7 @@ description = "OpenTelemetry Collector Exporters"
 optional = true
 python-versions = ">=3.9"
 groups = ["main"]
-markers = "extra == \"opentracing-otlp\" or extra == \"opentelemetry-log-handler\" or extra == \"all\""
+markers = "extra == \"opentracing-otlp\" or extra == \"opentelemetry-log-handler\" or extra == \"opentelemetry-metrics\" or extra == \"all\""
 files = [
     {file = "opentelemetry_exporter_otlp-1.40.0-py3-none-any.whl", hash = "sha256:48c87e539ec9afb30dc443775a1334cc5487de2f72a770a4c00b1610bf6c697d"},
     {file = "opentelemetry_exporter_otlp-1.40.0.tar.gz", hash = "sha256:7caa0870b95e2fcb59d64e16e2b639ecffb07771b6cd0000b5d12e5e4fef765a"},
@@ -1965,7 +1965,7 @@ description = "OpenTelemetry Protobuf encoding"
 optional = true
 python-versions = ">=3.9"
 groups = ["main"]
-markers = "extra == \"opentracing-otlp\" or extra == \"opentelemetry-log-handler\" or extra == \"all\""
+markers = "extra == \"opentracing-otlp\" or extra == \"opentelemetry-log-handler\" or extra == \"opentelemetry-metrics\" or extra == \"all\""
 files = [
     {file = "opentelemetry_exporter_otlp_proto_common-1.40.0-py3-none-any.whl", hash = "sha256:7081ff453835a82417bf38dccf122c827c3cbc94f2079b03bba02a3165f25149"},
     {file = "opentelemetry_exporter_otlp_proto_common-1.40.0.tar.gz", hash = "sha256:1cbee86a4064790b362a86601ee7934f368b81cd4cc2f2e163902a6e7818a0fa"},
@@ -1981,7 +1981,7 @@ description = "OpenTelemetry Collector Protobuf over gRPC Exporter"
 optional = true
 python-versions = ">=3.9"
 groups = ["main"]
-markers = "extra == \"opentracing-otlp\" or extra == \"opentelemetry-log-handler\" or extra == \"all\""
+markers = "extra == \"opentracing-otlp\" or extra == \"opentelemetry-log-handler\" or extra == \"opentelemetry-metrics\" or extra == \"all\""
 files = [
     {file = "opentelemetry_exporter_otlp_proto_grpc-1.40.0-py3-none-any.whl", hash = "sha256:2aa0ca53483fe0cf6405087a7491472b70335bc5c7944378a0a8e72e86995c52"},
     {file = "opentelemetry_exporter_otlp_proto_grpc-1.40.0.tar.gz", hash = "sha256:bd4015183e40b635b3dab8da528b27161ba83bf4ef545776b196f0fb4ec47740"},
@@ -2010,7 +2010,7 @@ description = "OpenTelemetry Collector Protobuf over HTTP Exporter"
 optional = true
 python-versions = ">=3.9"
 groups = ["main"]
-markers = "extra == \"opentracing-otlp\" or extra == \"opentelemetry-log-handler\" or extra == \"all\""
+markers = "extra == \"opentracing-otlp\" or extra == \"opentelemetry-log-handler\" or extra == \"opentelemetry-metrics\" or extra == \"all\""
 files = [
     {file = "opentelemetry_exporter_otlp_proto_http-1.40.0-py3-none-any.whl", hash = "sha256:a8d1dab28f504c5d96577d6509f80a8150e44e8f45f82cdbe0e34c99ab040069"},
     {file = "opentelemetry_exporter_otlp_proto_http-1.40.0.tar.gz", hash = "sha256:db48f5e0f33217588bbc00274a31517ba830da576e59503507c839b38fa0869c"},
@@ -2053,7 +2053,7 @@ description = "OpenTelemetry Python Proto"
 optional = true
 python-versions = ">=3.9"
 groups = ["main"]
-markers = "extra == \"opentracing-otlp\" or extra == \"opentelemetry-log-handler\" or extra == \"all\""
+markers = "extra == \"opentracing-otlp\" or extra == \"opentelemetry-log-handler\" or extra == \"opentelemetry-metrics\" or extra == \"all\""
 files = [
     {file = "opentelemetry_proto-1.40.0-py3-none-any.whl", hash = "sha256:266c4385d88923a23d63e353e9761af0f47a6ed0d486979777fe4de59dc9b25f"},
     {file = "opentelemetry_proto-1.40.0.tar.gz", hash = "sha256:03f639ca129ba513f5819810f5b1f42bcb371391405d99c168fe6937c62febcd"},
@@ -2069,7 +2069,7 @@ description = "OpenTelemetry Python SDK"
 optional = true
 python-versions = ">=3.9"
 groups = ["main"]
-markers = "extra == \"opentracing-otlp\" or extra == \"opentelemetry-log-handler\" or extra == \"all\""
+markers = "extra == \"opentracing-otlp\" or extra == \"opentelemetry-log-handler\" or extra == \"opentelemetry-metrics\" or extra == \"all\""
 files = [
     {file = "opentelemetry_sdk-1.40.0-py3-none-any.whl", hash = "sha256:787d2154a71f4b3d81f20524a8ce061b7db667d24e46753f32a7bc48f1c1f3f1"},
     {file = "opentelemetry_sdk-1.40.0.tar.gz", hash = "sha256:18e9f5ec20d859d268c7cb3c5198c8d105d073714db3de50b593b8c1345a48f2"},
@@ -2087,7 +2087,7 @@ description = "OpenTelemetry Semantic Conventions"
 optional = true
 python-versions = ">=3.9"
 groups = ["main"]
-markers = "extra == \"opentracing-otlp\" or extra == \"opentelemetry-log-handler\" or extra == \"all\""
+markers = "extra == \"opentracing-otlp\" or extra == \"opentelemetry-log-handler\" or extra == \"opentelemetry-metrics\" or extra == \"all\""
 files = [
     {file = "opentelemetry_semantic_conventions-0.61b0-py3-none-any.whl", hash = "sha256:fa530a96be229795f8cef353739b618148b0fe2b4b3f005e60e262926c4d38e2"},
     {file = "opentelemetry_semantic_conventions-0.61b0.tar.gz", hash = "sha256:072f65473c5d7c6dc0355b27d6c9d1a679d63b6d4b4b16a9773062cb7e31192a"},
@@ -2302,7 +2302,7 @@ description = ""
 optional = true
 python-versions = ">=3.8"
 groups = ["main"]
-markers = "extra == \"opentracing-otlp\" or extra == \"opentelemetry-log-handler\" or extra == \"all\""
+markers = "extra == \"opentracing-otlp\" or extra == \"opentelemetry-log-handler\" or extra == \"opentelemetry-metrics\" or extra == \"all\""
 files = [
     {file = "protobuf-5.29.4-cp310-abi3-win32.whl", hash = "sha256:13eb236f8eb9ec34e63fc8b1d6efd2777d062fa6aaa68268fb67cf77f6839ad7"},
     {file = "protobuf-5.29.4-cp310-abi3-win_amd64.whl", hash = "sha256:bcefcdf3976233f8a502d265eb65ea740c989bacc6c30a58290ed0e519eb4b8d"},
@@ -3939,7 +3939,7 @@ files = [
     {file = "zipp-3.23.0-py3-none-any.whl", hash = "sha256:071652d6115ed432f5ce1d34c336c0adfd6a884660d1e9712a256d3d3bd4b14e"},
     {file = "zipp-3.23.0.tar.gz", hash = "sha256:a07157588a12518c9d4034df3fbbee09c814741a33ff63c05fa29d26a2404166"},
 ]
-markers = {main = "extra == \"opentracing-otlp\" or extra == \"opentelemetry-log-handler\" or extra == \"all\"", dev = "python_version < \"3.12\" and platform_machine != \"ppc64le\" and platform_machine != \"s390x\""}
+markers = {main = "extra == \"opentracing-otlp\" or extra == \"opentelemetry-log-handler\" or extra == \"opentelemetry-metrics\" or extra == \"all\"", dev = "python_version < \"3.12\" and platform_machine != \"ppc64le\" and platform_machine != \"s390x\""}
 
 [package.extras]
 check = ["pytest-checkdocs (>=2.4)", "pytest-ruff (>=0.2.1) ; sys_platform != \"cygwin\""]
@@ -4038,6 +4038,7 @@ jwt = ["authlib"]
 matrix-synapse-ldap3 = ["matrix-synapse-ldap3"]
 oidc = ["authlib"]
 opentelemetry-log-handler = ["opentelemetry-api", "opentelemetry-exporter-otlp", "opentelemetry-sdk"]
+opentelemetry-metrics = ["opentelemetry-api", "opentelemetry-exporter-otlp", "opentelemetry-sdk"]
 opentracing-jaeger = ["jaeger-client", "opentracing", "thrift", "tornado"]
 opentracing-otlp = ["opentelemetry-api", "opentelemetry-exporter-otlp", "opentelemetry-opentracing-shim", "opentelemetry-sdk", "opentracing"]
 postgres = ["psycopg2", "psycopg2cffi", "psycopg2cffi-compat"]
@@ -4050,4 +4051,4 @@ url-preview = ["lxml"]
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.10.0,<4.0.0"
-content-hash = "6b14e814692dc21ef76e136cceb6b778a18ba9e54c2766a38da71c1cbb87a779"
+content-hash = "90446b4a9b78e5f3166173ef19089cadc70f2b92dcb49e2c0dcecce84976f280"

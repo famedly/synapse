@@ -26,7 +26,6 @@ from types import TracebackType
 from typing import TYPE_CHECKING, Hashable, Iterable
 
 import attr
-from prometheus_client import Counter
 
 from twisted.internet import defer
 
@@ -44,6 +43,7 @@ from synapse.logging import issue9533_logger
 from synapse.logging.context import PreserveLoggingContext
 from synapse.logging.opentracing import SynapseTags, set_tag
 from synapse.metrics import SERVER_NAME_LABEL, sent_transactions_counter
+from synapse.metrics.instruments import Counter
 from synapse.types import JsonDict, ReadReceipt
 from synapse.util.retryutils import NotRetryingDestination, get_retry_limiter
 from synapse.visibility import filter_events_for_server

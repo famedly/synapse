@@ -518,7 +518,7 @@ def init_tracer_otlp(hs: "HomeServer") -> None:
     from opentelemetry.shim.opentracing_shim import create_tracer
 
     tracer_provider = TracerProvider(
-        resource=Resource(attributes={"service.name": "synapse"})
+        resource=Resource.create(attributes={"service.name": "synapse"})
     )
     tracer_provider.add_span_processor(BatchSpanProcessor(OTLPSpanExporter()))
     trace.set_tracer_provider(tracer_provider)

@@ -39,7 +39,6 @@ from typing import (
 import attr
 import bcrypt
 import unpaddedbase64
-from prometheus_client import Counter
 
 from twisted.internet.defer import CancelledError
 from twisted.web.server import Request
@@ -66,6 +65,7 @@ from synapse.http.site import SynapseRequest
 from synapse.logging.context import defer_to_thread
 from synapse.metrics import SERVER_NAME_LABEL
 from synapse.metrics.background_process_metrics import run_as_background_process
+from synapse.metrics.instruments import Counter
 from synapse.storage.databases.main.registration import (
     LoginTokenExpired,
     LoginTokenLookupResult,

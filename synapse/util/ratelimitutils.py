@@ -34,8 +34,6 @@ from typing import (
 )
 from weakref import WeakSet
 
-from prometheus_client.core import Counter
-
 from twisted.internet import defer
 
 from synapse.api.errors import LimitExceededError
@@ -47,6 +45,7 @@ from synapse.logging.context import (
 )
 from synapse.logging.opentracing import start_active_span
 from synapse.metrics import SERVER_NAME_LABEL, Histogram, LaterGauge
+from synapse.metrics.instruments import Counter
 from synapse.util.clock import Clock
 from synapse.util.duration import Duration
 

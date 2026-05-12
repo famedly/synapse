@@ -18,7 +18,6 @@ from itertools import chain
 from typing import TYPE_CHECKING, AbstractSet, Mapping
 
 import attr
-from prometheus_client import Histogram
 from typing_extensions import assert_never
 
 from synapse.api.constants import Direction, EventTypes, Membership
@@ -40,6 +39,7 @@ from synapse.logging.opentracing import (
     trace,
 )
 from synapse.metrics import SERVER_NAME_LABEL
+from synapse.metrics.instruments import Histogram
 from synapse.storage.databases.main.roommember import extract_heroes_from_room_summary
 from synapse.storage.databases.main.state_deltas import StateDelta
 from synapse.storage.databases.main.stream import PaginateFunction

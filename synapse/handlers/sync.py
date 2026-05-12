@@ -29,7 +29,6 @@ from typing import (
 )
 
 import attr
-from prometheus_client import Counter
 
 from synapse.api.constants import (
     AccountDataTypes,
@@ -55,6 +54,7 @@ from synapse.logging.opentracing import (
     trace,
 )
 from synapse.metrics import SERVER_NAME_LABEL
+from synapse.metrics.instruments import Counter
 from synapse.storage.databases.main.event_push_actions import RoomNotifCounts
 from synapse.storage.databases.main.roommember import extract_heroes_from_room_summary
 from synapse.storage.databases.main.stream import PaginateFunction

@@ -27,17 +27,15 @@ import time
 from typing import Iterable
 
 from prometheus_client.core import (
-    REGISTRY,
     CounterMetricFamily,
-    Gauge,
     GaugeMetricFamily,
-    Histogram,
     Metric,
 )
 
 from twisted.internet import task
 
 from synapse.metrics._types import Collector
+from synapse.metrics.instruments import REGISTRY, Gauge, Histogram
 
 """Prometheus metrics for garbage collection"""
 

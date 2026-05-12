@@ -35,7 +35,6 @@ from typing import (
 )
 
 import attr
-from prometheus_client import Counter
 
 import synapse.metrics
 from synapse.api.constants import (
@@ -58,6 +57,7 @@ from synapse.events.snapshot import EventPersistencePair
 from synapse.events.utils import parse_stripped_state_event
 from synapse.logging.opentracing import trace
 from synapse.metrics import SERVER_NAME_LABEL
+from synapse.metrics.instruments import Counter
 from synapse.storage._base import db_to_json, make_in_list_sql_clause
 from synapse.storage.database import (
     DatabasePool,

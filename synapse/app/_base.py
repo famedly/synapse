@@ -337,9 +337,21 @@ def listen_metrics(
     Twisted reactor thread between bytecode boundaries and the metrics thread gets
     scheduled with roughly equal priority to the Twisted reactor thread.
 
+    When ``SYNAPSE_METRICS_BACKEND=otlp`` the Prometheus scrape endpoint is not
+    needed – metrics are pushed via OTLP instead – so this is a no-op.
+
     Returns:
         List of WSGIServer with the thread they are running on.
     """
+    from synapse.metrics.instruments import METRICS_BACKEND
+
+    if METRICS_BACKEND == "otlp":
+        logger.info(
+            "Not starting Prometheus metrics listener because "
+            "SYNAPSE_METRICS_BACKEND=otlp; metrics are exported via OTLP"
+        )
+        return []
+
     from prometheus_client import start_http_server as start_http_server_prometheus
 
     from synapse.metrics import RegistryProxy
@@ -763,6 +775,16 @@ async def start(hs: "HomeServer", *, freeze: bool = True) -> None:
 
     setup_sentry(hs)
     setup_sdnotify(hs)
+
+    # Flush pending OTLP metrics on shutdown.
+    from synapse.metrics.instruments import METRICS_BACKEND
+
+    if METRICS_BACKEND == "otlp":
+        from synapse.metrics._otel import shutdown as shutdown_otel_metrics
+
+        hs.get_clock().add_system_event_trigger(
+            "during", "shutdown", shutdown_otel_metrics
+        )
 
     # Register background tasks required by this server. This must be done
     # somewhat manually due to the background tasks not being registered

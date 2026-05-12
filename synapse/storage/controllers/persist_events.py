@@ -39,7 +39,6 @@ from typing import (
 )
 
 import attr
-from prometheus_client import Counter, Histogram
 
 from twisted.internet import defer
 
@@ -58,6 +57,7 @@ from synapse.logging.opentracing import (
     trace,
 )
 from synapse.metrics import SERVER_NAME_LABEL
+from synapse.metrics.instruments import Counter, Histogram
 from synapse.storage.controllers.state import StateStorageController
 from synapse.storage.databases import Databases
 from synapse.storage.databases.main.events import DeltaState

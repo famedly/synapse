@@ -33,7 +33,6 @@ from typing import (
 )
 
 import attr
-from prometheus_client import Counter
 
 from twisted.internet import defer
 from twisted.internet.defer import Deferred
@@ -47,6 +46,7 @@ from synapse.logging import issue9533_logger
 from synapse.logging.context import PreserveLoggingContext
 from synapse.logging.opentracing import log_kv, start_active_span
 from synapse.metrics import SERVER_NAME_LABEL, LaterGauge
+from synapse.metrics.instruments import Counter
 from synapse.streams.config import PaginationConfig
 from synapse.types import (
     ISynapseReactor,

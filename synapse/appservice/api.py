@@ -29,7 +29,6 @@ from typing import (
     TypeVar,
 )
 
-from prometheus_client import Counter
 from typing_extensions import ParamSpec, TypeGuard
 
 from synapse.api.constants import ThirdPartyEntityKind
@@ -44,6 +43,7 @@ from synapse.events.utils import FilteredEvent, SerializeEventConfig
 from synapse.http.client import SimpleHttpClient, is_unknown_endpoint
 from synapse.logging import opentracing
 from synapse.metrics import SERVER_NAME_LABEL
+from synapse.metrics.instruments import Counter
 from synapse.types import DeviceListUpdates, JsonDict, JsonMapping, ThirdPartyInstanceID
 from synapse.util.caches.response_cache import ResponseCache
 from synapse.util.duration import Duration

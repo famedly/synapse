@@ -29,11 +29,10 @@ from typing import (
     TypeVar,
 )
 
-from prometheus_client import Counter
-
 from twisted.internet.protocol import ReconnectingClientFactory
 
 from synapse.metrics import SERVER_NAME_LABEL, LaterGauge
+from synapse.metrics.instruments import Counter
 from synapse.replication.tcp.commands import (
     CancelTaskCommand,
     ClearUserSyncsCommand,

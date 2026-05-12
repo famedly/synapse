@@ -25,8 +25,6 @@ import urllib.parse
 from inspect import signature
 from typing import TYPE_CHECKING, Any, Awaitable, Callable, ClassVar
 
-from prometheus_client import Counter, Gauge
-
 from twisted.internet.error import ConnectError, DNSLookupError
 from twisted.web.server import Request
 
@@ -39,6 +37,7 @@ from synapse.http.site import SynapseRequest
 from synapse.logging import opentracing
 from synapse.logging.opentracing import trace_with_opname
 from synapse.metrics import SERVER_NAME_LABEL
+from synapse.metrics.instruments import Counter, Gauge
 from synapse.types import JsonDict
 from synapse.util.caches.response_cache import ResponseCache
 from synapse.util.cancellation import is_function_cancellable

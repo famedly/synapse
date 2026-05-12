@@ -24,14 +24,15 @@ import time
 from selectors import SelectSelector, _PollLikeSelector  # type: ignore[attr-defined]
 from typing import Any, Callable, Iterable
 
-from prometheus_client import Histogram, Metric
-from prometheus_client.core import REGISTRY, GaugeMetricFamily
+from prometheus_client import Metric
+from prometheus_client.core import GaugeMetricFamily
 
 from twisted.internet import reactor, selectreactor
 from twisted.internet.asyncioreactor import AsyncioSelectorReactor
 
 from synapse.app.complement_fork_proxied_reactor import ProxiedReactor
 from synapse.metrics._types import Collector
+from synapse.metrics.instruments import REGISTRY, Histogram
 
 try:
     from selectors import KqueueSelector  # type: ignore[attr-defined]

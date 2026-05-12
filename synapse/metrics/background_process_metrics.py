@@ -37,7 +37,6 @@ from typing import (
 )
 
 from prometheus_client import Metric
-from prometheus_client.core import REGISTRY, Counter, Gauge
 from typing_extensions import Concatenate, ParamSpec
 
 from twisted.internet import defer
@@ -55,6 +54,7 @@ from synapse.logging.opentracing import (
 )
 from synapse.metrics import SERVER_NAME_LABEL
 from synapse.metrics._types import Collector
+from synapse.metrics.instruments import REGISTRY, Counter, Gauge
 
 if TYPE_CHECKING:
     import resource

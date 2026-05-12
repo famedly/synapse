@@ -42,7 +42,6 @@ from typing import (
 )
 
 import attr
-from prometheus_client import Counter, Histogram
 from typing_extensions import Concatenate, ParamSpec
 
 from twisted.enterprise import adbapi
@@ -57,6 +56,7 @@ from synapse.logging.context import (
     make_deferred_yieldable,
 )
 from synapse.metrics import SERVER_NAME_LABEL, register_threadpool
+from synapse.metrics.instruments import Counter, Histogram
 from synapse.storage.background_updates import BackgroundUpdater
 from synapse.storage.engines import BaseDatabaseEngine, PostgresEngine, Sqlite3Engine
 from synapse.storage.types import Connection, Cursor, SQLQueryParameters

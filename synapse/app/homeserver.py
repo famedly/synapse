@@ -257,10 +257,18 @@ class SynapseHomeServer(HomeServer):
             resources[SERVER_KEY_PREFIX] = KeyResource(self)
 
         if name == "metrics" and self.config.metrics.enable_metrics:
-            metrics_resource: Resource = MetricsResource(RegistryProxy)
-            if compress:
-                metrics_resource = gz_wrap(metrics_resource)
-            resources[METRICS_PREFIX] = metrics_resource
+            from synapse.metrics.instruments import METRICS_BACKEND
+
+            if METRICS_BACKEND == "otlp":
+                logger.info(
+                    "Not exposing Prometheus /metrics resource because "
+                    "SYNAPSE_METRICS_BACKEND=otlp; metrics are exported via OTLP"
+                )
+            else:
+                metrics_resource: Resource = MetricsResource(RegistryProxy)
+                if compress:
+                    metrics_resource = gz_wrap(metrics_resource)
+                resources[METRICS_PREFIX] = metrics_resource
 
         if name == "replication":
             resources[REPLICATION_PREFIX] = ReplicationRestResource(self)

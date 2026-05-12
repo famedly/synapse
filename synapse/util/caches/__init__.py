@@ -27,11 +27,10 @@ from sys import intern
 from typing import Any, Callable, Sized, TypeVar
 
 import attr
-from prometheus_client import REGISTRY
-from prometheus_client.core import Gauge
 
 from synapse.config.cache import add_resizable_cache
 from synapse.metrics import SERVER_NAME_LABEL
+from synapse.metrics.instruments import REGISTRY, Gauge
 from synapse.util.metrics import DynamicCollectorRegistry
 
 logger = logging.getLogger(__name__)

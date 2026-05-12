@@ -36,7 +36,6 @@ import attr
 import treq
 from canonicaljson import encode_canonical_json
 from netaddr import AddrFormatError, IPAddress, IPSet
-from prometheus_client import Counter
 from zope.interface import implementer
 
 from OpenSSL import SSL
@@ -85,6 +84,7 @@ from synapse.logging.context import (
 )
 from synapse.logging.opentracing import set_tag, start_active_span, tags
 from synapse.metrics import SERVER_NAME_LABEL
+from synapse.metrics.instruments import Counter
 from synapse.types import ISynapseReactor, StrSequence
 from synapse.util.async_helpers import timeout_deferred
 from synapse.util.clock import Clock

@@ -43,7 +43,6 @@ from typing import (
 import attr
 import treq
 from canonicaljson import encode_canonical_json
-from prometheus_client import Counter
 from signedjson.sign import sign_json
 
 from twisted.internet import defer
@@ -84,6 +83,7 @@ from synapse.logging import opentracing
 from synapse.logging.context import make_deferred_yieldable, run_in_background
 from synapse.logging.opentracing import set_tag, start_active_span, tags
 from synapse.metrics import SERVER_NAME_LABEL
+from synapse.metrics.instruments import Counter
 from synapse.types import JsonDict
 from synapse.util.async_helpers import AwakenableSleeper, Linearizer, timeout_deferred
 from synapse.util.clock import Clock

@@ -36,7 +36,6 @@ from typing import (
 )
 
 import attr
-from prometheus_client import Gauge
 
 from twisted.internet import defer
 
@@ -67,6 +66,7 @@ from synapse.metrics import SERVER_NAME_LABEL
 from synapse.metrics.background_process_metrics import (
     wrap_as_background_process,
 )
+from synapse.metrics.instruments import Gauge
 from synapse.replication.tcp.streams import BackfillStream, UnPartialStatedEventStream
 from synapse.replication.tcp.streams.events import EventsStream
 from synapse.replication.tcp.streams.partial_state import UnPartialStatedEventStreamRow

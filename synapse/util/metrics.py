@@ -37,7 +37,7 @@ from typing import (
     TypeVar,
 )
 
-from prometheus_client import CollectorRegistry, Counter, Metric
+from prometheus_client import Metric
 from typing_extensions import Concatenate, ParamSpec
 
 from synapse.logging.context import (
@@ -46,6 +46,7 @@ from synapse.logging.context import (
     current_context,
 )
 from synapse.metrics import SERVER_NAME_LABEL, InFlightGauge
+from synapse.metrics.instruments import CollectorRegistry, Counter
 from synapse.util.clock import Clock
 
 logger = logging.getLogger(__name__)

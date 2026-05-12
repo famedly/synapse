@@ -112,7 +112,7 @@ try:
     class RealOtlpHandler(LoggingHandler):
         def __init__(self, level: int = logging.NOTSET) -> None:
             self.logger_provider = LoggerProvider(
-                resource=Resource(attributes={"service.name": "synapse"})
+                resource=Resource.create(attributes={"service.name": "synapse"})
             )
             self.logger_provider.add_log_record_processor(
                 BatchLogRecordProcessor(OTLPLogExporter())

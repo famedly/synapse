@@ -24,11 +24,10 @@ import resource
 import sys
 from typing import TYPE_CHECKING, Mapping, Sized
 
-from prometheus_client import Gauge
-
 from twisted.internet import defer
 
 from synapse.metrics import SERVER_NAME_LABEL
+from synapse.metrics.instruments import Gauge
 from synapse.types import JsonDict
 from synapse.util.duration import Duration
 
