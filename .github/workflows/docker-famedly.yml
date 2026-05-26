@@ -25,7 +25,7 @@ jobs:
     # automatically passed into the workflow. This workflow is pinned to this branch so
     # the support for including a namespace for the docker image name does not break
     # digest merging for multiple architectures.
-    uses: famedly/github-workflows/.github/workflows/docker.yml@jason-docker-namespace
+    uses: famedly/github-workflows/.github/workflows/docker.yml@57b383862ba81dfa265bb33d492e2bbcbc96891d
     with:
       push: ${{ github.event_name != 'pull_request' }} # Always build, don't publish on pull requests
       registry: ghcr.io
@@ -85,7 +85,7 @@ jobs:
     strategy:
       matrix:
         job: ${{ fromJson(needs.calculate_mod_build.outputs.build_matrix) }}
-    uses: famedly/github-workflows/.github/workflows/docker.yml@jason-docker-namespace
+    uses: famedly/github-workflows/.github/workflows/docker.yml@57b383862ba81dfa265bb33d492e2bbcbc96891d
     with:
       push: ${{ github.event_name != 'pull_request' }} # Always build, don't publish on pull requests
       registry_user: ${{ vars.REGISTRY_USER }}
