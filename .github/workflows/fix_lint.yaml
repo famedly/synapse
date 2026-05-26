@@ -18,17 +18,17 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@900f2210b1d28bbbd0bd22d17926b9e224e8f231 # v6.0.2
 
       - name: Install Rust
-        uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # master
+        uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9 # master
         with:
           toolchain: ${{ env.RUST_VERSION }}
           components: clippy, rustfmt
       - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
 
       - name: Setup Poetry
-        uses: matrix-org/setup-python-poetry@5bbf6603c5c930615ec8a29f1b5d7d258d905aa4 # v2.0.0
+        uses: matrix-org/setup-python-poetry@1297526d8f92f6852ff499827bc63cbcf265caba # v2.0.0
         with:
           install-project: "false"
           poetry-version: "2.2.1"

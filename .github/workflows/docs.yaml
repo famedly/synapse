@@ -76,7 +76,7 @@ jobs:
         run: echo 'window.SYNAPSE_VERSION = "${{ needs.pre.outputs.branch-version }}";' > ./docs/website_files/version.js
 
       - name: Setup python
-        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        uses: actions/setup-python@c8813ba1bc76ebf779b911ad8ffccbf2e449cb48 # v6.2.0
         with:
           python-version: "3.x"
 
