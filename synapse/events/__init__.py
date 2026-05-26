@@ -44,8 +44,12 @@ from synapse.api.constants import (
     StickyEvent,
 )
 from synapse.api.room_versions import EventFormatVersions, RoomVersion, RoomVersions
-from synapse.synapse_rust.events import EventInternalMetadata
-from synapse.types import JsonDict, StateKey, StrCollection
+from synapse.synapse_rust.events import EventInternalMetadata, Signatures, Unsigned
+from synapse.types import (
+    JsonDict,
+    StateKey,
+    StrCollection,
+)
 from synapse.util.caches import intern_dict
 from synapse.util.duration import Duration
 from synapse.util.frozenutils import freeze, unfreeze
@@ -63,6 +67,10 @@ dict to frozen_dicts is expensive.
 NOTE: This is overridden by the configuration by the Synapse worker apps, but
 for the sake of tests, it is set here because it cannot be configured on the
 homeserver object itself.
+
+FIXME: Because of how this option works (changing the underlying types), it causes
+subtle downstream bugs that makes type comparisons brittle, tracked by
+https://github.com/element-hq/synapse/issues/18117
 """
 
 T = TypeVar("T")
@@ -199,8 +207,8 @@ class EventBase(metaclass=abc.ABCMeta):
         assert room_version.event_format == self.format_version
 
         self.room_version = room_version
-        self.signatures = signatures
-        self.unsigned = unsigned
+        self.signatures = Signatures(signatures)
+        self.unsigned = Unsigned(unsigned)
         self.rejected_reason = rejected_reason
 
         self._dict = event_dict
@@ -250,8 +258,26 @@ class EventBase(metaclass=abc.ABCMeta):
         return self._dict.get("state_key")
 
     def get_dict(self) -> JsonDict:
+        """Convert the event to a dictionary suitable for serialisation."""
         d = dict(self._dict)
-        d.update({"signatures": self.signatures, "unsigned": dict(self.unsigned)})
+        d.update(
+            {
+                "signatures": self.signatures.as_dict(),
+                "unsigned": self.unsigned.for_event(),
+            }
+        )
+
+        return d
+
+    def get_dict_for_persistence(self) -> JsonDict:
+        """Convert the event to a dictionary suitable for persistence."""
+        d = dict(self._dict)
+        d.update(
+            {
+                "signatures": self.signatures.as_dict(),
+                "unsigned": self.unsigned.for_persistence(),
+            }
+        )
 
         return d
 
@@ -397,7 +423,7 @@ class FrozenEvent(EventBase):
             for name, sigs in event_dict.pop("signatures", {}).items()
         }
 
-        unsigned = dict(event_dict.pop("unsigned", {}))
+        unsigned = event_dict.pop("unsigned", {})
 
         # We intern these strings because they turn up a lot (especially when
         # caching).
@@ -451,7 +477,7 @@ class FrozenEventV2(EventBase):
 
         assert "event_id" not in event_dict
 
-        unsigned = dict(event_dict.pop("unsigned", {}))
+        unsigned = event_dict.pop("unsigned", {})
 
         # We intern these strings because they turn up a lot (especially when
         # caching).

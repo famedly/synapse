@@ -316,7 +316,7 @@ class ProfileTestCase(unittest.HomeserverTestCase):
             )
 
     @override_config({"enable_set_displayname": False})
-    def test_set_displayname_if_disabled(self) -> None:
+    def test_set_my_name_if_disabled(self) -> None:
         # Setting displayname for the first time is allowed
         self.get_success(self.store.set_profile_displayname(self.frank, "Frank"))
 
@@ -436,7 +436,7 @@ class ProfileTestCase(unittest.HomeserverTestCase):
         )
 
     @override_config({"enable_set_avatar_url": False})
-    def test_set_avatar_url_if_disabled(self) -> None:
+    def test_set_my_avatar_if_disabled(self) -> None:
         # Setting displayname for the first time is allowed
         self.get_success(
             self.store.set_profile_avatar_url(self.frank, "http://my.server/me.png")
