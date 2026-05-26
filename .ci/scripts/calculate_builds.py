@@ -79,11 +79,13 @@ all_mod_pack_versions = {
     },
     "mod026": {"sic-version": "0.2.2", "sta-version": "0.13.1", "fcs-version": "0.0.2"},
     "mod027": {"sic-version": "0.5.0", "sta-version": "0.13.1", "fcs-version": "0.0.2"},
+    "mod028": {"sic-version": "0.2.2", "sta-version": "0.13.1", "fcs-version": "0.0.4"},
+    "mod029": {"sic-version": "0.5.0", "sta-version": "0.13.1", "fcs-version": "0.0.4"},
 }
 
 # Adjust this section to decide what gets built and layered on top
 # THIS IS THE SECTION TO EDIT, after you have added the new versions above
-current_mod_packs_to_build = ["mod026", "mod027"]
+current_mod_packs_to_build = ["mod028", "mod029"]
 
 generated_jobs: list[dict[str, Any]] = []
 for mod_pack_job in current_mod_packs_to_build:
