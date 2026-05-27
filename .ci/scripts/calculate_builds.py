@@ -79,6 +79,7 @@ all_mod_pack_versions = {
     },
     "mod026": {"sic-version": "0.2.2", "sta-version": "0.13.1", "fcs-version": "0.0.2"},
     "mod027": {"sic-version": "0.5.0", "sta-version": "0.13.1", "fcs-version": "0.0.2"},
+    # there is no modpack with fcs 0.0.3 as 2 fcs releases have been done since the last synapse release
     "mod028": {"sic-version": "0.2.2", "sta-version": "0.13.1", "fcs-version": "0.0.4"},
     "mod029": {"sic-version": "0.5.0", "sta-version": "0.13.1", "fcs-version": "0.0.4"},
 }
