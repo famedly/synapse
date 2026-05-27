@@ -256,7 +256,7 @@ jobs:
       - run: poetry run coverage combine
       - run: poetry run coverage xml
       - name: Codecov - Upload coverage
-        uses: codecov/codecov-action@v5
+        uses: codecov/codecov-action@v6
         with:
           use_oidc: true
 
