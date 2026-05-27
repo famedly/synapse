@@ -502,13 +502,17 @@ class DeactivateTestCase(unittest.HomeserverTestCase):
 
     def test_deactivate_erase_account(self) -> None:
         """
-        Test that deactivating the user with the 'erase' option will remove existing
-        profile data.
+        Test that a user account can be signaled for erasure on the Matrix spec endpoint
+        for client access, `/account/deactivate` and that profile data is erased as part
+        of the process
         """
         mxid = self.register_user("kermit", "test")
         user_id = UserID.from_string(mxid)
         tok = self.login("kermit", "test")
+
         profile_handler = self.hs.get_profile_handler()
+
+        # Set some profile data that can be checked for after the user is erased
         self.get_success(
             profile_handler.set_displayname(
                 user_id, create_requester(user_id), "Kermit the Frog"
@@ -562,7 +566,9 @@ class DeactivateTestCase(unittest.HomeserverTestCase):
         mxid = self.register_user("kermit", "test")
         user_id = UserID.from_string(mxid)
         tok = self.login("kermit", "test")
+
         profile_handler = self.hs.get_profile_handler()
+
         # Can not use the profile handler to set a display name when it is disabled. Use
         # the database directly
         store = self.hs.get_datastores().main
@@ -810,6 +816,15 @@ class DeactivateTestCase(unittest.HomeserverTestCase):
         self.assertEqual(len(res2), 4)
 
     def deactivate(self, user_id: str, tok: str, erase: bool = False) -> None:
+        """
+        Helper to deactivate a user using the /account/deactivate endpoint, optionally
+        with erasure
+
+        Args:
+            user_id: the string formatted mxid(not a UserID)
+            tok: the user's access token
+            erase: bool of if this should be a full erasure request
+        """
         request_data = {
             "auth": {
                 "type": "m.login.password",
