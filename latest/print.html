@@ -38,7 +38,7 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-5ba710a8.js";
+            window.path_to_searchindex_js = "searchindex-7da38afe.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="toc-e4894a5b.js"></script>
@@ -4366,7 +4366,11 @@ shown.</p>
 </code></pre>
 <hr>
 <h3 id="use_frozen_dicts"><a class="header" href="#use_frozen_dicts"><code>use_frozen_dicts</code></a></h3>
-<p><em>(boolean)</em> Determines whether we should freeze the internal dict object in <code>FrozenEvent</code>. Freezing prevents bugs where we accidentally share e.g. signature dicts. However, freezing a dict is expensive. Defaults to <code>false</code>.</p>
+<p><em>(boolean)</em> Determines whether we should freeze the internal dict object in <code>FrozenEvent</code>. Freezing prevents bugs where we accidentally share e.g. signature dicts. However, freezing a dict is expensive.</p>
+<blockquote>
+<p>⚠️ <strong>Warning</strong> – This option is known to introduce a new class of <a href="https://github.com/element-hq/synapse/issues/18117">comparison bugs</a> in Synapse.</p>
+</blockquote>
+<p>Defaults to <code>false</code>.</p>
 <p>Example configuration:</p>
 <pre><code class="language-yaml">use_frozen_dicts: true
 </code></pre>
@@ -14567,6 +14571,9 @@ end of the list.</p>
 If the room does not define a type, the value will be <code>null</code>.</li>
 <li><code>forgotten</code> - Whether all local users have
 <a href="https://spec.matrix.org/latest/client-server-api/#leaving-rooms">forgotten</a> the room.</li>
+<li><code>tombstoned</code> - Whether the room has been tombstoned (permanently closed).</li>
+<li><code>replacement_room</code> - The room ID of the new room that users should join instead, if this room was tombstoned. Will be
+<code>null</code> if the room has not been tombstoned, or if it was tombstoned without designating a successor room.</li>
 </ul>
 <p>The API is:</p>
 <pre><code>GET /_synapse/admin/v1/rooms/&lt;room_id&gt;
@@ -14591,7 +14598,9 @@ If the room does not define a type, the value will be <code>null</code>.</li>
   "history_visibility": "shared",
   "state_events": 93534,
   "room_type": "m.space",
-  "forgotten": false
+  "forgotten": false,
+  "tombstoned": false,
+  "replacement_room": null
 }
 </code></pre>
 <p><em>Changed in Synapse 1.66:</em> Added the <code>forgotten</code> key to the response body.</p>
