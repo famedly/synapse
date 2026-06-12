@@ -2,6 +2,10 @@
 
 No significant changes since 1.154.0rc1.
 
+## Famedly additions for v1.154.0_1
+
+- Disabled in-repo dependabot pull requests, as this fork relies on upstream to handle dependency changes (Jason Little)
+
 # Synapse 1.154.0rc1 (2026-05-27)
 
 ## Features
