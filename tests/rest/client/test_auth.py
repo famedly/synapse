@@ -36,9 +36,7 @@ from synapse.rest.client import (
     devices,
     login,
     logout,
-    read_marker,
     register,
-    room,
 )
 from synapse.rest.synapse.client import build_synapse_client_resource_tree
 from synapse.server import HomeServer
@@ -777,9 +775,7 @@ class RefreshAuthTests(unittest.HomeserverTestCase):
         devices.register_servlets,
         login.register_servlets,
         logout.register_servlets,
-        read_marker.register_servlets,
         register.register_servlets,
-        room.register_servlets,
         synapse.rest.admin.register_servlets_for_client_rest_resource,
     ]
     hijack_auth = False
@@ -1548,14 +1544,16 @@ class RefreshAuthTests(unittest.HomeserverTestCase):
 
     def test_token_invalid_after_refresh_token_issued_and_device_removed(self) -> None:
         """
-        Test that sending a read marker (dummy action) fails after the device (which had a refresh token) is removed by another device.
-        The removal of a refresh token cascade deletes the associated access token in the db, which can make cache invalidation fail, if not handled properly.
-        This test will catch such behavior if it ever happens again.
+        Test that an access token is invalidated after the device (which had a
+        refresh token) is removed by another device.
+        The removal of a refresh token cascade deletes the associated access
+        token in the db, which can make cache invalidation fail, if not handled
+        properly. This test will catch such behavior if it ever happens again.
         1. User logs in with device1
         2. User logs in with device2 and requests a refresh token
-        3. Device2 sends a read marker (should work)
+        3. Device2 calls /whoami (should work)
         4. Device1 removes device2
-        5. Device2 tries to send a read marker (should fail)
+        5. Device2 calls /whoami (should fail)
         """
         # Login with device1
         device1_tok = self.login("test", self.user_pass, device_id="device1")
@@ -1563,7 +1561,7 @@ class RefreshAuthTests(unittest.HomeserverTestCase):
         # Login with device2 and request a refresh token
         login_response = self.make_request(
             "POST",
-            "/_matrix/client/v3/login",
+            "/_matrix/client/r0/login",
             {
                 "type": "m.login.password",
                 "user": "test",
@@ -1577,19 +1575,10 @@ class RefreshAuthTests(unittest.HomeserverTestCase):
         device2_id = login_response.json_body["device_id"]
         self.assertEqual(device2_id, "device2")
 
-        # Create a room and send a message
-        room_id = self.helper.create_room_as(self.user, tok=device1_tok)
-        event_id = self.helper.send(
-            room_id=room_id, body="test message", tok=device1_tok
-        )["event_id"]
-
-        # Device2 sends a read marker (should work)
+        # Device2 calls /whoami (should work)
         channel = self.make_request(
-            "POST",
-            f"/rooms/{room_id}/read_markers",
-            content={
-                "m.fully_read": event_id,
-            },
+            "GET",
+            "/_matrix/client/v3/account/whoami",
             access_token=device2_tok,
         )
         self.assertEqual(channel.code, HTTPStatus.OK, channel.result)
@@ -1622,17 +1611,14 @@ class RefreshAuthTests(unittest.HomeserverTestCase):
         )
         self.assertEqual(delete_channel.code, HTTPStatus.OK, delete_channel.result)
 
-        # Device2 tries to send a read marker (should fail)
+        # Device2 calls /whoami (should fail)
         channel = self.make_request(
-            "POST",
-            f"/rooms/{room_id}/read_markers",
-            content={
-                "m.fully_read": event_id,
-            },
+            "GET",
+            "/_matrix/client/v3/account/whoami",
             access_token=device2_tok,
         )
         self.assertEqual(channel.code, HTTPStatus.UNAUTHORIZED, channel.result)
-        self.assertEqual(channel.json_body["errcode"], Codes.UNKNOWN_TOKEN)
+        self.assertEqual(channel.json_body["errcode"], "M_UNKNOWN_TOKEN")
 
 
 def oidc_config(
