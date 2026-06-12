@@ -6,13 +6,14 @@ updates:
   - # "pip" is the correct setting for poetry, per https://docs.github.com/en/code-security/dependabot/dependabot-version-updates/configuration-options-for-the-dependabot.yml-file#package-ecosystem
     package-ecosystem: "pip"
     directory: "/"
-    open-pull-requests-limit: 10
+    # Famedly edit. Setting open pull requests to 0 prevents new ones from opening.
+    open-pull-requests-limit: 0
     versioning-strategy: "increase-if-necessary"
     schedule:
       interval: "weekly"
     # Group patch updates to packages together into a single PR, as they rarely
     # if ever contain breaking changes that need to be reviewed separately.
-    # 
+    #
     # Less PRs means a streamlined review process.
     #
     # Python packages follow semantic versioning, and tend to only introduce
@@ -39,7 +40,8 @@ updates:
 
   - package-ecosystem: "docker"
     directory: "/docker"
-    open-pull-requests-limit: 10
+    # Famedly edit. Setting open pull requests to 0 prevents new ones from opening.
+    open-pull-requests-limit: 0
     schedule:
       interval: "weekly"
     # For container versions, breaking changes are also typically only introduced in major
@@ -57,7 +59,8 @@ updates:
 
   - package-ecosystem: "github-actions"
     directory: "/"
-    open-pull-requests-limit: 10
+    # Famedly edit. Setting open pull requests to 0 prevents new ones from opening.
+    open-pull-requests-limit: 0
     schedule:
       interval: "weekly"
     # Similarly for GitHub Actions, breaking changes are typically only introduced in major
@@ -75,7 +78,8 @@ updates:
 
   - package-ecosystem: "cargo"
     directory: "/"
-    open-pull-requests-limit: 10
+    # Famedly edit. Setting open pull requests to 0 prevents new ones from opening.
+    open-pull-requests-limit: 0
     versioning-strategy: "lockfile-only"
     schedule:
       interval: "weekly"
