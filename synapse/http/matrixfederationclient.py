@@ -104,7 +104,7 @@ outgoing_requests_counter = Counter(
 incoming_responses_counter = Counter(
     "synapse_http_matrixfederationclient_responses",
     "",
-    labelnames=["method", "code", SERVER_NAME_LABEL],
+    labelnames=["method", "destination", "code", SERVER_NAME_LABEL],
 )
 
 
@@ -754,6 +754,7 @@ class MatrixFederationHttpClient:
 
                     incoming_responses_counter.labels(
                         method=request.method,
+                        destination=request.destination,
                         code=response.code,
                         **{SERVER_NAME_LABEL: self.server_name},
                     ).inc()
