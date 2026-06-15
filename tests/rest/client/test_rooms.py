@@ -59,7 +59,7 @@ from synapse.rest.client import (
     sync,
 )
 from synapse.server import HomeServer
-from synapse.types import JsonDict, RoomAlias, UserID, create_requester
+from synapse.types import JsonDict, JsonMapping, RoomAlias, UserID, create_requester
 from synapse.util.clock import Clock
 from synapse.util.stringutils import random_string
 
@@ -1859,7 +1859,7 @@ class RoomMessagesTestCase(RoomBase):
             mock_return_value: str | bool | Codes | tuple[Codes, JsonDict] | bool = (
                 "NOT_SPAM"
             )
-            mock_content: JsonDict | None = None
+            mock_content: JsonMapping | None = None
 
             async def check_event_for_spam(
                 self,
@@ -2248,7 +2248,7 @@ class RoomMessageListTestCase(RoomBase):
         self.room_id = self.helper.create_room_as(self.user_id)
 
     def test_topo_token_is_accepted(self) -> None:
-        token = "t1-0_0_0_0_0_0_0_0_0_0_0_0"
+        token = "t1-0_0_0_0_0_0_0_0_0_0_0_0_0"
         channel = self.make_request(
             "GET", "/rooms/%s/messages?access_token=x&from=%s" % (self.room_id, token)
         )
@@ -2259,7 +2259,7 @@ class RoomMessageListTestCase(RoomBase):
         self.assertTrue("end" in channel.json_body)
 
     def test_stream_token_is_accepted_for_fwd_pagianation(self) -> None:
-        token = "s0_0_0_0_0_0_0_0_0_0_0_0"
+        token = "s0_0_0_0_0_0_0_0_0_0_0_0_0"
         channel = self.make_request(
             "GET", "/rooms/%s/messages?access_token=x&from=%s" % (self.room_id, token)
         )
