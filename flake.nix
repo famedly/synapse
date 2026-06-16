@@ -45,7 +45,7 @@
     # Output a development shell for x86_64/aarch64 Linux/Darwin (MacOS).
     systems.url = "github:nix-systems/default";
     # A development environment manager built on Nix. See https://devenv.sh.
-    devenv.url = "github:cachix/devenv/v0.6.3";
+    devenv.url = "github:cachix/devenv/v2.0.6";
     # Rust toolchain.
     rust-overlay.url = "github:oxalica/rust-overlay";
   };
@@ -68,11 +68,6 @@
             inherit inputs pkgs;
             modules = [
               {
-                # Make use of the Starship command prompt when this development environment
-                # is manually activated (via `nix develop --impure`).
-                # See https://starship.rs/ for details on the prompt itself.
-                starship.enable = true;
-
                 # Configure packages to install.
                 # Search for package names at https://search.nixos.org/packages?channel=unstable
                 packages = with pkgs; [
@@ -82,7 +77,7 @@
                   #
                   # NOTE: We currently need to set the Rust version unnecessarily high
                   # in order to work around https://github.com/matrix-org/synapse/issues/15939
-                  (rust-bin.stable."1.82.0".default.override {
+                  (rust-bin.stable."1.89.0".default.override {
                     # Additionally install the "rust-src" extension to allow diving into the
                     # Rust source code in an IDE (rust-analyzer will also make use of it).
                     extensions = [ "rust-src" ];
@@ -174,7 +169,7 @@
                 #  * ensures a directory containing two additional homeserver config files exists;
                 #    one to configure using the development environment's PostgreSQL as the
                 #    database backend and another for enabling Redis support.
-                process.before = ''
+                process.manager.before = ''
                   python -m synapse.app.homeserver -c homeserver.yaml --generate-config --server-name=synapse.dev --report-stats=no
                   mkdir -p homeserver-config-overrides.d
                   cat > homeserver-config-overrides.d/database.yaml << EOF
@@ -204,7 +199,7 @@
                 # corresponding Nix packages on https://search.nixos.org/packages.
                 #
                 # This was done until `./install-deps.pl --dryrun` produced no output.
-                env.PERL5LIB = "${with pkgs.perl538Packages; makePerlPath [
+                env.PERL5LIB = "${with pkgs.perl5Packages; makePerlPath [
                   DBI
                   ClassMethodModifiers
                   CryptEd25519
