@@ -522,6 +522,12 @@ class ServerConfig(Config):
             "require_auth_for_profile_requests", False
         )
 
+        # Whether to require federation(server) authentication for the server /version
+        # endpoint.
+        self.require_auth_for_server_version = config.get(
+            "require_auth_for_server_version", False
+        )
+
         # Whether to require sharing a room with a user to retrieve their
         # profile data
         self.limit_profile_requests_to_users_who_share_rooms = config.get(
