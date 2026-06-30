@@ -9,6 +9,10 @@ as it reached end of life on the 10th of June 2026.
 
 - When building releases, don't cancel Debian package builds when one of them fails. ([\#19842](https://github.com/element-hq/synapse/issues/19842))
 
+## Famedly additions for v1.155.0_1
+
+- add destination to incoming federation responses metrics (Jason Little)
+
 # Synapse 1.155.0rc1 (2026-06-09)
 
 ## Bugfixes
