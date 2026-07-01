@@ -1,5 +1,5 @@
 $schema: https://famedly.github.io/synapse/latest/schema/v1/meta.schema.json
-$id: https://famedly.github.io/synapse/schema/synapse/v1.154/synapse-config.schema.json
+$id: https://famedly.github.io/synapse/schema/synapse/v1.155/synapse-config.schema.json
 type: object
 properties:
   famedly_maximum_refresh_token_lifetime:
@@ -4635,10 +4635,10 @@ properties:
         type: boolean
         description: >-
           Use this setting to keep a user's profile fields in sync with
-          information from the identity provider. Fields are checked on every 
-          SSO login, and are updated if necessary. Note that enabling this 
-          option will override user profile information, regardless of whether 
-          users have opted-out of syncing that information when first signing 
+          information from the identity provider. Fields are checked on every
+          SSO login, and are updated if necessary. Note that enabling this
+          option will override user profile information, regardless of whether
+          users have opted-out of syncing that information when first signing
           in.
           Fields that will be synced:
             * displayname
