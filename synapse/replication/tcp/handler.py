@@ -133,6 +133,7 @@ class ReplicationCommandHandler:
         self._clock = hs.get_clock()
         self._instance_id = hs.get_instance_id()
         self._instance_name = hs.get_instance_name()
+        self.force_restart = hs.config.server.force_crash_workers_after_main_restart
 
         # Additional Redis channel suffixes to subscribe to.
         self._channels_to_subscribe_to: list[str] = []

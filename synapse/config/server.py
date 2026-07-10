@@ -983,6 +983,13 @@ class ServerConfig(Config):
             self.max_delayed_events_per_user and self.max_event_delay_duration
         )
 
+        force_crash_workers_after_main_restart = config.get(
+            "force_crash_workers_after_main_restart", False
+        )
+        self.force_crash_workers_after_main_restart = bool(
+            force_crash_workers_after_main_restart
+        )
+
     def has_tls_listener(self) -> bool:
         return any(listener.is_tls() for listener in self.listeners)
 
