@@ -18,10 +18,15 @@
 # [This file includes modifications made by New Vector Limited]
 #
 #
+from typing import Any
+from unittest import mock
 
 from twisted.internet import defer
+from twisted.internet.testing import MemoryReactor
 
-from synapse.replication.tcp.commands import PositionCommand
+from synapse.replication.tcp.commands import PositionCommand, ServerCommand
+from synapse.server import HomeServer
+from synapse.util.clock import Clock
 
 from tests.replication._base import BaseMultiWorkerStreamTestCase
 
@@ -221,3 +226,52 @@ class ChannelsTestCase(BaseMultiWorkerStreamTestCase):
         # Master should get told about `next_token2`, so the deferred should
         # resolve.
         self.assertTrue(d.called)
+
+
+class RestartBehaviorTestCase(BaseMultiWorkerStreamTestCase):
+    def prepare(
+        self, reactor: MemoryReactor, clock: Clock, homeserver: HomeServer
+    ) -> None:
+        super().prepare(reactor, clock, homeserver)
+        self.repl_comm_handler = self.hs.get_replication_command_handler()
+
+        self.server_name = self.hs.config.server.server_name
+
+    def default_config(self) -> dict[str, Any]:
+        config = super().default_config()
+        config["force_crash_workers_after_main_restart"] = True
+        return config
+
+    def test_server_command_can_raise_from_main(self) -> None:
+        """
+        Test that a server command send from the main process can raise a SIGTERM on a
+        worker
+        """
+        # self.reactor.advance(0.001)
+        worker = self.make_worker_hs(
+            "synapse.app.generic_worker",
+            extra_config={
+                "worker_name": "worker1",
+                "redis": {"enabled": True},
+            },
+        )
+
+        # Move forward time just a pinch, so the SERVER command has a new value
+        self.reactor.advance(0.001)
+        # In unit tests, we can not really restart a process. So, send the command again
+        # to simulate that.
+        self.repl_comm_handler.send_command(
+            ServerCommand(
+                self.server_name, self.hs.get_instance_name(), self.clock.time_msec()
+            )
+        )
+        with mock.patch(
+            "signal.raise_signal",
+        ) as patch_ctx:
+            # Simulate receiving the redis command by calling the handler that would
+            # have responded to "wake up"
+            worker.get_replication_streamer().on_notifier_poke()
+            # Need to move forward time to get the background tasks to run
+            self.reactor.advance(0.001)
+
+        patch_ctx.assert_called_once()
