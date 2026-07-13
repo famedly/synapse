@@ -45,6 +45,7 @@ from synapse.metrics.background_process_metrics import (
 from synapse.replication.tcp.commands import (
     Command,
     ReplicateCommand,
+    ServerCommand,
     parse_command_from_line,
 )
 from synapse.replication.tcp.context import ClientContextFactory
@@ -150,21 +151,40 @@ class RedisSubscriber(SubscriberProtocol):
         self.hs.run_as_background_process("subscribe-replication", self._send_subscribe)
 
     async def _send_subscribe(self) -> None:
+        # Make sure to send the SERVER command before any other commands. It is
+        # important to not interrupt the SUBSCRIBE processes
+        logger.info("Sending SERVER command to redis connection")
+        self.send_command(
+            ServerCommand(
+                self.server_name,
+                self.hs.get_instance_name(),
+                self.hs.get_clock().time_msec(),
+            )
+        )
+
         # it's important to make sure that we only send the REPLICATE command once we
         # have successfully subscribed to the stream - otherwise we might miss the
         # POSITION response sent back by the other end.
+        # XXX: Oddly, other places in the code specify that commands are not to be sent
+        #  on a connection that has already been subscribed to and another connection is
+        #  set up for this purpose. Isn't sending a replicate command on a subscribed
+        #  stream exactly the opposite of this?
         fully_qualified_stream_names = [
             f"{self.synapse_stream_prefix}/{stream_suffix}"
             for stream_suffix in self.synapse_channel_names
         ] + [self.synapse_stream_prefix]
-        logger.info("Sending redis SUBSCRIBE for %r", fully_qualified_stream_names)
+        logger.info(
+            "Successfully sent SERVER command, sending SUBSCRIBE for %r",
+            fully_qualified_stream_names,
+        )
         await make_deferred_yieldable(self.subscribe(fully_qualified_stream_names))
 
         logger.info(
             "Successfully subscribed to redis stream, sending REPLICATE command"
         )
         self.synapse_handler.new_connection(self)
-        await self._async_send_command(ReplicateCommand())
+        self.send_command(ReplicateCommand())
+
         logger.info("REPLICATE successfully sent")
 
         # We send out our positions when there is a new connection in case the

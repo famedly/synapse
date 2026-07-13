@@ -26,6 +26,7 @@ An explanation of this protocol is available in docs/tcp_replication.md
 
 import fcntl
 import logging
+import signal
 import struct
 from inspect import isawaitable
 from typing import TYPE_CHECKING, Any, Collection
@@ -38,6 +39,7 @@ from twisted.internet.tcp import Connection
 from twisted.protocols.basic import LineOnlyReceiver
 from twisted.python.failure import Failure
 
+from synapse.config.workers import MAIN_PROCESS_INSTANCE_NAME
 from synapse.logging.context import PreserveLoggingContext
 from synapse.metrics import SERVER_NAME_LABEL, LaterGauge
 from synapse.metrics.background_process_metrics import (
@@ -485,14 +487,39 @@ class ServerReplicationStreamProtocol(BaseReplicationStreamProtocol):
         super().__init__(hs, server_name, clock, handler)
 
         self.server_name = server_name
+        self.instance_name = hs.get_instance_name()
+        self.clock = hs.get_clock()
+        self.force_restart = hs.config.server.force_crash_workers_after_main_restart
+        self.startup_time_ms = self.clock.time_msec()
 
     def connectionMade(self) -> None:
-        self.send_command(ServerCommand(self.server_name))
+        self.send_command(
+            ServerCommand(self.server_name, self.instance_name, self.startup_time_ms)
+        )
         super().connectionMade()
 
     def on_NAME(self, cmd: NameCommand) -> None:
         logger.info("[%s] Renamed to %r", self.id(), cmd.data)
         self.name = cmd.data
+
+    def on_SERVER(self, cmd: ServerCommand) -> None:
+        if cmd.server_name != self.server_name:
+            logger.error(
+                "[%s] Connected to wrong remote: %r", self.id(), cmd.server_name
+            )
+            self.send_error("Wrong remote")
+        if (
+            self.force_restart
+            and self.instance_name != MAIN_PROCESS_INSTANCE_NAME
+            and cmd.instance_name == MAIN_PROCESS_INSTANCE_NAME
+            and cmd.startup_time_ms >= self.startup_time_ms
+        ):
+            logger.error(
+                "Main process broadcast it just came up, crashing local worker"
+            )
+            self.send_error("Terminating local worker")
+
+            signal.raise_signal(signal.SIGTERM)
 
 
 class ClientReplicationStreamProtocol(BaseReplicationStreamProtocol):
@@ -520,8 +547,10 @@ class ClientReplicationStreamProtocol(BaseReplicationStreamProtocol):
         self.replicate()
 
     def on_SERVER(self, cmd: ServerCommand) -> None:
-        if cmd.data != self.server_name:
-            logger.error("[%s] Connected to wrong remote: %r", self.id(), cmd.data)
+        if cmd.server_name != self.server_name:
+            logger.error(
+                "[%s] Connected to wrong remote: %r", self.id(), cmd.server_name
+            )
             self.send_error("Wrong remote")
 
     def replicate(self) -> None:

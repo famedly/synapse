@@ -95,15 +95,30 @@ class _SimpleCommand(Command):
         return self.data
 
 
-class ServerCommand(_SimpleCommand):
+class ServerCommand(Command):
     """Sent by the server on new connection and includes the server_name.
 
     Format::
 
-        SERVER <server_name>
+        SERVER <server_name> <instance_name> <startup_time_ms>
     """
 
     NAME = "SERVER"
+
+    def __init__(self, server_name: str, instance_name: str, startup_time_ms: int):
+        self.server_name = server_name
+        self.instance_name = instance_name
+        self.startup_time_ms = startup_time_ms
+
+    @classmethod
+    def from_line(cls: type["ServerCommand"], line: str) -> "ServerCommand":
+        server_name, instance_name, startup_time_ms = line.split(" ", 2)
+        return cls(server_name, instance_name, int(startup_time_ms))
+
+    def to_line(self) -> str:
+        return " ".join(
+            (self.server_name, self.instance_name, str(self.startup_time_ms))
+        )
 
 
 class RdataCommand(Command):

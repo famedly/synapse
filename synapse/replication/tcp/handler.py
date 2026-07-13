@@ -20,6 +20,7 @@
 #
 #
 import logging
+import signal
 from typing import (
     TYPE_CHECKING,
     Any,
@@ -33,6 +34,7 @@ from prometheus_client import Counter
 
 from twisted.internet.protocol import ReconnectingClientFactory
 
+from synapse.config.workers import MAIN_PROCESS_INSTANCE_NAME
 from synapse.metrics import SERVER_NAME_LABEL, LaterGauge
 from synapse.replication.tcp.commands import (
     CancelTaskCommand,
@@ -45,6 +47,7 @@ from synapse.replication.tcp.commands import (
     RdataCommand,
     RemoteServerUpCommand,
     ReplicateCommand,
+    ServerCommand,
     UserIpCommand,
     UserSyncCommand,
 )
@@ -134,6 +137,7 @@ class ReplicationCommandHandler:
         self._instance_id = hs.get_instance_id()
         self._instance_name = hs.get_instance_name()
         self.force_restart = hs.config.server.force_crash_workers_after_main_restart
+        self.startup_time_ms = self._clock.time_msec()
 
         # Additional Redis channel suffixes to subscribe to.
         self._channels_to_subscribe_to: list[str] = []
@@ -442,6 +446,32 @@ class ReplicationCommandHandler:
     def get_streams_to_replicate(self) -> list[Stream]:
         """Get a list of streams that this instances replicates."""
         return self._streams_to_replicate
+
+    def on_SERVER(self, conn: IReplicationConnection, cmd: ServerCommand) -> None:
+        if cmd.server_name != self.server_name:
+            logger.error(
+                "Current process is receiving commands from wrong remote: %r",
+                cmd.server_name,
+            )
+
+        # Simply:
+        # * if force restarting is enabled
+        # * and if this worker process is not the main process
+        # * and the command came from the main process
+        # * and the timestamp from the command is >= to the timestamp this worker
+        #   started at
+        # ... crash the worker
+        if (
+            self.force_restart
+            and self._instance_name != MAIN_PROCESS_INSTANCE_NAME
+            and cmd.instance_name == MAIN_PROCESS_INSTANCE_NAME
+            and cmd.startup_time_ms >= self.startup_time_ms
+        ):
+            logger.error(
+                "Main process broadcast it just came up, crashing local worker"
+            )
+
+            signal.raise_signal(signal.SIGTERM)
 
     def on_REPLICATE(self, conn: IReplicationConnection, cmd: ReplicateCommand) -> None:
         self.send_positions_to_connection()
