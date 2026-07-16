@@ -1,0 +1,24 @@
+{{- /* Per-component config: one ConfigMap for main, one per worker group. */ -}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "synapse.componentFullname" (dict "root" $ "component" "main") }}
+  labels:
+    {{- include "synapse.componentLabels" (dict "root" $ "component" "main") | nindent 4 }}
+data:
+  component.yaml: |
+    {{- include "synapse.componentConfigYaml" (dict "root" $ "isWorker" false) | nindent 4 }}
+{{- if .Values.workers.enabled }}
+{{- range $g := .Values.workers.groups }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "synapse.componentFullname" (dict "root" $ "component" $g.name) }}
+  labels:
+    {{- include "synapse.componentLabels" (dict "root" $ "component" $g.name) | nindent 4 }}
+data:
+  component.yaml: |
+    {{- include "synapse.componentConfigYaml" (dict "root" $ "isWorker" true "group" $g) | nindent 4 }}
+{{- end }}
+{{- end }}

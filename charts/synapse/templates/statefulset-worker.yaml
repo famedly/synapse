@@ -1,0 +1,51 @@
+{{- if .Values.workers.enabled }}
+{{- range $g := .Values.workers.groups }}
+{{- $info := fromYaml (include "synapse.groupInfo" (dict "root" $ "group" $g)) }}
+{{- $replicas := int ($g.replicas | default 1) }}
+{{- if and $info.singleton (ne $replicas 1) }}
+{{- fail (printf "worker group %q includes a singleton preset (one of %v) and must have replicas: 1, got %d" $g.name $g.types $replicas) }}
+{{- end }}
+{{- $component := $g.name }}
+{{- $stsName := include "synapse.componentFullname" (dict "root" $ "component" $component) }}
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ $stsName }}
+  labels:
+    {{- include "synapse.componentLabels" (dict "root" $ "component" $component) | nindent 4 }}
+spec:
+  serviceName: {{ $stsName }}
+  replicas: {{ $replicas }}
+  podManagementPolicy: OrderedReady
+  updateStrategy:
+    type: RollingUpdate
+  selector:
+    matchLabels:
+      {{- include "synapse.componentSelectorLabels" (dict "root" $ "component" $component) | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "synapse.componentLabels" (dict "root" $ "component" $component) | nindent 8 }}
+      annotations:
+        checksum/config: {{ include "synapse.configChecksum" (dict "root" $ "isWorker" true "group" $g) }}
+        {{- if $.Values.reloader.enabled }}
+        reloader.stakater.com/auto: "true"
+        {{- end }}
+        {{- with $.Values.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      {{- include "synapse.podSpec" (dict
+            "root" $
+            "component" $component
+            "module" "generic_worker"
+            "isWorker" true
+            "httpResources" $info.httpResources
+            "hasReplication" $info.hasReplication
+            "mediaWritable" $info.mediaWritable
+            "componentConfigMap" $stsName
+            "values" $g
+          ) | nindent 6 }}
+{{- end }}
+{{- end }}

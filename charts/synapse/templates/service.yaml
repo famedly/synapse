@@ -1,0 +1,55 @@
+{{- /*
+One headless Service per component. It is the StatefulSet's governing service
+(stable pod DNS for the replication instance_map) and doubles as the HTTPRoute
+backendRef (Istio load-balances over its EndpointSlices). publishNotReadyAddresses
+lets writers resolve each other during startup before readiness passes.
+*/ -}}
+{{- define "synapse.servicePorts" -}}
+{{- if .httpResources }}
+- name: http
+  port: 8008
+  targetPort: 8008
+{{- end }}
+{{- if .hasReplication }}
+- name: replication
+  port: 9093
+  targetPort: 9093
+{{- end }}
+{{- if .root.Values.metrics.enabled }}
+- name: metrics
+  port: 9090
+  targetPort: 9090
+{{- end }}
+{{- end -}}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "synapse.componentFullname" (dict "root" $ "component" "main") }}
+  labels:
+    {{- include "synapse.componentLabels" (dict "root" $ "component" "main") | nindent 4 }}
+spec:
+  clusterIP: None
+  publishNotReadyAddresses: true
+  selector:
+    {{- include "synapse.componentSelectorLabels" (dict "root" $ "component" "main") | nindent 4 }}
+  ports:
+    {{- include "synapse.servicePorts" (dict "root" $ "httpResources" (list "client" "federation") "hasReplication" .Values.workers.enabled) | nindent 4 }}
+{{- if .Values.workers.enabled }}
+{{- range $g := .Values.workers.groups }}
+{{- $info := fromYaml (include "synapse.groupInfo" (dict "root" $ "group" $g)) }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "synapse.componentFullname" (dict "root" $ "component" $g.name) }}
+  labels:
+    {{- include "synapse.componentLabels" (dict "root" $ "component" $g.name) | nindent 4 }}
+spec:
+  clusterIP: None
+  publishNotReadyAddresses: true
+  selector:
+    {{- include "synapse.componentSelectorLabels" (dict "root" $ "component" $g.name) | nindent 4 }}
+  ports:
+    {{- include "synapse.servicePorts" (dict "root" $ "httpResources" $info.httpResources "hasReplication" $info.hasReplication) | nindent 4 }}
+{{- end }}
+{{- end }}

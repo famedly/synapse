@@ -1,0 +1,16 @@
+Synapse ({{ .Chart.AppVersion }}) has been deployed as release {{ .Release.Name }}.
+
+Mode: {{ if .Values.workers.enabled }}workers{{ else }}workerless (single main process){{ end }}
+{{- if .Values.workers.enabled }}
+Worker groups:
+{{- range $g := .Values.workers.groups }}
+  - {{ $g.name }}: types={{ $g.types }} replicas={{ $g.replicas | default 1 }}
+{{- end }}
+{{- end }}
+
+Routing: {{ if .Values.gateway.enabled }}HTTPRoute {{ include "synapse.fullname" . }} attached to Gateway {{ .Values.gateway.parentRef.name }}{{ else }}disabled (managed externally){{ end }}
+
+Remember:
+  - This chart consumes existing Secrets and an external Postgres{{ if .Values.workers.enabled }}, Redis,{{ end }} and object storage.
+  - Your base config must set database.args.passfile: {{ include "synapse.paths.pgpass" . }}
+  - To force a coordinated restart of the whole fleet, bump .Values.restartNonce.

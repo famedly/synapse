@@ -217,3 +217,48 @@ already ends with `$` (anchored) or `.*` (already open-ended).
 {{- printf "%s.*" $p -}}
 {{- end -}}
 {{- end -}}
+
+{{/*
+Derive the merged facts for a worker group from its presets.
+Ctx: root, group. Returns YAML:
+  httpResources: subset of [client, federation, media] (fixed order)
+  hasReplication: bool
+  routed: bool            # has any endpoint => gets an HTTPRoute rule
+  singleton: bool         # any preset is singleton-only => replicas must be 1
+  probePort: 8008 | 9093
+  mediaWritable: bool
+  streams: [..]
+  endpoints: [..]         # merged raw upstream regexes
+*/}}
+{{- define "synapse.groupInfo" -}}
+{{- $presets := fromYaml (include "synapse.presets" .root) -}}
+{{- $listeners := list -}}
+{{- $endpoints := list -}}
+{{- $streams := list -}}
+{{- $singleton := false -}}
+{{- $media := false -}}
+{{- range $t := .group.types -}}
+{{- $p := index $presets $t -}}
+{{- if not $p }}{{- fail (printf "worker group %q references unknown preset %q" $.group.name $t) }}{{- end -}}
+{{- with $p.listeners }}{{- $listeners = concat $listeners . }}{{- end -}}
+{{- with $p.endpoints }}{{- $endpoints = concat $endpoints . }}{{- end -}}
+{{- with $p.streams }}{{- $streams = concat $streams . }}{{- end -}}
+{{- if $p.singleton }}{{- $singleton = true }}{{- end -}}
+{{- if eq $t "media_repository" }}{{- $media = true }}{{- end -}}
+{{- end -}}
+{{- $http := list -}}
+{{- range $r := (list "client" "federation" "media") -}}
+{{- if has $r $listeners }}{{- $http = append $http $r }}{{- end -}}
+{{- end -}}
+{{- $hasRepl := has "replication" $listeners -}}
+{{- $probePort := 9093 -}}
+{{- if $http }}{{- $probePort = 8008 }}{{- end -}}
+httpResources: {{ $http | toJson }}
+hasReplication: {{ $hasRepl }}
+routed: {{ gt (len $endpoints) 0 }}
+singleton: {{ $singleton }}
+probePort: {{ $probePort }}
+mediaWritable: {{ $media }}
+streams: {{ $streams | toJson }}
+endpoints: {{ $endpoints | toJson }}
+{{- end -}}

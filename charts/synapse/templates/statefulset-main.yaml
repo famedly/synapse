@@ -1,0 +1,45 @@
+{{- $anyMedia := false -}}
+{{- if .Values.workers.enabled -}}
+{{- range $g := .Values.workers.groups -}}
+{{- if has "media_repository" $g.types }}{{- $anyMedia = true }}{{- end -}}
+{{- end -}}
+{{- end -}}
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ include "synapse.componentFullname" (dict "root" $ "component" "main") }}
+  labels:
+    {{- include "synapse.componentLabels" (dict "root" $ "component" "main") | nindent 4 }}
+spec:
+  serviceName: {{ include "synapse.componentFullname" (dict "root" $ "component" "main") }}
+  replicas: {{ .Values.main.replicas }}
+  podManagementPolicy: OrderedReady
+  updateStrategy:
+    type: RollingUpdate
+  selector:
+    matchLabels:
+      {{- include "synapse.componentSelectorLabels" (dict "root" $ "component" "main") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "synapse.componentLabels" (dict "root" $ "component" "main") | nindent 8 }}
+      annotations:
+        checksum/config: {{ include "synapse.configChecksum" (dict "root" $ "isWorker" false) }}
+        {{- if .Values.reloader.enabled }}
+        reloader.stakater.com/auto: "true"
+        {{- end }}
+        {{- with .Values.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      {{- include "synapse.podSpec" (dict
+            "root" $
+            "component" "main"
+            "module" "homeserver"
+            "isWorker" false
+            "httpResources" (list "client" "federation")
+            "hasReplication" .Values.workers.enabled
+            "mediaWritable" (not $anyMedia)
+            "componentConfigMap" (include "synapse.componentFullname" (dict "root" $ "component" "main"))
+            "values" .Values.main
+          ) | nindent 6 }}

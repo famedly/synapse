@@ -89,3 +89,11 @@ Usage: include "synapse.secretName" (dict "ref" .Values.secrets.signingKey "defa
 {{- end -}}
 {{- $name -}}
 {{- end -}}
+
+{{/*
+Non-failing variant: returns the resolved secret name or an empty string.
+Usage: include "synapse.resolveSecretName" (dict "ref" .Values.secrets.formSecret "default" .Values.secrets.existingSecret)
+*/}}
+{{- define "synapse.resolveSecretName" -}}
+{{- .ref.secretName | default .default -}}
+{{- end -}}
