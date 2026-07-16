@@ -1,0 +1,22 @@
+# Example overrides for OpenShift.
+#
+# The restricted-v2 SCC assigns runAsUser, runAsGroup and fsGroup from a
+# per-namespace range at admission time, so we must NOT set them here — pinning
+# them would conflict with the SCC. We only assert the constraints the SCC also
+# enforces. The SCC-assigned fsGroup makes the projected Secret files (mode 0440)
+# group-readable by the assigned UID.
+#
+# Usage: helm install synapse ... -f values-openshift.yaml -f your-values.yaml
+
+podSecurityContext:
+  runAsNonRoot: true
+  seccompProfile:
+    type: RuntimeDefault
+  # runAsUser / runAsGroup / fsGroup intentionally omitted (assigned by the SCC).
+
+containerSecurityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  runAsNonRoot: true
+  capabilities:
+    drop: ["ALL"]

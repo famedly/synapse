@@ -1,0 +1,24 @@
+# Example overrides for vanilla Kubernetes.
+#
+# On stock Kubernetes there is no SCC to assign IDs, so we pin a non-root
+# UID/GID and an fsGroup explicitly. 991 is the UID/GID Synapse's own image
+# defaults to; any non-root value works since the image filesystem is
+# world-readable. fsGroup is required so the projected Secret files (mode 0440)
+# are group-readable by the runtime UID.
+#
+# Usage: helm install synapse ... -f values-k8s.yaml -f your-values.yaml
+
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 991
+  runAsGroup: 991
+  fsGroup: 991
+  seccompProfile:
+    type: RuntimeDefault
+
+containerSecurityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  runAsNonRoot: true
+  capabilities:
+    drop: ["ALL"]
