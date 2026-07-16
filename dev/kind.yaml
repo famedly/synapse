@@ -1,0 +1,9 @@
+# kind cluster for iterating on the Synapse Helm chart.
+# NOTE: dev-only. Not part of the chart. Throwaway credentials throughout.
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+name: synapse-dev
+nodes:
+  - role: control-plane
+# The Istio gateway is reached via `kubectl port-forward` (see the Tiltfile),
+# so no host port mapping is needed here.

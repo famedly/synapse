@@ -54,7 +54,9 @@ Your base config **must** set:
 - The `database:` block (`name`, `args.user/database/host/port`) plus
   **`database.args.passfile: /run/db/pgpass`** (the password is injected via the
   passfile — see below).
-- `log_config` (a path; e.g. a file you include in your ConfigMap).
+- Optionally `log_config` (a path to a log-config file you include via
+  `config.existingConfigMap`). If omitted, Synapse logs to stdout — the
+  Kubernetes-friendly default.
 - For media: `media_store_path: /media` and your S3 storage-provider config. The
   chart provides a writable `emptyDir` at `/media` for the S3 provider's local
   staging on whichever process serves media (main in workerless mode, the media

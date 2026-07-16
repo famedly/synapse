@@ -1,0 +1,41 @@
+# Throwaway Postgres for the dev harness. Ephemeral (emptyDir), insecure creds.
+# DO NOT use anything here in production.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: postgres
+  labels: { app: postgres }
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: postgres } }
+  template:
+    metadata:
+      labels: { app: postgres }
+    spec:
+      containers:
+        - name: postgres
+          image: postgres:16-alpine
+          env:
+            - { name: POSTGRES_USER, value: synapse }
+            - { name: POSTGRES_PASSWORD, value: devpassword }
+            - { name: POSTGRES_DB, value: synapse }
+            # Synapse requires C locale / UTF8.
+            - { name: POSTGRES_INITDB_ARGS, value: "--locale=C --encoding=UTF8" }
+            - { name: PGDATA, value: /var/lib/postgresql/data/pgdata }
+          ports: [{ containerPort: 5432 }]
+          volumeMounts:
+            - { name: data, mountPath: /var/lib/postgresql/data }
+          readinessProbe:
+            exec: { command: ["pg_isready", "-U", "synapse"] }
+            periodSeconds: 5
+      volumes:
+        - name: data
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres
+spec:
+  selector: { app: postgres }
+  ports: [{ port: 5432, targetPort: 5432 }]

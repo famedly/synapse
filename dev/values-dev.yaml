@@ -1,0 +1,66 @@
+# Dev-only values for the Tilt harness. Layered on top of values-k8s.yaml.
+# Targets the throwaway Postgres/Redis/MinIO in dev/deps and the dev Gateway.
+serverName: matrix.localhost
+
+config:
+  settings:
+    server_name: matrix.localhost
+    public_baseurl: http://matrix.localhost/
+    report_stats: false
+    # Quiet dev-only defaults.
+    trusted_key_servers: []
+    suppress_key_server_warning: true
+    enable_registration: true
+    enable_registration_without_verification: true
+    database:
+      name: psycopg2
+      args:
+        user: synapse
+        database: synapse
+        host: postgres
+        port: 5432
+        passfile: /run/db/pgpass
+        cp_min: 1
+        cp_max: 5
+    media_store_path: /media
+    media_storage_providers:
+      - module: s3_storage_provider.S3StorageProviderBackend
+        store_local: true
+        store_remote: true
+        store_synchronous: true
+        config:
+          bucket: synapse
+          endpoint_url: http://minio:9000
+          access_key_id: minioadmin
+          secret_access_key: minioadmin
+
+secrets:
+  existingSecret: synapse-secrets
+
+redis:
+  host: redis
+  passwordSecret:
+    key: redis-password
+
+gateway:
+  parentRef:
+    name: matrix-gateway
+    sectionName: http
+  hostnames:
+    - matrix.localhost
+
+workers:
+  enabled: true
+  groups:
+    - name: synchrotron
+      types: [synchrotron]
+      replicas: 1
+    - name: stream-writers
+      types: [account_data, presence, receipts, typing, to_device, push_rules]
+      replicas: 1
+    - name: event-persister
+      types: [event_persister]
+      replicas: 1
+    - name: media
+      types: [media_repository]
+      replicas: 1
