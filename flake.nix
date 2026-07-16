@@ -60,6 +60,11 @@
           pkgs = import nixpkgs {
             inherit system overlays;
           };
+          # Helm wrapped with the unittest plugin, for developing and testing the
+          # Synapse Helm chart under charts/synapse.
+          helm = pkgs.wrapHelm pkgs.kubernetes-helm {
+            plugins = [ pkgs.kubernetes-helmPlugins.helm-unittest ];
+          };
         in {
           # Everything is configured via devenv - a Nix module for creating declarative
           # developer environments. See https://devenv.sh/reference/options/ for a list
@@ -117,6 +122,15 @@
                   # For releasing Synapse
                   debian-devscripts # (`dch` for manipulating the Debian changelog)
                   libnotify # (the release script uses `notify-send` to tell you when CI jobs are done)
+
+                  # Helm chart development and testing (charts/synapse).
+                  helm # helm + helm-unittest plugin (wrapped above)
+                  kubeconform # validate rendered manifests against k8s/CRD schemas
+                  kubectl
+                  # Dev harness for iterating on the chart (dev/, outside the chart).
+                  kind # local Kubernetes-in-Docker cluster
+                  tilt # live dev loop
+                  istioctl # install Istio + Gateway API for the dev harness
                 ];
 
                 # Install Python and manage a virtualenv with Poetry.
