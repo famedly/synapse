@@ -1,0 +1,157 @@
+# Default values for the Synapse chart.
+#
+# This chart is production-oriented and ships no dependencies. Postgres, Redis,
+# object storage, the Gateway, and (optionally) Stakater Reloader must already
+# exist on the cluster. Secrets are consumed from existing Secret objects only.
+
+image:
+  repository: ghcr.io/famedly/synapse
+  # Defaults to .Chart.appVersion when empty.
+  tag: ""
+  pullPolicy: IfNotPresent
+  # References to existing image pull Secrets, e.g. [{name: my-regcred}].
+  pullSecrets: []
+
+# Convenience only; the authoritative server_name lives in config.settings.
+# Used for defaulting HTTPRoute hostnames when gateway.hostnames is empty.
+serverName: ""
+
+# --- Base homeserver.yaml (non-secret). The user owns the bulk of the config. ---
+# The chart mounts this first in an ordered list of --config-path directories and
+# layers its own fragments on top, so it must NOT set any chart-reserved key
+# (see README "Reserved config keys"): listeners, worker_app, worker_name,
+# worker_listeners, instance_map, stream_writers, redis, run_background_tasks_on,
+# pusher_instances, federation_sender_instances, notify_appservices_from_worker,
+# update_user_directory_from_worker, enable_media_repo,
+# media_instance_running_background_jobs, and any *_path secret key.
+config:
+  # Inline config rendered into a ConfigMap. Must include at least server_name,
+  # report_stats, the database block (host/port/user/dbname/args.passfile, no
+  # password), and media/storage settings. Ignored if existingConfigMap is set.
+  settings: {}
+  # Use an existing ConfigMap (whose *.yaml keys form the base config) instead of
+  # rendering `settings`. When set, `settings` is ignored.
+  existingConfigMap: ""
+
+# --- Secrets: consumed from existing Secret objects, mounted as files. ---
+# Each credential is read by Synapse via its *_path option. Any entry may set its
+# own secretName; otherwise it falls back to secrets.existingSecret.
+secrets:
+  existingSecret: ""
+  signingKey:
+    secretName: ""
+    key: signing.key
+  macaroonSecretKey:
+    secretName: ""
+    key: macaroon_secret_key
+  formSecret:
+    secretName: ""
+    key: form_secret
+  registrationSharedSecret:
+    secretName: ""
+    key: registration_shared_secret
+  # Required whenever workers.enabled is true (the replication listener becomes
+  # cluster-reachable and must be authenticated).
+  workerReplicationSecret:
+    secretName: ""
+    key: worker_replication_secret
+
+database:
+  # A single libpq .pgpass line, mounted mode 0600 at /run/secrets/synapse/pgpass.
+  # The base config must set database.args.passfile to that path. This keeps the
+  # Postgres password out of the rendered config (Synapse has no password_path).
+  passfileSecret:
+    secretName: ""
+    key: pgpass
+
+redis:
+  # Automatically treated as enabled when workers.enabled is true. Redis is a hard
+  # dependency for any worker deployment; workerless mode does not need it.
+  enabled: false
+  host: ""
+  port: 6379
+  # Optional password read via redis.password_path.
+  passwordSecret:
+    secretName: ""
+    key: redis-password
+
+# --- Global pod hardening. Plain maps (not a toggle) so both vanilla k8s and
+# OpenShift are supported. See values-k8s.yaml and values-openshift.yaml. ---
+podSecurityContext:
+  runAsNonRoot: true
+  seccompProfile:
+    type: RuntimeDefault
+containerSecurityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop: ["ALL"]
+
+# Applied to every pod. checksum/config is injected automatically on top.
+podAnnotations: {}
+# Bump to force-roll the entire fleet together in one `helm upgrade` (fixes
+# presence/replication breakage on partial restarts, and sharded-writer
+# membership changes).
+restartNonce: ""
+
+# Optional Stakater Reloader annotations for out-of-band Secret/ConfigMap rotation.
+reloader:
+  enabled: false
+
+# Exposes a metrics listener (:9090). ServiceMonitor/PodMonitor are intentionally
+# left to the umbrella chart.
+metrics:
+  enabled: false
+
+# --- Main process (always a singleton StatefulSet). ---
+main:
+  # Scaling the main process is not supported.
+  replicas: 1
+  resources: {}
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+  topologySpreadConstraints: []
+  terminationGracePeriodSeconds: 60
+  # Deep-merged over the global security contexts.
+  podSecurityContext: {}
+  containerSecurityContext: {}
+  # Override probe thresholds; the port is derived from the listener set.
+  probes: {}
+
+# --- Workers. Workerless by default (Synapse default). ---
+workers:
+  enabled: false
+  # Each group becomes one StatefulSet + one headless Service. `types` is a list
+  # of built-in presets (see templates/_presets.tpl) merged into a single worker
+  # process, mirroring the docker image's "a+b+c" grouping.
+  groups: []
+  # Example:
+  # - name: client-reader
+  #   types: [client_reader]
+  #   replicas: 3
+  # - name: stream-writers
+  #   types: [account_data, presence, receipts, typing, to_device, push_rules]
+  #   replicas: 1            # singleton presets fail the template if replicas > 1
+  # - name: event-persister
+  #   types: [event_persister]
+  #   replicas: 2
+  # - name: media
+  #   types: [media_repository]
+  #   replicas: 2            # ordinal 0 runs media background jobs
+  # - name: background
+  #   types: [background_worker]
+  #   replicas: 1
+
+# --- Routing (Gateway API only). The chart references an existing Gateway and
+# creates HTTPRoute(s) only; it never creates a Gateway or GatewayClass. ---
+gateway:
+  # Set to false to skip HTTPRoute creation entirely (e.g. routing managed
+  # elsewhere by the umbrella chart).
+  enabled: true
+  parentRef:
+    name: ""
+    namespace: ""
+    sectionName: ""
+  # Defaults to [serverName] when empty.
+  hostnames: []

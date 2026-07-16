@@ -1,0 +1,17 @@
+{{- /*
+User-provided base homeserver config. Rendered only when config.settings is used
+(skipped when config.existingConfigMap points at a pre-existing ConfigMap).
+This is mounted first in the ordered --config-path list; chart fragments layer on
+top and win the shallow (top-level, last-wins) merge Synapse performs.
+*/ -}}
+{{- if not .Values.config.existingConfigMap }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "synapse.fullname" . }}-base
+  labels:
+    {{- include "synapse.labels" . | nindent 4 }}
+data:
+  homeserver.yaml: |
+    {{- .Values.config.settings | toYaml | nindent 4 }}
+{{- end }}

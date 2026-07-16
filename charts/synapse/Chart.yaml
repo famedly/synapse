@@ -1,0 +1,27 @@
+apiVersion: v2
+name: synapse
+description: |
+  Lean, production-oriented Helm chart for Famedly's Synapse (Matrix homeserver).
+  Ships no dependencies (Postgres, Redis, object storage, Gateway, Reloader are
+  external) and no development helpers; designed to be consumed as a dependency by
+  an umbrella chart. Supports workerless mode and arbitrary worker topologies.
+type: application
+# Chart version; bumped per release of the chart itself.
+version: 0.1.0
+# The Synapse version this chart is tested against; also the default image tag.
+appVersion: "1.155"
+kubeVersion: ">=1.36.0-0"
+home: https://github.com/famedly/synapse
+sources:
+  - https://github.com/famedly/synapse
+keywords:
+  - matrix
+  - synapse
+  - homeserver
+maintainers:
+  - name: Famedly
+    url: https://famedly.com
+annotations:
+  # Minimum tested platforms. OpenShift 4.22 corresponds to Kubernetes 1.36.
+  famedly.com/min-kubernetes: "1.36"
+  famedly.com/min-openshift: "4.22"
