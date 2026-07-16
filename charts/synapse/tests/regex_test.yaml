@@ -1,0 +1,42 @@
+suite: full-match regex transformation (golden)
+templates:
+  - templates/httproute.yaml
+set:
+  serverName: matrix.example.com
+  secrets.existingSecret: synapse-secrets
+  gateway.parentRef.name: matrix-gateway
+  workers.enabled: true
+  # federation_inbound: single partial-match endpoint (no anchor) -> gains .*
+  # user_dir: single anchored endpoint ($) -> unchanged
+  workers.groups:
+    - name: fed-in
+      types: [federation_inbound]
+    - name: userdir
+      types: [user_dir]
+capabilities:
+  majorVersion: "1"
+  minorVersion: "36"
+tests:
+  - it: appends .* to an unanchored partial-match pattern
+    asserts:
+      - equal:
+          path: spec.rules[0].matches[0].path.type
+          value: RegularExpression
+      - equal:
+          path: spec.rules[0].matches[0].path.value
+          value: "/_matrix/federation/(v1|v2)/send/.*"
+
+  - it: leaves a $-anchored pattern unchanged
+    asserts:
+      - equal:
+          path: spec.rules[1].matches[0].path.value
+          value: "^/_matrix/client/(api/v1|r0|v3|unstable)/user_directory/search$"
+
+  - it: routed worker rules precede the main catch-all
+    asserts:
+      - equal:
+          path: spec.rules[2].matches[0].path.type
+          value: PathPrefix
+      - equal:
+          path: spec.rules[2].backendRefs[0].name
+          value: RELEASE-NAME-synapse-main

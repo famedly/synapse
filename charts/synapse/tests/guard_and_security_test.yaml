@@ -1,0 +1,65 @@
+suite: guards and security context
+capabilities:
+  majorVersion: "1"
+  minorVersion: "36"
+tests:
+  - it: fails when a singleton preset is given replicas > 1
+    template: templates/statefulset-worker.yaml
+    set:
+      secrets.existingSecret: s
+      gateway.parentRef.name: g
+      workers.enabled: true
+      workers.groups:
+        - name: presence
+          types: [presence]
+          replicas: 2
+    asserts:
+      - failedTemplate:
+          errorPattern: "must have replicas: 1"
+
+  - it: fails on an unknown preset name
+    template: templates/statefulset-worker.yaml
+    set:
+      secrets.existingSecret: s
+      gateway.parentRef.name: g
+      workers.enabled: true
+      workers.groups:
+        - name: bogus
+          types: [not_a_worker]
+          replicas: 1
+    asserts:
+      - failedTemplate:
+          errorPattern: "unknown preset"
+
+  - it: applies explicit UID/GID/fsGroup when set (vanilla k8s)
+    template: templates/statefulset-main.yaml
+    set:
+      config.settings.server_name: x
+      secrets.existingSecret: s
+      gateway.parentRef.name: g
+      podSecurityContext.runAsUser: 991
+      podSecurityContext.runAsGroup: 991
+      podSecurityContext.fsGroup: 991
+    asserts:
+      - equal:
+          path: spec.template.spec.securityContext.runAsUser
+          value: 991
+      - equal:
+          path: spec.template.spec.securityContext.fsGroup
+          value: 991
+      - equal:
+          path: spec.template.spec.securityContext.runAsNonRoot
+          value: true
+
+  - it: lets a component override the global security context
+    template: templates/statefulset-main.yaml
+    set:
+      config.settings.server_name: x
+      secrets.existingSecret: s
+      gateway.parentRef.name: g
+      podSecurityContext.runAsUser: 991
+      main.podSecurityContext.runAsUser: 1000
+    asserts:
+      - equal:
+          path: spec.template.spec.securityContext.runAsUser
+          value: 1000

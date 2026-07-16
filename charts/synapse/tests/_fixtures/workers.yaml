@@ -1,0 +1,36 @@
+serverName: matrix.example.com
+config:
+  settings:
+    server_name: matrix.example.com
+    media_store_path: /media
+secrets:
+  existingSecret: synapse-secrets
+redis:
+  host: redis
+  passwordSecret: { key: redis-password }
+gateway:
+  parentRef: { name: matrix-gateway, namespace: istio-system, sectionName: https }
+workers:
+  enabled: true
+  groups:
+    - name: synchrotron
+      types: [synchrotron]
+      replicas: 3
+    - name: client-reader
+      types: [client_reader]
+      replicas: 2
+    - name: stream-writers
+      types: [account_data, presence, receipts, typing, to_device, push_rules]
+      replicas: 1
+    - name: event-persister
+      types: [event_persister]
+      replicas: 2
+    - name: media
+      types: [media_repository]
+      replicas: 2
+    - name: background
+      types: [background_worker]
+      replicas: 1
+    - name: senders
+      types: [federation_sender, pusher]
+      replicas: 2

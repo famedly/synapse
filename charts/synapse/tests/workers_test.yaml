@@ -1,0 +1,98 @@
+suite: worker deployment
+values:
+  - _fixtures/workers.yaml
+capabilities:
+  majorVersion: "1"
+  minorVersion: "36"
+tests:
+  - it: creates a StatefulSet per worker group with the requested replicas
+    template: templates/statefulset-worker.yaml
+    asserts:
+      - hasDocuments:
+          count: 7
+      - equal:
+          path: spec.template.spec.containers[0].command
+          value: ["python", "-m", "synapse.app.generic_worker"]
+        documentIndex: 0
+
+  - it: injects a per-pod worker_name via the init container (workers only)
+    template: templates/statefulset-worker.yaml
+    documentIndex: 0
+    asserts:
+      - matchRegex:
+          path: spec.template.spec.initContainers[0].command[2]
+          pattern: "worker_name"
+
+  - it: forces Redis on and wires secret paths in shared config
+    template: templates/configmap-shared.yaml
+    asserts:
+      - matchRegex:
+          path: data["shared.yaml"]
+          pattern: "worker_replication_secret_path: /secrets/worker_replication_secret"
+      - matchRegex:
+          path: data["shared.yaml"]
+          pattern: "password_path: /secrets/redis_password"
+
+  - it: puts main and every stream writer in instance_map
+    template: templates/configmap-shared.yaml
+    asserts:
+      - matchRegex:
+          path: data["shared.yaml"]
+          pattern: "host: RELEASE-NAME-synapse-main-0\\."
+      - matchRegex:
+          path: data["shared.yaml"]
+          pattern: "RELEASE-NAME-synapse-event-persister-1:"
+
+  - it: shards events across both persisters
+    template: templates/configmap-shared.yaml
+    asserts:
+      - matchRegex:
+          path: data["shared.yaml"]
+          pattern: "- RELEASE-NAME-synapse-event-persister-0"
+      - matchRegex:
+          path: data["shared.yaml"]
+          pattern: "- RELEASE-NAME-synapse-event-persister-1"
+
+  - it: pins single-instance duties to ordinal 0 and disables media on main
+    template: templates/configmap-shared.yaml
+    asserts:
+      - matchRegex:
+          path: data["shared.yaml"]
+          pattern: "run_background_tasks_on: RELEASE-NAME-synapse-background-0"
+      - matchRegex:
+          path: data["shared.yaml"]
+          pattern: "media_instance_running_background_jobs: RELEASE-NAME-synapse-media-0"
+      - matchRegex:
+          path: data["shared.yaml"]
+          pattern: "enable_media_repo: false"
+
+  - it: enumerates pusher and federation_sender instances
+    template: templates/configmap-shared.yaml
+    asserts:
+      - matchRegex:
+          path: data["shared.yaml"]
+          pattern: "pusher_instances:"
+      - matchRegex:
+          path: data["shared.yaml"]
+          pattern: "federation_sender_instances:"
+
+  - it: keeps the main catch-all as the last rule (after 4 routed groups)
+    template: templates/httproute.yaml
+    asserts:
+      - equal:
+          path: spec.rules[4].matches[0].path.type
+          value: PathPrefix
+      - equal:
+          path: spec.rules[4].backendRefs[0].name
+          value: RELEASE-NAME-synapse-main
+
+  - it: replication-only event persister probes on the replication port
+    template: templates/statefulset-worker.yaml
+    documentIndex: 3
+    asserts:
+      - equal:
+          path: metadata.name
+          value: RELEASE-NAME-synapse-event-persister
+      - equal:
+          path: spec.template.spec.containers[0].readinessProbe.httpGet.port
+          value: 9093
