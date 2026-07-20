@@ -503,7 +503,8 @@ def listen_http(
                     reactor=reactor,
                 )
                 logger.info(
-                    "Synapse now listening on TCP port %d (TLS)", listener_config.port
+                    "Synapse now listening on TCP port %d (TLS)",
+                    ports[0].getHost().port,
                 )
             else:
                 ports = listen_tcp(
@@ -513,7 +514,7 @@ def listen_http(
                     reactor=reactor,
                 )
                 logger.info(
-                    "Synapse now listening on TCP port %d", listener_config.port
+                    "Synapse now listening on TCP port %d", ports[0].getHost().port
                 )
 
         elif isinstance(listener_config, UnixListenerConfig):
