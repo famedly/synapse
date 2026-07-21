@@ -233,7 +233,7 @@ class ThirdPartyRulesTestCase(unittest.FederatingHomeserverTestCase):
 
         # add a callback that will raise our hacky exception
         async def check(
-            ev: EventBase, state: StateMap[EventBase]
+            ev: EventBase, state: StateMap[EventBase], requesting_user: Requester | None
         ) -> tuple[bool, JsonDict | None]:
             raise NastyHackException(429, "message")
 
@@ -261,7 +261,7 @@ class ThirdPartyRulesTestCase(unittest.FederatingHomeserverTestCase):
 
         # first patch the event checker so that it will try to modify the event
         async def check(
-            ev: EventBase, state: StateMap[EventBase]
+            ev: EventBase, state: StateMap[EventBase], requesting_user: Requester | None
         ) -> tuple[bool, JsonDict | None]:
             # Try and modify the content, this will fail because the event is
             # immutable. (We therefore need the type ignore linter, as the
@@ -285,18 +285,27 @@ class ThirdPartyRulesTestCase(unittest.FederatingHomeserverTestCase):
         self.assertEqual(channel.code, 500, channel.result)
 
     def test_modify_event(self) -> None:
-        """The module can return a modified version of the event"""
+        """
+        The module can return a modified version of the event. Use this test to check
+        the backwards compatibility for the number of arguments passed to the function.
+        """
 
         # first patch the event checker so that it will modify the event
-        async def check(
-            ev: EventBase, state: StateMap[EventBase]
+        async def check_v2(
+            ev: EventBase, state: StateMap[EventBase], requesting_user: Requester | None
         ) -> tuple[bool, JsonDict | None]:
             d = ev.get_dict()
+            # To make sure that the requesting user argument is giving the correct data,
+            # check that it should be the same as the event sender, as that is the
+            # fallback option when it is not a differing user
+            assert requesting_user is not None
+            self.assertEqual(ev.sender, requesting_user.user.to_string())
+            self.assertEqual(ev.content["x"], "x")
             d["content"] = {"x": "y"}
             return True, d
 
         self.hs.get_module_api_callbacks().third_party_event_rules._check_event_allowed_callbacks = [
-            check
+            check_v2
         ]
 
         # now send the event
@@ -319,12 +328,46 @@ class ThirdPartyRulesTestCase(unittest.FederatingHomeserverTestCase):
         ev = channel.json_body
         self.assertEqual(ev["content"]["x"], "y")
 
+        async def check(
+            ev: EventBase, state: StateMap[EventBase]
+        ) -> tuple[bool, JsonDict | None]:
+            # No requesting_user to check here. Just make sure it does not blow up with
+            # a 500 Internal Server Error
+            d = ev.get_dict()
+            self.assertEqual(ev.content["x"], "x")
+            d["content"] = {"x": "y"}
+            return True, d
+
+        self.hs.get_module_api_callbacks().third_party_event_rules._check_event_allowed_callbacks = [
+            check
+        ]
+
+        # now send the event
+        channel = self.make_request(
+            "PUT",
+            "/_matrix/client/r0/rooms/%s/send/modifyme/2" % self.room_id,
+            {"x": "x"},
+            access_token=self.tok,
+        )
+        self.assertEqual(channel.code, 200, channel.result)
+        event_id = channel.json_body["event_id"]
+
+        # ... and check that it got modified
+        channel = self.make_request(
+            "GET",
+            "/_matrix/client/r0/rooms/%s/event/%s" % (self.room_id, event_id),
+            access_token=self.tok,
+        )
+        self.assertEqual(channel.code, 200, channel.result)
+        ev = channel.json_body
+        self.assertEqual(ev["content"]["x"], "y")
+
     def test_message_edit(self) -> None:
         """Ensure that the module doesn't cause issues with edited messages."""
 
         # first patch the event checker so that it will modify the event
         async def check(
-            ev: EventBase, state: StateMap[EventBase]
+            ev: EventBase, state: StateMap[EventBase], requesting_user: Requester | None
         ) -> tuple[bool, JsonDict | None]:
             d = ev.get_dict()
             d["content"] = {
@@ -541,7 +584,9 @@ class ThirdPartyRulesTestCase(unittest.FederatingHomeserverTestCase):
 
         # Define a callback that sends a custom event on power levels update.
         async def test_fn(
-            event: EventBase, state_events: StateMap[EventBase]
+            event: EventBase,
+            state_events: StateMap[EventBase],
+            requesting_user: Requester | None,
         ) -> tuple[bool, JsonDict | None]:
             if event.is_state() and event.type == EventTypes.PowerLevels:
                 await api.create_and_send_event_into_room(
