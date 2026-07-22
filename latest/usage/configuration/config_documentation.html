@@ -37,7 +37,7 @@
             const path_to_root = "../../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../../searchindex-6a754381.js";
+            window.path_to_searchindex_js = "../../searchindex-f9732ba8.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../../toc-e4894a5b.js"></script>
@@ -1942,7 +1942,7 @@ For more details, see the <a href="../../setup/forward_proxy.html">forward proxy
 <hr>
 <h3 id="rc_delayed_event_mgmt"><a class="header" href="#rc_delayed_event_mgmt"><code>rc_delayed_event_mgmt</code></a></h3>
 <p><em>(object)</em> Ratelimiting settings for delayed event management.</p>
-<p>This is a ratelimiting option that ratelimits attempts to restart, cancel, or view delayed events based on the sending client’s account and device ID.</p>
+<p>This is a ratelimiting option that ratelimits attempts to restart, cancel, or view delayed events based on the sending client’s account, or its source IP when requests are unauthenticated.</p>
 <p>Attempts to create or send delayed events are ratelimited not by this setting, but by <code>rc_message</code>.</p>
 <p>Setting this to a high value allows clients to make delayed event management requests often (such as repeatedly restarting a delayed event with a short timeout, or restarting several different delayed events all at once) without the risk of being ratelimited.</p>
 <p>This setting has the following sub-options:</p>
@@ -2625,6 +2625,7 @@ These limits are applied in addition to the <code>max_upload_size</code> limit a
 <h3 id="auto_join_rooms"><a class="header" href="#auto_join_rooms"><code>auto_join_rooms</code></a></h3>
 <p><em>(array)</em> Users who register on this homeserver will automatically be joined to the rooms listed under this option.</p>
 <p>By default, any room aliases included in this list will be created as a publicly joinable room when the first user registers for the homeserver. If the room already exists, make certain it is a publicly joinable room, i.e. the join rule of the room must be set to <code>public</code>. You can find more options relating to auto-joining rooms below.</p>
+<p>Invite-only rooms can also be auto-joined when setting <code>auto_join_mxid_localpart</code> to a user who’s part of the invite-only rooms.</p>
 <p>As Spaces are just rooms under the hood, Space aliases may also be used.</p>
 <p>Defaults to <code>[]</code>.</p>
 <p>Example configuration:</p>

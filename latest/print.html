@@ -38,7 +38,7 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-6a754381.js";
+            window.path_to_searchindex_js = "searchindex-f9732ba8.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="toc-e4894a5b.js"></script>
@@ -5939,7 +5939,7 @@ For more details, see the <a href="#using-a-forward-proxy-with-synapse">forward 
 <hr>
 <h3 id="rc_delayed_event_mgmt"><a class="header" href="#rc_delayed_event_mgmt"><code>rc_delayed_event_mgmt</code></a></h3>
 <p><em>(object)</em> Ratelimiting settings for delayed event management.</p>
-<p>This is a ratelimiting option that ratelimits attempts to restart, cancel, or view delayed events based on the sending client’s account and device ID.</p>
+<p>This is a ratelimiting option that ratelimits attempts to restart, cancel, or view delayed events based on the sending client’s account, or its source IP when requests are unauthenticated.</p>
 <p>Attempts to create or send delayed events are ratelimited not by this setting, but by <code>rc_message</code>.</p>
 <p>Setting this to a high value allows clients to make delayed event management requests often (such as repeatedly restarting a delayed event with a short timeout, or restarting several different delayed events all at once) without the risk of being ratelimited.</p>
 <p>This setting has the following sub-options:</p>
@@ -6622,6 +6622,7 @@ These limits are applied in addition to the <code>max_upload_size</code> limit a
 <h3 id="auto_join_rooms"><a class="header" href="#auto_join_rooms"><code>auto_join_rooms</code></a></h3>
 <p><em>(array)</em> Users who register on this homeserver will automatically be joined to the rooms listed under this option.</p>
 <p>By default, any room aliases included in this list will be created as a publicly joinable room when the first user registers for the homeserver. If the room already exists, make certain it is a publicly joinable room, i.e. the join rule of the room must be set to <code>public</code>. You can find more options relating to auto-joining rooms below.</p>
+<p>Invite-only rooms can also be auto-joined when setting <code>auto_join_mxid_localpart</code> to a user who’s part of the invite-only rooms.</p>
 <p>As Spaces are just rooms under the hood, Space aliases may also be used.</p>
 <p>Defaults to <code>[]</code>.</p>
 <p>Example configuration:</p>
@@ -12437,6 +12438,7 @@ information.</p>
 ^/_matrix/client/(v1|unstable)/rooms/.*/relations/
 ^/_matrix/client/v1/rooms/.*/threads$
 ^/_matrix/client/unstable/im.nheko.summary/summary/.*$
+^/_matrix/client/v1/room_summary/.*$
 ^/_matrix/client/(r0|v3|unstable)/account/3pid$
 ^/_matrix/client/(r0|v3|unstable)/account/whoami$
 ^/_matrix/client/(r0|v3|unstable)/account/deactivate$
@@ -15578,11 +15580,11 @@ for a server admin: see <a href="usage/administration/admin_api">Admin API</a>.<
         }
     ],
     "avatar_url": "&lt;avatar_url&gt;",  // can be null if not set
-    "is_guest": 0,
-    "admin": 0,
-    "deactivated": 0,
+    "is_guest": false,
+    "admin": false,
+    "deactivated": false,
     "erased": false,
-    "shadow_banned": 0,
+    "shadow_banned": false,
     "creation_ts": 1560432506,
     "last_seen_ts": 1732919539393,
     "appservice_id": null,
@@ -15737,24 +15739,24 @@ By default, the response is ordered by ascending user ID.</p>
     "users": [
         {
             "name": "&lt;user_id1&gt;",
-            "is_guest": 0,
-            "admin": 0,
+            "is_guest": false,
+            "admin": false,
             "user_type": null,
-            "deactivated": 0,
+            "deactivated": false,
             "erased": false,
-            "shadow_banned": 0,
+            "shadow_banned": false,
             "displayname": "&lt;User One&gt;",
             "avatar_url": null,
             "creation_ts": 1560432668000,
             "locked": false
         }, {
             "name": "&lt;user_id2&gt;",
-            "is_guest": 0,
-            "admin": 1,
+            "is_guest": false,
+            "admin": true,
             "user_type": null,
-            "deactivated": 0,
+            "deactivated": false,
             "erased": false,
-            "shadow_banned": 0,
+            "shadow_banned": false,
             "displayname": "&lt;User Two&gt;",
             "avatar_url": "&lt;avatar_url&gt;",
             "creation_ts": 1561550621000,
@@ -21441,14 +21443,17 @@ they don’t have their own system-level dependencies.</p>
 concerned about the criteria for selecting minimum versions. The only thing of concern
 is making sure we’re not making it unnecessarily difficult for downstream package
 maintainers. Generally, this just means avoiding the bleeding edge for a few months.</p>
-<p>The situation for Rust dependencies is fundamentally different. For packagers, the
-concerns around Python dependency versions do not apply. The <code>cargo</code> tool handles
-downloading and building all libraries to satisfy dependencies, and these libraries are
-statically linked into the final binary. This means that from a packager’s perspective,
-the Rust dependency versions are an internal build detail, not a runtime dependency to
-be managed on the target system. Consequently, we have even greater flexibility to
-upgrade Rust dependencies as needed for the project. Some distros (e.g. Fedora) do
-package Rust libraries, but this appears to be the outlier rather than the norm.</p>
+<p>The situation for Rust dependencies is typically different and
+the concerns around Python dependency versions typically do not apply.
+For example, for packagers of Debian, the packagers have the choice of either
+using a crate packaged in the distro, or vendoring crates in the source package for the
+application.</p>
+<p>This freedom to vendor a dependency crate for a specific application consequently gives
+us even greater flexibility to upgrade Rust dependencies as needed for the project.</p>
+<p>(This is in contrast with Python dependencies, which are generally
+installed system-wide by mainstream distributions’ official packages.)</p>
+<p>Some distros (e.g. Fedora) do not vendor Rust dependencies in their
+official application packages, but these cases appear to be less common.</p>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="running-synapse-on-a-single-board-computer"><a href="#running-synapse-on-a-single-board-computer" class="header">Running Synapse on a Single-Board Computer</a></h1>
 <h2 id="summary-of-performance-impact-of-running-on-resource-constrained-devices-such-as-sbcs"><a class="header" href="#summary-of-performance-impact-of-running-on-resource-constrained-devices-such-as-sbcs">Summary of performance impact of running on resource constrained devices such as SBCs</a></h2>
