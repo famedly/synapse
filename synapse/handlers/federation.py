@@ -1299,6 +1299,9 @@ class FederationHandler:
             unpersisted_context,
         ) = await self.event_creation_handler.create_new_client_event(builder=builder)
 
+        # TODO: just remove this callback, it is literally called in the function above
+        #  and the only difference between here and there is one logs as info and the
+        #  other is a warning
         event_allowed, _ = await self._third_party_event_rules.check_event_allowed(
             event, unpersisted_context
         )

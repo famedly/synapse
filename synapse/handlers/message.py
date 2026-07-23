@@ -1433,7 +1433,7 @@ class EventCreationHandler:
             )
 
         res, new_content = await self._third_party_event_rules.check_event_allowed(
-            event, context
+            event, context, requester
         )
         if res is False:
             logger.info(

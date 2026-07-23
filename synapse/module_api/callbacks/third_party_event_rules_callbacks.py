@@ -18,8 +18,9 @@
 # [This file includes modifications made by New Vector Limited]
 #
 #
+import inspect
 import logging
-from typing import TYPE_CHECKING, Any, Awaitable, Callable
+from typing import TYPE_CHECKING, Any, Awaitable, Callable, cast
 
 from twisted.internet.defer import CancelledError
 
@@ -37,9 +38,13 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-CHECK_EVENT_ALLOWED_CALLBACK = Callable[
-    [EventBase, StateMap[EventBase]], Awaitable[tuple[bool, dict | None]]
-]
+CHECK_EVENT_ALLOWED_CALLBACK = (
+    Callable[[EventBase, StateMap[EventBase]], Awaitable[tuple[bool, dict | None]]]
+    | Callable[
+        [EventBase, StateMap[EventBase], Requester | None],
+        Awaitable[tuple[bool, dict | None]],
+    ]
+)
 ON_CREATE_ROOM_CALLBACK = Callable[[Requester, dict, bool], Awaitable]
 CHECK_THREEPID_CAN_BE_INVITED_CALLBACK = Callable[
     [str, str, StateMap[EventBase]], Awaitable[bool]
@@ -92,16 +97,26 @@ def load_legacy_third_party_event_rules(hs: "HomeServer") -> None:
             # We need to wrap check_event_allowed because its old form would return either
             # a boolean or a dict, but now we want to return the dict separately from the
             # boolean.
+            # We also need to check that the signature has either two or three args, as
+            # a requesting user argument was added later. If this new arg was not
+            # included in the registered callback, call it as a function that needs only
+            # 2 arguments and drop the `requester` on the floor.
+            checker_args = inspect.signature(f)
+
             async def wrap_check_event_allowed(
                 event: EventBase,
                 state_events: StateMap[EventBase],
+                requesting_user: Requester,
             ) -> tuple[bool, dict | None]:
                 # Assertion required because mypy can't prove we won't change
                 # `f` back to `None`. See
                 # https://mypy.readthedocs.io/en/latest/common_issues.html#narrowing-and-inner-functions
                 assert f is not None
+                if len(checker_args.parameters) == 3:
+                    res = await f(event, state_events, requesting_user)
+                else:
+                    res = await f(event, state_events)
 
-                res = await f(event, state_events)
                 if isinstance(res, dict):
                     return True, res
                 else:
@@ -262,6 +277,7 @@ class ThirdPartyEventRulesModuleApiCallbacks:
         self,
         event: EventBase,
         context: UnpersistedEventContextBase,
+        requester: Requester | None = None,
     ) -> tuple[bool, dict | None]:
         """Check if a provided event should be allowed in the given context.
 
@@ -275,6 +291,7 @@ class ThirdPartyEventRulesModuleApiCallbacks:
         Args:
             event: The event to be checked.
             context: The context of the event.
+            requester: The user who requested this event or None.
 
         Returns:
             The result from the ThirdPartyRules module, as above.
@@ -291,9 +308,32 @@ class ThirdPartyEventRulesModuleApiCallbacks:
 
         for callback in self._check_event_allowed_callbacks:
             try:
-                res, replacement_data = await delay_cancellation(
-                    callback(event, state_events)
-                )
+                checker_args = inspect.signature(callback)
+                # Ensure backwards compatibility with third party callbacks
+                # that don't expect the requesting_user argument.
+                if len(checker_args.parameters) == 2:
+                    callback_without_requester_id = cast(
+                        Callable[
+                            [EventBase, StateMap[EventBase]],
+                            Awaitable[tuple[bool, dict | None]],
+                        ],
+                        callback,
+                    )
+                    res, replacement_data = await delay_cancellation(
+                        callback_without_requester_id(event, state_events)
+                    )
+                else:
+                    callback_with_requester_id = cast(
+                        Callable[
+                            [EventBase, StateMap[EventBase], Requester | None],
+                            Awaitable[tuple[bool, dict | None]],
+                        ],
+                        callback,
+                    )
+                    res, replacement_data = await delay_cancellation(
+                        callback_with_requester_id(event, state_events, requester)
+                    )
+
             except CancelledError:
                 raise
             except SynapseError as e:
