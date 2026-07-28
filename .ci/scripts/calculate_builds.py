@@ -82,11 +82,13 @@ all_mod_pack_versions = {
     # there is no modpack with fcs 0.0.3 as 2 fcs releases have been done since the last synapse release
     "mod028": {"sic-version": "0.2.2", "sta-version": "0.13.1", "fcs-version": "0.0.4"},
     "mod029": {"sic-version": "0.5.0", "sta-version": "0.13.1", "fcs-version": "0.0.4"},
+    "mod030": {"sic-version": "0.2.2", "sta-version": "0.13.1", "fcs-version": "0.1.0"},
+    "mod031": {"sic-version": "0.5.0", "sta-version": "0.13.1", "fcs-version": "0.1.0"},
 }
 
 # Adjust this section to decide what gets built and layered on top
 # THIS IS THE SECTION TO EDIT, after you have added the new versions above
-current_mod_packs_to_build = ["mod028", "mod029"]
+current_mod_packs_to_build = ["mod030", "mod031"]
 
 generated_jobs: list[dict[str, Any]] = []
 for mod_pack_job in current_mod_packs_to_build:
