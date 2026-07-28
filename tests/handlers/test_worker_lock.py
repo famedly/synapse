@@ -19,9 +19,6 @@
 #
 #
 
-import logging
-import platform
-
 from twisted.internet import defer
 from twisted.internet.testing import MemoryReactor
 
@@ -37,10 +34,7 @@ from synapse.util.duration import Duration
 
 from tests import unittest
 from tests.replication._base import BaseMultiWorkerStreamTestCase
-from tests.unittest import COVERAGE_RUNNING
 from tests.utils import test_timeout
-
-logger = logging.getLogger(__name__)
 
 
 class WorkerLockTestCase(unittest.HomeserverTestCase):
@@ -150,41 +144,19 @@ class WorkerLockTestCase(unittest.HomeserverTestCase):
         while self.reactor.seconds() < end_time_s:
             self.reactor.advance(by.as_secs())
 
-    # We do not want to run this test while collecting coverage. Some environments are
-    # resource constrained and this test will flake/fail as it is a stress test and not
-    # a compliance test. The coverage included from this test is found in other tests.
-    @unittest.skip_unless(
-        not COVERAGE_RUNNING,
-        "Test requested to not be run when collecting coverage data.",
-    )
     def test_lock_contention(self) -> None:
         """Test lock contention when a lot of locks wait on a single worker"""
         nb_locks_to_test = 500
-        current_machine = platform.machine().lower()
-        if current_machine.startswith("riscv"):
-            # RISC-V specific settings
-            timeout_seconds = 15  # Increased timeout for RISC-V
-            # add a print or log statement here for visibility in CI logs
-            logger.info(  # use logger.info
-                "Detected RISC-V architecture (%s). "
-                "Adjusting test_lock_contention: timeout=%ss",
-                current_machine,
-                timeout_seconds,
-            )
-        else:
-            # Settings for other architectures. The 5 seconds originally given to this
-            # test was insufficient when under load. Sometimes it would fail on CI. For
-            # lack of a better/reliable Twisted mechanism option, this uses signal which
-            # watches wallclock time instead of Twisted's simulated time.
-            timeout_seconds = 15
-        # It takes around 0.5s on a 5+ years old laptop
-        with test_timeout(timeout_seconds):  # Use the dynamically set timeout
-            d = self._take_locks(
-                nb_locks_to_test
-            )  # Use the (potentially adjusted) number of locks
-            self.assertEqual(
-                self.get_success(d), nb_locks_to_test
-            )  # Assert against the used number of locks
+
+        # This test is a performance-regression canary: before #16840 taking the
+        # locks below spent ~30s spinning the CPU, afterwards ~0.5s. We budget
+        # CPU time rather than wall-clock time so that time spent waiting on
+        # database round-trips (significant on PostgreSQL) or lost to a loaded
+        # CI machine doesn't make the test flaky: a healthy run costs well
+        # under 1s of CPU on either database engine.
+        with test_timeout(5, cpu_time=True):
+            d = self._take_locks(nb_locks_to_test)
+            self.assertEqual(self.get_success(d), nb_locks_to_test)
 
     async def _take_locks(self, nb_locks: int) -> int:
         locks = [
