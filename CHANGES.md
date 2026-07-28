@@ -27,6 +27,10 @@ Low severity:
 - Fix [ELEMENTSEC-2026-1703](https://github.com/element-hq/synapse/security/advisories/GHSA-vh4c-pqh4-w3wq)
 - Fix [ELEMENTSEC-2026-1760](https://github.com/element-hq/synapse/security/advisories/GHSA-hgcg-p9gx-fq5f)
 
+## Famedly additions for v1.157.2_1
+
+- feat: Add requester as an argument to the third party module callback "check_event_allowed" (Jason Little)
+
 
 # Synapse 1.157.1 (2026-07-22)
 
