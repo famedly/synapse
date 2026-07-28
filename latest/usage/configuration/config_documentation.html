@@ -37,7 +37,7 @@
             const path_to_root = "../../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../../searchindex-c1ee44ff.js";
+            window.path_to_searchindex_js = "../../searchindex-a74687cc.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../../toc-e4894a5b.js"></script>
@@ -430,6 +430,21 @@ shown.</p>
 </li>
 <li>
 <p><code>include_offline_users_on_sync</code> (boolean): When clients perform an initial or <code>full_state</code> sync, presence results for offline users are not included by default. Setting <code>include_offline_users_on_sync</code> to <code>true</code> will always include offline users in the results. Defaults to <code>false</code>.</p>
+</li>
+<li>
+<p><code>last_active_granularity</code> (duration): How long after a user was last active that they are still shown as “currently active” to other users. Larger values reduce the rate of presence updates sent to other users and servers.</p>
+<p><em>Added in Synapse 1.156.0.</em></p>
+<p>Defaults to <code>"1m"</code>.</p>
+</li>
+<li>
+<p><code>sync_online_timeout</code> (duration): How long after a client’s last sync request their presence is switched to offline. Clients are expected to keep a sync request open at (almost) all times while online, so this only needs to cover the gap between two consecutive sync requests. Note that if <code>rc_presence</code> is set to ratelimit how often syncs can affect presence, this must be greater than the ratelimit’s interval or users will incorrectly be marked as offline in between syncs.</p>
+<p><em>Added in Synapse 1.156.0.</em></p>
+<p>Defaults to <code>"30s"</code>.</p>
+</li>
+<li>
+<p><code>idle_timeout</code> (duration): How long after a user was last active that their presence is switched to “unavailable” (idle) while they remain connected. Must be greater than <code>last_active_granularity</code>.</p>
+<p><em>Added in Synapse 1.156.0.</em></p>
+<p>Defaults to <code>"5m"</code>.</p>
 </li>
 </ul>
 <p>Example configuration:</p>
@@ -3564,6 +3579,30 @@ process (i.e. not workerized) and media is stored locally Defaults to <code>fals
   jitter_delay: 10s
 </code></pre>
 <hr>
+<h3 id="push_rules"><a class="header" href="#push_rules"><code>push_rules</code></a></h3>
+<p><em>(object)</em> Options for push rules</p>
+<p>This setting has the following sub-options:</p>
+<ul>
+<li>
+<p><code>limits</code> (object): Limits on the size of push rules that users can have</p>
+<p>This setting has the following sub-options:</p>
+<ul>
+<li>
+<p><code>rule_count</code> (integer): This is the total number of push rules that each user can have. Power users may expect to have one push rule per room. Defaults to <code>10000</code>.</p>
+</li>
+<li>
+<p><code>rule_id_length</code> (integer): This is the maximum length of a push rule ID, in bytes. Push rule IDs need to be allowed to be at least as long as a room ID (which are <a href="https://spec.matrix.org/v1.19/appendices/#room-ids">limited to 255 bytes per specification</a>)
+It’s recommended to leave this option as it is. We expect to remove this option if/when the specification standardises on a limit. Defaults to <code>300</code>.</p>
+</li>
+<li>
+<p><code>rule_size</code> (integer): This is the maximum size of a push rule’s body, in bytes.
+The exact mechanism for calculating this size is currently an implementation detail, subject to change. This limit should be treated as a coarse sanity limit rather than something to fine-tune.
+It’s recommended to leave this option as it is. We expect to remove this option if/when the specification standardises on a limit and a mechanism for calculating it. Defaults to <code>1024</code>.</p>
+</li>
+</ul>
+</li>
+</ul>
+<hr>
 <h2 id="rooms"><a class="header" href="#rooms">Rooms</a></h2>
 <p>Config options relating to rooms.</p>
 <hr>
@@ -3875,6 +3914,13 @@ process (i.e. not workerized) and media is stored locally Defaults to <code>fals
 <p><em>(array)</em> A list of rooms to exclude from sync responses. This is useful for server administrators wishing to group users into a room without these users being able to see it from their client. Defaults to <code>[]</code>.</p>
 <p>Example configuration:</p>
 <pre><code class="language-yaml">exclude_rooms_from_sync:
+- '!foo:example.com'
+</code></pre>
+<hr>
+<h3 id="exclude_rooms_from_presence"><a class="header" href="#exclude_rooms_from_presence"><code>exclude_rooms_from_presence</code></a></h3>
+<p><em>(array)</em> A list of rooms to exclude from presence updates. Presence will not be routed between two users solely because they share one of these rooms. Users who also share a non-excluded room continue to exchange presence as normal. Defaults to <code>[]</code>.</p>
+<p>Example configuration:</p>
+<pre><code class="language-yaml">exclude_rooms_from_presence:
 - '!foo:example.com'
 </code></pre>
 <hr>
