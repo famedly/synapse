@@ -154,7 +154,7 @@ class RedisSubscriber(SubscriberProtocol):
         # Make sure to send the SERVER command before any other commands. It is
         # important to not interrupt the SUBSCRIBE processes
         logger.info("Sending SERVER command to redis connection")
-        self.send_command(
+        await self._async_send_command(
             ServerCommand(
                 self.server_name,
                 self.hs.get_instance_name(),
@@ -183,7 +183,7 @@ class RedisSubscriber(SubscriberProtocol):
             "Successfully subscribed to redis stream, sending REPLICATE command"
         )
         self.synapse_handler.new_connection(self)
-        self.send_command(ReplicateCommand())
+        await self._async_send_command(ReplicateCommand())
 
         logger.info("REPLICATE successfully sent")
 
