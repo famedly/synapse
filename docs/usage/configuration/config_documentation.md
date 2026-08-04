@@ -110,6 +110,17 @@ Example configuration:
 ```yaml
 famedly_maximum_refresh_token_lifetime: 3600000
 ```
+
+---
+### `force_crash_workers_after_main_restart`
+
+*(bool)* When enabled causes any workers to crash when the main process starts up after they do. Defaults to "false"
+
+Example configuration:
+```yaml
+force_crash_workers_after_main_restart: true
+```
+
 ---
 ## Experimental features
 
