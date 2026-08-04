@@ -110,17 +110,15 @@ Example configuration:
 ```yaml
 famedly_maximum_refresh_token_lifetime: 3600000
 ```
-
 ---
 ### `force_crash_workers_after_main_restart`
 
-*(bool)* When enabled causes any workers to crash when the main process starts up after they do. Defaults to "false"
+*(boolean)* When enabled, shutdown and exit all workers of Synapse if the main process is restarted. The shutdown is triggered by a SIGTERM raised from within each worker. Once shutdown, they are eligible for restart based on the deployment  orchestrator. Individual workers can still be restarted independently without affecting other workers or the main process Defaults to `false`.
 
 Example configuration:
 ```yaml
 force_crash_workers_after_main_restart: true
 ```
-
 ---
 ## Experimental features
 

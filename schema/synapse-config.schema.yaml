@@ -10,6 +10,16 @@ properties:
     default: "160d"
     examples:
       - 3600000
+  force_crash_workers_after_main_restart:
+    type: boolean
+    description: >-
+      When enabled, shutdown and exit all workers of Synapse if the main process is restarted. The shutdown is triggered
+      by a SIGTERM raised from within each worker. Once shutdown, they are eligible for restart based on the deployment 
+      orchestrator.
+      Individual workers can still be restarted independently without affecting other workers or the main process
+    default: false
+    examples:
+      - true
   experimental_features:
     type: object
     description: >-
