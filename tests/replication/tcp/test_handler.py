@@ -247,7 +247,13 @@ class RestartBehaviorTestCase(BaseMultiWorkerStreamTestCase):
         Test that a server command send from the main process can raise a SIGTERM on a
         worker
         """
-        # self.reactor.advance(0.001)
+        # This test simulates the process being restarted as close as we can from inside
+        # pytest/trial. The test infrastructure does not tolerate an actual SIGTERM
+        # being raised, as that will stop all tests in progress. Instead, we mock the
+        # `raise_signal` function to make sure it is actually called after the SERVER
+        # command has been sent.
+
+        # We will need another worker that can receive the command
         worker = self.make_worker_hs(
             "synapse.app.generic_worker",
             extra_config={
@@ -256,8 +262,11 @@ class RestartBehaviorTestCase(BaseMultiWorkerStreamTestCase):
             },
         )
 
-        # Move forward time just a pinch, so the SERVER command has a new value
-        self.reactor.advance(0.001)
+        #
+        # Move forward time, so the SERVER command has a new value. A healthy amount,
+        # although a tiny amount would also do fine.
+        self.reactor.advance(1.000)
+
         # In unit tests, we can not really restart a process. So, send the command again
         # to simulate that.
         self.repl_comm_handler.send_command(
@@ -274,4 +283,5 @@ class RestartBehaviorTestCase(BaseMultiWorkerStreamTestCase):
             # Need to move forward time to get the background tasks to run
             self.reactor.advance(0.001)
 
+        # the `raise_signal` should have been called exactly one time.
         patch_ctx.assert_called_once()
