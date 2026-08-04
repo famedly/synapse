@@ -158,7 +158,7 @@ class RedisSubscriber(SubscriberProtocol):
             ServerCommand(
                 self.server_name,
                 self.hs.get_instance_name(),
-                self.hs.get_clock().time_msec(),
+                self.synapse_handler.startup_time_ms,
             )
         )
 
