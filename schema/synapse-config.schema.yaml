@@ -1,5 +1,5 @@
 $schema: https://famedly.github.io/synapse/latest/schema/v1/meta.schema.json
-$id: https://famedly.github.io/synapse/schema/synapse/v1.157/synapse-config.schema.json
+$id: https://famedly.github.io/synapse/schema/synapse/v1.158/synapse-config.schema.json
 type: object
 properties:
   famedly_maximum_refresh_token_lifetime:
@@ -325,7 +325,11 @@ properties:
       _Changed in Synapse 1.76:_ the default version room version was increased
       from [9](https://spec.matrix.org/v1.5/rooms/v9/) to
       [10](https://spec.matrix.org/v1.5/rooms/v10/).
-    default: "10"
+
+      _Changed in Synapse 1.157:_ the default version room version was increased
+      from [10](https://spec.matrix.org/v1.12/rooms/v10/) to
+      [11](https://spec.matrix.org/v1.12/rooms/v11/).
+    default: "11"
     examples:
       - "8"
   gc_thresholds:
@@ -2517,20 +2521,42 @@ properties:
       module API [callback](../../modules/media_repository_callbacks.md#get_media_upload_limits_for_user).
     default: []
     items:
-      time_period:
-        type: "#/$defs/duration"
-        description: >-
-          The time period over which the limit applies. Required.
-      max_size:
-        type: "#/$defs/bytes"
-        description: >-
-          Amount of data that can be uploaded in the time period by the user.
-          Required.
+      type: object
+      required:
+        - time_period
+        - max_size
+      properties:
+        time_period:
+          $ref: "#/$defs/duration"
+          description: >-
+            The time period over which the limit applies. Required.
+        max_size:
+          $ref: "#/$defs/bytes"
+          description: >-
+            Amount of data that can be uploaded in the time period by the user.
+            Required.
+        info_uri:
+          type: string
+          description: >-
+            URI returned to the client for where the user can find information
+            about the upload limit and how users can reduce their upload usage
+            or request an upload limit increase. Optional.
+            If not set, Synapse serves a built-in page (customisable via the
+            `media_upload_limit_exceeded.html` template) and uses its URL
+            instead.
+        can_upgrade:
+          type: boolean
+          description: >-
+            Value returned to the client for whether the limit can be increased.
+          default: false
     examples:
       - - time_period: 1h
           max_size: 100M
+          info_uri: https://example.com/quota#hour
         - time_period: 1w
           max_size: 500M
+          info_uri: https://example.com/quota
+          can_upgrade: true
   max_image_pixels:
     $ref: "#/$defs/bytes"
     description: Maximum number of pixels that will be thumbnailed.
