@@ -38,10 +38,10 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-a74687cc.js";
+            window.path_to_searchindex_js = "searchindex-4e1d5f25.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="toc-e4894a5b.js"></script>
+        <script src="toc-561cdce4.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -2031,6 +2031,11 @@ database migrations are complete. You should wait until background updates from
 each upgrade are complete before moving on to the next upgrade, to avoid
 stacking them up. You can monitor the currently running background updates with
 <a href="#status">the Admin API</a>.</p>
+<h1 id="upgrading-to-v11580"><a class="header" href="#upgrading-to-v11580">Upgrading to v1.158.0</a></h1>
+<h2 id="drop-support-for-ubuntu-2510-questing-quokka-add-support-for-ubuntu-2604-resolute-raccoon"><a class="header" href="#drop-support-for-ubuntu-2510-questing-quokka-add-support-for-ubuntu-2604-resolute-raccoon">Drop support for Ubuntu 25.10 ‘Questing Quokka’, add support for Ubuntu 26.04 ‘Resolute Raccoon’</a></h2>
+<p>Ubuntu 25.10 ‘Questing Quokka’ <a href="https://endoflife.date/ubuntu">is end-of-life as of
+2026-07-01</a>. This release drops support for Ubuntu 25.10,
+and in its place adds support for Ubuntu 26.04 ‘Resolute Raccoon’.</p>
 <h1 id="upgrading-to-v11570"><a class="header" href="#upgrading-to-v11570">Upgrading to v1.157.0</a></h1>
 <h2 id="msc3861-auth-delegation-must-be-migrated-to-stable-matrix-authentication-service-integration"><a class="header" href="#msc3861-auth-delegation-must-be-migrated-to-stable-matrix-authentication-service-integration">MSC3861 Auth Delegation must be migrated to stable Matrix Authentication Service integration</a></h2>
 <p>Support for the deprecated MSC3861 Auth Delegation (<code>experimental_features.msc3861</code>)
@@ -4493,8 +4498,9 @@ shown.</p>
 <p><em>(string)</em> The default room version for newly created rooms on this server.</p>
 <p>Known room versions are listed <a href="https://spec.matrix.org/latest/rooms/#complete-list-of-room-versions">here</a></p>
 <p>For example, for room version 1, <code>default_room_version</code> should be set to “1”.</p>
-<p><em>Changed in Synapse 1.76:</em> the default version room version was increased from <a href="https://spec.matrix.org/v1.5/rooms/v9/">9</a> to <a href="https://spec.matrix.org/v1.5/rooms/v10/">10</a>.</p>
-<p>Defaults to <code>"10"</code>.</p>
+<p><em>Changed in Synapse 1.76:</em> the default version room version was increased from <a href="https://spec.matrix.org/v1.5/rooms/v9/">9</a> to <a href="https://spec.matrix.org/v1.5/rooms/v10/">10</a>.
+<em>Changed in Synapse 1.157:</em> the default version room version was increased from <a href="https://spec.matrix.org/v1.12/rooms/v10/">10</a> to <a href="https://spec.matrix.org/v1.12/rooms/v11/">11</a>.</p>
+<p>Defaults to <code>"11"</code>.</p>
 <p>Example configuration:</p>
 <pre><code class="language-yaml">default_room_version: '8'
 </code></pre>
@@ -6164,12 +6170,30 @@ These limits are applied in addition to the <code>max_upload_size</code> limit a
 <p>An empty list means no limits are applied.</p>
 <p>These settings can be overridden using the <code>get_media_upload_limits_for_user</code> module API <a href="#get_media_upload_limits_for_user">callback</a>.</p>
 <p>Defaults to <code>[]</code>.</p>
+<p>Options for each entry include:</p>
+<ul>
+<li>
+<p><code>time_period</code> (duration): The time period over which the limit applies. Required.</p>
+</li>
+<li>
+<p><code>max_size</code> (byte size): Amount of data that can be uploaded in the time period by the user. Required.</p>
+</li>
+<li>
+<p><code>info_uri</code> (string): URI returned to the client for where the user can find information about the upload limit and how users can reduce their upload usage or request an upload limit increase. Optional. If not set, Synapse serves a built-in page (customisable via the <code>media_upload_limit_exceeded.html</code> template) and uses its URL instead.</p>
+</li>
+<li>
+<p><code>can_upgrade</code> (boolean): Value returned to the client for whether the limit can be increased. Defaults to <code>false</code>.</p>
+</li>
+</ul>
 <p>Example configuration:</p>
 <pre><code class="language-yaml">media_upload_limits:
 - time_period: 1h
   max_size: 100M
+  info_uri: https://example.com/quota#hour
 - time_period: 1w
   max_size: 500M
+  info_uri: https://example.com/quota
+  can_upgrade: true
 </code></pre>
 <hr>
 <h3 id="max_image_pixels"><a class="header" href="#max_image_pixels"><code>max_image_pixels</code></a></h3>
@@ -12138,6 +12162,37 @@ by Synapse itself.</p>
 <p>If multiple such callbacks try to add the same field to an event’s unsigned
 section, the last-registered callback wins.</p>
 <div style="break-before: page; page-break-before: always;"></div>
+<h1 id="federation-callbacks"><a class="header" href="#federation-callbacks">Federation callbacks</a></h1>
+<p>Federation callbacks can be registered using the module API’s <code>register_federation_callbacks</code> method.</p>
+<h2 id="callbacks-5"><a class="header" href="#callbacks-5">Callbacks</a></h2>
+<p>The available federation callbacks are:</p>
+<h3 id="on_event_delivered_over_federation"><a class="header" href="#on_event_delivered_over_federation"><code>on_event_delivered_over_federation</code></a></h3>
+<p><em>First introduced in Synapse v1.158.0</em></p>
+<pre><code class="language-python">async def on_event_delivered_over_federation(
+    event: FederationEventDeliveryEvent,
+) -&gt; None:
+</code></pre>
+<p>Called when an event has been delivered over federation.
+See <code>FederationEventDeliveryEvent</code> for detailed information available on the event.</p>
+<p>Note that depending on the specific method, delivery may not have
+actually been acknowledged by the other homeserver.
+See <code>FederatedEventDeliveryMethod</code> for details on which cases imply acknowledgment.</p>
+<p>Modules should anticipate more methods being added to the <code>FederatedEventDeliveryMethod</code> enum
+over time (it is non-exhaustive).</p>
+<p>Only methods that deliver full, signed PDUs are included in this mechanism.
+Some notable examples of excluded endpoints:</p>
+<ul>
+<li><code>/send_knock</code> is excluded as it only returns unsigned ‘stripped state’.</li>
+<li><code>/timestamp_to_event</code> is excluded as it only returns event IDs, not events themselves.</li>
+</ul>
+<p>If multiple modules implement this callback, Synapse runs them all in order.
+Exceptions are logged and otherwise ignored.</p>
+<p>Performance note:</p>
+<ul>
+<li>Registering this hook causes a performance (caching) optimisation on the
+Federation <code>/state</code> endpoint to be bypassed.</li>
+</ul>
+<div style="break-before: page; page-break-before: always;"></div>
 <h1 id="media-repository-callbacks"><a class="header" href="#media-repository-callbacks">Media repository callbacks</a></h1>
 <p>Media repository callbacks allow module developers to customise the behaviour of the
 media repository on a per user basis. Media repository callbacks can be registered
@@ -15837,7 +15892,8 @@ that contain this value. This parameter is ignored when using the <code>name</co
 </li>
 <li>
 <p><code>guests</code> - string representing a bool - Is optional and if <code>false</code> will <strong>exclude</strong> guest users.
-Defaults to <code>true</code> to include guest users. This parameter is not supported when Matrix Authentication Service integration is enabled. <a href="https://github.com/matrix-org/synapse/pull/15582">See #15582</a></p>
+Defaults to <code>true</code> to include guest users. Setting this option to <code>true</code> is not supported when Matrix Authentication
+Service integration is enabled. <a href="https://github.com/matrix-org/synapse/pull/15582">See #15582</a></p>
 </li>
 <li>
 <p><code>admins</code> - Optional flag to filter admins. If <code>true</code>, only admins are queried. If <code>false</code>, admins are excluded from
