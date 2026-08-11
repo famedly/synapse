@@ -397,8 +397,9 @@ Known room versions are listed [here](https://spec.matrix.org/latest/rooms/#comp
 For example, for room version 1, `default_room_version` should be set to "1".
 
 _Changed in Synapse 1.76:_ the default version room version was increased from [9](https://spec.matrix.org/v1.5/rooms/v9/) to [10](https://spec.matrix.org/v1.5/rooms/v10/).
+_Changed in Synapse 1.157:_ the default version room version was increased from [10](https://spec.matrix.org/v1.12/rooms/v10/) to [11](https://spec.matrix.org/v1.12/rooms/v11/).
 
-Defaults to `"10"`.
+Defaults to `"11"`.
 
 Example configuration:
 ```yaml
@@ -2261,13 +2262,26 @@ These settings can be overridden using the `get_media_upload_limits_for_user` mo
 
 Defaults to `[]`.
 
+Options for each entry include:
+
+* `time_period` (duration): The time period over which the limit applies. Required.
+
+* `max_size` (byte size): Amount of data that can be uploaded in the time period by the user. Required.
+
+* `info_uri` (string): URI returned to the client for where the user can find information about the upload limit and how users can reduce their upload usage or request an upload limit increase. Optional. If not set, Synapse serves a built-in page (customisable via the `media_upload_limit_exceeded.html` template) and uses its URL instead.
+
+* `can_upgrade` (boolean): Value returned to the client for whether the limit can be increased. Defaults to `false`.
+
 Example configuration:
 ```yaml
 media_upload_limits:
 - time_period: 1h
   max_size: 100M
+  info_uri: https://example.com/quota#hour
 - time_period: 1w
   max_size: 500M
+  info_uri: https://example.com/quota
+  can_upgrade: true
 ```
 ---
 ### `max_image_pixels`
