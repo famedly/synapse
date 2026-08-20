@@ -2,6 +2,9 @@
 
 No significant changes since 1.159.0rc1.
 
+## Famedly additions for v1.159.0_1
+
+- fix: presence stream stalling intermittently ([\#282](https://github.com/famedly/synapse/pull/282)) (FrenchGithubUser)
 
 # Synapse 1.159.0rc1 (2026-08-11)
 
