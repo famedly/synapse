@@ -41,7 +41,7 @@ Postgres sequence '%(seq)s' is inconsistent with associated stream position
 of '%(stream_name)s' in the 'stream_positions' table.
 
 This is likely a programming error and should be reported at
-https://github.com/matrix-org/synapse. Please include the following data with
+https://github.com/element-hq/synapse. Please include the following data with
 your report:
 -----
 last_value: '%(last_value)s',    is_called: '%(is_called)s',
