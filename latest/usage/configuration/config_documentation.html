@@ -37,7 +37,7 @@
             const path_to_root = "../../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../../searchindex-79df36d2.js";
+            window.path_to_searchindex_js = "../../searchindex-c0e8b6b6.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../../toc-561cdce4.js"></script>
@@ -473,7 +473,7 @@ shown.</p>
 <hr>
 <h3 id="include_profile_updates_in_sync"><a class="header" href="#include_profile_updates_in_sync"><code>include_profile_updates_in_sync</code></a></h3>
 <p><em>(boolean)</em> Use this option to include updates of other users’ profiles in sync responses, for users who share rooms.
-Requires an <a href="https://github.com/matrix-org/matrix-spec-proposals/pull/4429">MSC4429</a> compatible client, and is currently limited to legacy sync and local users only.
+For legacy sync clients, requires <a href="https://github.com/matrix-org/matrix-spec-proposals/pull/4429">MSC4429</a> compatibility. For sliding sync clients, requires <a href="https://github.com/matrix-org/matrix-spec-proposals/pull/4262">MSC4262</a> compatibility. Note, profile updates via sync are currently limited to local users only.
 This feature is under development and should be used with caution on busy servers or servers which depend on <code>limit_profile_requests_to_users_who_share_rooms</code> for ensuring profile information doesn’t leak across rooms. Defaults to <code>false</code>.</p>
 <p>Example configuration:</p>
 <pre><code class="language-yaml">include_profile_updates_in_sync: true
@@ -1283,9 +1283,10 @@ For more details, see the <a href="../../setup/forward_proxy.html">forward proxy
 <p>Options related to federation.</p>
 <hr>
 <h3 id="federation_domain_whitelist"><a class="header" href="#federation_domain_whitelist"><code>federation_domain_whitelist</code></a></h3>
-<p><em>(array)</em> Restrict federation to the given whitelist of domains. N.B. we recommend also firewalling your federation listener to limit inbound federation traffic as early as possible, rather than relying purely on this application-layer restriction. If not specified, the default is to whitelist everything.</p>
-<p>Note: this does not stop a server from joining rooms that servers not on the whitelist are in. As such, this option is really only useful to establish a “private federation”, where a group of servers all whitelist each other and have the same whitelist.</p>
-<p>Defaults to <code>[]</code>.</p>
+<p><em>(array)</em> Restrict federation to the given whitelist of domains. N.B. we recommend also firewalling your federation listener to limit inbound federation traffic as early as possible, rather than relying purely on this application-layer restriction.
+If specified as an empty list (<code>[]</code>), federation will be denied with all servers. Specifying an empty list (<code>[]</code>) here is the recommended way of disabling federation.
+If not specified, the default is to allow federation with all servers.
+Note: this does not stop a server from joining rooms that servers not on the whitelist are in. As such, this option is really only useful to establish a “private federation”, where a group of servers all whitelist each other and have the same whitelist. There is no default for this option.</p>
 <p>Example configuration:</p>
 <pre><code class="language-yaml">federation_domain_whitelist:
 - lon.example.com
