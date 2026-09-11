@@ -299,10 +299,15 @@ class ServerMetricsStore(EventPushActionsWorkerStore, SQLBaseStore):
 
              The dict keys are:
               - "all" (a combined number of users across any and all clients)
-              - "android" (Element Android)
-              - "ios" (Element iOS)
-              - "electron" (Element Desktop)
+              - "element_android" (Element Android)
+              - "element_ios" (Element iOS)
+              - "element_electron" (Element Desktop)
               - "web" (any web application -- it's not possible to distinguish Element Web here)
+              - "famedly_android" (Famedly Android)
+              - "famedly_ios" (Famedly iOS)
+              - "unknown_android" (Android clients that are neither Element nor Famedly)
+              - "unknown_ios" (iOS clients that are neither Element nor Famedly)
+              - "unknown" (any other client)
         """
 
         def _count_r30v2_users(txn: LoggingTransaction) -> dict[str, int]:
@@ -311,99 +316,124 @@ class ServerMetricsStore(EventPushActionsWorkerStore, SQLBaseStore):
             sixty_days_ago_in_secs = now - 2 * thirty_days_in_secs
             one_day_from_now_in_secs = now + 86400
 
-            # This is the 'per-platform' count.
+            # Single scan of user_daily_visits: lower the user-agent once, then
+            # derive both per-client and overall R30v2 counts from that set.
+            #
+            # Classification order matters:
+            # 1. Branded native clients (Famedly / Element-Riot)
+            # 2. Web browsers (mozilla/gecko) — before bare android/ios, because
+            #    mobile browser user agents also contain those platform tokens
+            # 3. Unbranded android/ios native clients
+            # 4. unknown
             sql = """
-                SELECT
-                    client_type,
-                    count(client_type)
-                FROM
-                    (
-                        SELECT
-                            user_id,
-                            CASE
-                                WHEN
-                                    LOWER(user_agent) LIKE '%%riot%%' OR
-                                    LOWER(user_agent) LIKE '%%element%%'
-                                    THEN CASE
-                                        WHEN
-                                            LOWER(user_agent) LIKE '%%electron%%'
-                                            THEN 'electron'
-                                        WHEN
-                                            LOWER(user_agent) LIKE '%%android%%'
-                                            THEN 'android'
-                                        WHEN
-                                            LOWER(user_agent) LIKE '%%ios%%'
-                                            THEN 'ios'
-                                        ELSE 'unknown'
-                                    END
-                                WHEN
-                                    LOWER(user_agent) LIKE '%%mozilla%%' OR
-                                    LOWER(user_agent) LIKE '%%gecko%%'
-                                    THEN 'web'
-                                ELSE 'unknown'
-                            END as client_type
-                        FROM
-                            user_daily_visits
-                        WHERE
-                            timestamp > ?
-                            AND
-                            timestamp < ?
-                        GROUP BY
-                            user_id,
-                            client_type
-                        HAVING
-                            max(timestamp) - min(timestamp) > ?
-                    ) AS temp
-                GROUP BY
-                    client_type
-                ;
-            """
-
-            # We initialise all the client types to zero, so we get an explicit
-            # zero if they don't appear in the query results
-            results = {"ios": 0, "android": 0, "web": 0, "electron": 0}
-            txn.execute(
-                sql,
-                (
-                    sixty_days_ago_in_secs * 1000,
-                    one_day_from_now_in_secs * 1000,
-                    thirty_days_in_secs * 1000,
-                ),
-            )
-
-            for row in txn:
-                if row[0] == "unknown":
-                    continue
-                results[row[0]] = row[1]
-
-            # This is the 'all users' count.
-            sql = """
-                SELECT COUNT(*) FROM (
+                -- `last_60_days_visits`: selects rows within 60 days and normalizes
+                -- the user_agent to lowercase as `ua`.
+                WITH last_60_days_visits AS (
                     SELECT
-                        1
+                        user_id,
+                        timestamp,
+                        LOWER(COALESCE(user_agent, '')) AS ua
                     FROM
                         user_daily_visits
                     WHERE
                         timestamp > ?
                         AND
                         timestamp < ?
+                ),
+                -- `last_60_days_classified`: map user_agent to client type from `last_60_days_visits`.
+                last_60_days_classified AS (
+                    SELECT
+                        user_id,
+                        timestamp,
+                        CASE
+                            WHEN ua LIKE '%%famedly%%'
+                                THEN CASE
+                                    WHEN ua LIKE '%%android%%' THEN 'famedly_android'
+                                    WHEN ua LIKE '%%ios%%' THEN 'famedly_ios'
+                                    ELSE 'unknown'
+                                END
+                            WHEN (ua LIKE '%%element%%' OR ua LIKE '%%riot%%')
+                                THEN CASE
+                                    WHEN ua LIKE '%%electron%%' THEN 'element_electron'
+                                    WHEN ua LIKE '%%android%%' THEN 'element_android'
+                                    WHEN ua LIKE '%%ios%%' THEN 'element_ios'
+                                    ELSE 'unknown'
+                                END
+                            WHEN
+                                ua LIKE '%%mozilla%%' OR ua LIKE '%%gecko%%' THEN 'web'
+                            WHEN
+                                ua LIKE '%%android%%' THEN 'unknown_android'
+                            WHEN
+                                ua LIKE '%%ios%%' THEN 'unknown_ios'
+                            ELSE 'unknown'
+                        END AS client_type
+                    FROM
+                        last_60_days_visits
+                )
+                -- get counts per client type from `last_60_days_classified` for users
+                -- who have been active for more than 30 days in the last 60 days.
+                SELECT
+                    client_type,
+                    COUNT(*)
+                FROM (
+                    SELECT
+                        user_id,
+                        client_type
+                    FROM
+                        last_60_days_classified
+                    GROUP BY
+                        user_id,
+                        client_type
+                    HAVING
+                        MAX(timestamp) - MIN(timestamp) > ?
+                ) AS retained_by_client
+                GROUP BY
+                    client_type
+
+                UNION ALL
+                -- get count of all users from `last_60_days_visits` who have been
+                -- active for more than 30 days in the last 60 days.
+                SELECT
+                    'all',
+                    COUNT(*)
+                FROM (
+                    SELECT
+                        user_id
+                    FROM
+                        last_60_days_visits
                     GROUP BY
                         user_id
                     HAVING
-                        max(timestamp) - min(timestamp) > ?
-                ) AS r30_users
+                        MAX(timestamp) - MIN(timestamp) > ?
+                ) AS retained_all
             """
 
+            # We initialise all the client types to zero, so we get an explicit
+            # zero if they don't appear in the query results
+            results = {
+                "element_electron": 0,
+                "element_android": 0,
+                "element_ios": 0,
+                "famedly_android": 0,
+                "famedly_ios": 0,
+                "unknown_android": 0,
+                "unknown_ios": 0,
+                "web": 0,
+                "unknown": 0,
+                "all": 0,
+            }
             txn.execute(
                 sql,
                 (
                     sixty_days_ago_in_secs * 1000,
                     one_day_from_now_in_secs * 1000,
                     thirty_days_in_secs * 1000,
+                    thirty_days_in_secs * 1000,
                 ),
             )
-            (count,) = cast(tuple[int], txn.fetchone())
-            results["all"] = count
+
+            for row in txn:
+                results[row[0]] = row[1]
 
             return results
 
