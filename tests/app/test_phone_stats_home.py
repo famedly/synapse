@@ -247,25 +247,49 @@ class PhoneHomeR30V2TestCase(HomeserverTestCase):
         store = self.hs.get_datastores().main
 
         clients = [
+            # element_electron
             (
                 "element_electron_user",
                 "Element/1.11.0 (Macintosh; Intel Mac OS X; Electron)",
             ),
+            # element_android
             (
                 "element_android_user",
                 "Element/1.1 (Linux; U; Android 9; MatrixAndroidSDK_X 0.0.1)",
             ),
+            # element_ios
             (
                 "element_ios_user",
                 "Riot/1.4 (iPhone; iOS 13; Scale/4.00)",
             ),
+            # famedly_android
             ("famedly_android_user", "Famedly/1.0 (Linux; U; Android 13)"),
+            # famedly_ios
             ("famedly_ios_user", "Famedly/1.0 (iPhone; iOS 17; Scale/3.00)"),
+            # unknown_android
             ("unknown_android_user", "SomeClient/1.0 (Linux; Android 12)"),
+            # unknown_ios
             ("unknown_ios_user", "SomeClient/1.0 (iPhone; iOS 16)"),
+            # web
             (
                 "web_user",
                 "Mozilla/5.0 (X11; Linux x86_64; rv:103.0) Gecko/20100101 Firefox/103.0",
+            ),
+            (
+                "android_chrome_user",
+                "Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 "
+                "(KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36",
+            ),
+            (
+                "ios_safari_user",
+                "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) "
+                "AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 "
+                "Mobile/15E148 Safari/604.1",
+            ),
+            # unknown
+            (
+                "non_element_electron_user",
+                "SomeApp/1.0.0 (Macintosh; Intel Mac OS X; Electron)",
             ),
             ("unknown_user", "SomeClient/1.0 (Unknown; Unknown)"),
         ]
@@ -299,7 +323,7 @@ class PhoneHomeR30V2TestCase(HomeserverTestCase):
             r30_results,
             {
                 **EMPTY_R30V2_RESULTS,
-                "all": 9,
+                "all": 12,
                 "element_electron": 1,
                 "element_android": 1,
                 "element_ios": 1,
@@ -307,7 +331,7 @@ class PhoneHomeR30V2TestCase(HomeserverTestCase):
                 "famedly_ios": 1,
                 "unknown_android": 1,
                 "unknown_ios": 1,
-                "web": 1,
-                "unknown": 1,
+                "web": 3,
+                "unknown": 2,
             },
         )

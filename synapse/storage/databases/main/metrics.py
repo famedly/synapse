@@ -318,8 +318,13 @@ class ServerMetricsStore(EventPushActionsWorkerStore, SQLBaseStore):
 
             # Single scan of user_daily_visits: lower the user-agent once, then
             # derive both per-client and overall R30v2 counts from that set.
-            # Classification order: Famedly, then Element/Riot, then platform-only,
-            # then web heuristics, else unknown.
+            #
+            # Classification order matters:
+            # 1. Branded native clients (Famedly / Element-Riot)
+            # 2. Web browsers (mozilla/gecko) — before bare android/ios, because
+            #    mobile browser user agents also contain those platform tokens
+            # 3. Unbranded android/ios native clients
+            # 4. unknown
             sql = """
                 -- `last_60_days_visits`: selects rows within 60 days and normalizes
                 -- the user_agent to lowercase as `ua`.
@@ -341,22 +346,25 @@ class ServerMetricsStore(EventPushActionsWorkerStore, SQLBaseStore):
                         user_id,
                         timestamp,
                         CASE
-                            WHEN ua LIKE '%%ios%%'
+                            WHEN ua LIKE '%%famedly%%'
                                 THEN CASE
-                                    WHEN ua LIKE '%%famedly%%' THEN 'famedly_ios'
-                                    WHEN ua LIKE '%%element%%' or ua LIKE '%%riot%%' THEN 'element_ios'
-                                    ELSE 'unknown_ios'
+                                    WHEN ua LIKE '%%android%%' THEN 'famedly_android'
+                                    WHEN ua LIKE '%%ios%%' THEN 'famedly_ios'
+                                    ELSE 'unknown'
                                 END
-                            WHEN ua LIKE '%%android%%'
+                            WHEN (ua LIKE '%%element%%' OR ua LIKE '%%riot%%')
                                 THEN CASE
-                                    WHEN ua LIKE '%%famedly%%' THEN 'famedly_android'
-                                    WHEN ua LIKE '%%element%%' or ua LIKE '%%riot%%' THEN 'element_android'
-                                    ELSE 'unknown_android'
+                                    WHEN ua LIKE '%%electron%%' THEN 'element_electron'
+                                    WHEN ua LIKE '%%android%%' THEN 'element_android'
+                                    WHEN ua LIKE '%%ios%%' THEN 'element_ios'
+                                    ELSE 'unknown'
                                 END
-                            WHEN ua LIKE '%%electron%%'
-                                THEN 'element_electron'
-                            WHEN ua LIKE '%%mozilla%%' OR ua LIKE '%%gecko%%'
-                                THEN 'web'
+                            WHEN
+                                ua LIKE '%%mozilla%%' OR ua LIKE '%%gecko%%' THEN 'web'
+                            WHEN
+                                ua LIKE '%%android%%' THEN 'unknown_android'
+                            WHEN
+                                ua LIKE '%%ios%%' THEN 'unknown_ios'
                             ELSE 'unknown'
                         END AS client_type
                     FROM
