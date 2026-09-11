@@ -341,25 +341,21 @@ class ServerMetricsStore(EventPushActionsWorkerStore, SQLBaseStore):
                         user_id,
                         timestamp,
                         CASE
-                            WHEN
-                                ua LIKE '%%famedly%%'
+                            WHEN ua LIKE '%%ios%%'
                                 THEN CASE
-                                    WHEN ua LIKE '%%android%%' THEN 'famedly_android'
-                                    WHEN ua LIKE '%%ios%%' THEN 'famedly_ios'
-                                    ELSE 'unknown'
+                                    WHEN ua LIKE '%%famedly%%' THEN 'famedly_ios'
+                                    WHEN ua LIKE '%%element%%' or ua LIKE '%%riot%%' THEN 'element_ios'
+                                    ELSE 'unknown_ios'
                                 END
-                            WHEN
-                                ua LIKE '%%riot%%' OR ua LIKE '%%element%%'
+                            WHEN ua LIKE '%%android%%'
                                 THEN CASE
-                                    WHEN ua LIKE '%%electron%%' THEN 'element_electron'
-                                    WHEN ua LIKE '%%android%%' THEN 'element_android'
-                                    WHEN ua LIKE '%%ios%%' THEN 'element_ios'
-                                    ELSE 'unknown'
+                                    WHEN ua LIKE '%%famedly%%' THEN 'famedly_android'
+                                    WHEN ua LIKE '%%element%%' or ua LIKE '%%riot%%' THEN 'element_android'
+                                    ELSE 'unknown_android'
                                 END
-                            WHEN ua LIKE '%%android%%' THEN 'unknown_android'
-                            WHEN ua LIKE '%%ios%%' THEN 'unknown_ios'
-                            WHEN
-                                ua LIKE '%%mozilla%%' OR ua LIKE '%%gecko%%'
+                            WHEN ua LIKE '%%electron%%'
+                                THEN 'element_electron'
+                            WHEN ua LIKE '%%mozilla%%' OR ua LIKE '%%gecko%%'
                                 THEN 'web'
                             ELSE 'unknown'
                         END AS client_type
