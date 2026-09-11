@@ -58,6 +58,12 @@ retained_users_gauge = Gauge(
     ["time_range", SERVER_NAME_LABEL],
 )
 
+r30v2_clients_gauge = Gauge(
+    "synapse_r30v2_clients",
+    "Number of R30v2 retained users by client type",
+    ["client", SERVER_NAME_LABEL],
+)
+
 
 @dataclass
 class UserMetrics:
@@ -171,3 +177,9 @@ class CommonUsageMetricsManager:
         retained_users_gauge.labels(
             time_range="30d", **{SERVER_NAME_LABEL: self.server_name}
         ).set(float(metrics.monthly_retained_users))
+
+        r30v2_results = await self._store.count_r30v2_users()
+        for client, count in r30v2_results.items():
+            r30v2_clients_gauge.labels(
+                client=client, **{SERVER_NAME_LABEL: self.server_name}
+            ).set(float(count))
