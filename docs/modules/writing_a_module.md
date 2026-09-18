@@ -10,7 +10,7 @@ either the output of the module's `parse_config` static method (see below), or t
 configuration associated with the module in Synapse's configuration file.
 
 See the documentation for the `ModuleApi` class
-[here](https://github.com/element-hq/synapse/blob/master/synapse/module_api/__init__.py).
+[here](https://github.com/famedly/synapse/blob/master/synapse/module_api/__init__.py).
 
 ## When Synapse runs with several modules configured
 
@@ -82,7 +82,7 @@ the callback name as the argument name and the function as its value. A
 `register_[...]_callbacks` method exists for each category.
 
 Callbacks for each category can be found on their respective page of the
-[Synapse documentation website](https://element-hq.github.io/synapse).
+[Synapse documentation website](https://famedly.github.io/synapse).
 
 ## Caching
 

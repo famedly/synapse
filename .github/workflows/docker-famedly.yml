@@ -1,0 +1,107 @@
+---
+# Build the Community Edition of Synapse, then build the Famedly Edition on top. Push
+# both to their respective registries.
+
+name: Docker
+
+on:
+  push:
+    tags: ["v*.*.*_*"]
+  workflow_dispatch:
+    # Manually trigger to build and push docker image with modules to nightly Harbor registry.
+    inputs:
+      tag:
+        description: "Provide tag name with work package. Tag must only contain ASCII letters, digits, underscores, periods, or dashes."
+        required: true
+        type: string
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  community-build:
+    # Since this will upload to ghcr.io, all we need is the github token. That is
+    # automatically passed into the workflow. This workflow is pinned to this branch so
+    # the support for including a namespace for the docker image name does not break
+    # digest merging for multiple architectures.
+    uses: famedly/github-workflows/.github/workflows/docker.yml@jason-docker-namespace
+    with:
+      push: ${{ github.event_name != 'pull_request' }} # Always build, don't publish on pull requests
+      registry: ghcr.io
+      registry_user: ${{ github.repository_owner }}
+      image_name: famedly/synapse
+      file: docker/Dockerfile
+      # tag our new base image. If given a git tag of(as an example): "v1.234.5_6", this will
+      # break down into a docker tag of "v1.234.5" and "v1.234.5_6". As the suffix is incremented
+      # in future builds, this will make the base build sha change  and can potentially trigger
+      # "updated image" notifications(or some such) for the general public that would
+      # not actually have tangible updates.
+      # This will need to be sorted in the future, but I am not certain how yet. I would
+      # prefer not having suffix appended version for the community edition.
+      #
+      # Disable "latest" for now. It is enabled by default from the 'auto' functionality of flavors used
+      # when the tag is based on(in this case) a pattern and requires no explicit enablement.
+      # Allow for workflow_dispatch to create a docker image tagged with a custom tag.
+      # Use the full sha ref here, then we can borrow the Github context to reference
+      # it for the production-build below
+      tags: |
+        type=match,group=1,pattern=(v\d+.\d+.\d+)_\d+
+        type=match,group=1,pattern=(v\d+.\d+.\d+_\d+)
+        type=sha,format=long
+      flavor: latest=false
+
+  calculate_mod_build:
+    if: ${{ !cancelled() && !failure() }} # Allow for stopping the build job
+    needs:
+      - community-build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@83679a892e2d95755f2dac6acb0bfd1e9ac5d548 # v6.1.0
+        with:
+          python-version: "3.x"
+      - id: get-matrix
+        run: .ci/scripts/calculate_builds.py
+    outputs:
+      build_matrix: ${{ steps.get-matrix.outputs.build_matrix }}
+
+  validate_image_tag:
+    # Validate the tag input for workflow_dispatch.
+    if: ${{ github.event_name == 'workflow_dispatch' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Validate Image Tag
+        run: |
+          if ! [[ "${{ github.event.inputs.tag }}" =~ ^[a-zA-Z0-9._-]+$ ]]; then
+            echo "Error: tag must only contain ASCII letters, digits, underscores, periods, or dashes."
+            exit 1
+          fi
+
+  production-build:
+    if: ${{ !cancelled() && !failure() }} # Allow for stopping the build job
+    needs:
+      - calculate_mod_build
+    strategy:
+      matrix:
+        job: ${{ fromJson(needs.calculate_mod_build.outputs.build_matrix) }}
+    uses: famedly/github-workflows/.github/workflows/docker.yml@jason-docker-namespace
+    with:
+      push: ${{ github.event_name != 'pull_request' }} # Always build, don't publish on pull requests
+      registry_user: ${{ vars.REGISTRY_USER }}
+      registry: ${{ github.event_name == 'workflow_dispatch' && 'registry.famedly.net/docker-nightly' || 'registry.famedly.net/docker-oss' }}
+      image_name: synapse
+      file: docker/Dockerfile-famedly
+      # Notice that there is a leading 'sha-' in front of the actual sha, as that is
+      # how the docker meta action produces that tag.
+      build_args: |
+        "SYNAPSE_VERSION=sha-${{ github.sha }}"
+        "STA_VERSION=${{ matrix.job.sta-version }}"
+        "SIC_VERSION=${{ matrix.job.sic-version }}"
+        "FCS_VERSION=${{ matrix.job.fcs-version }}"
+      # Tag the production image used for famedly deployments.
+      tags: |
+        type=ref,event=tag,suffix=-${{ matrix.job.mod_pack_name }}
+        type=raw,enable=${{ github.event_name == 'workflow_dispatch' }},value=${{ matrix.job.mod_pack_name }}-${{ github.event.inputs.tag }}
+      flavor: latest=false
+    secrets: inherit

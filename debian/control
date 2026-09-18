@@ -18,7 +18,7 @@ Build-Depends:
  python3-venv,
  tar,
 Standards-Version: 3.9.8
-Homepage: https://github.com/element-hq/synapse
+Homepage: https://github.com/famedly/synapse
 
 Package: matrix-synapse-py3
 Architecture: any

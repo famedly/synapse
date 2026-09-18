@@ -687,6 +687,13 @@ build_info.labels(
     RUSTC_VERSION,
 ).set(1)
 
+# Loaded modules info
+module_instances_info = Gauge(
+    "synapse_module_info",
+    "Information about loaded modules",
+    labelnames=["package_name", "module_name", "module_version", SERVER_NAME_LABEL],
+)
+
 synapse_server_name_info = Gauge(
     "synapse_server_name_info",
     "Maps Synapse `server_name`s to the `instance`s they're hosted on",
@@ -738,6 +745,19 @@ threadpool_total_max_threads = Gauge(
     "synapse_threadpool_max_threads",
     "Maximum number of threads configured in the threadpool",
     labelnames=["name", SERVER_NAME_LABEL],
+)
+
+# Gauges for room counts
+known_rooms_gauge = Gauge(
+    "synapse_known_rooms_total",
+    "Total number of rooms",
+    labelnames=[SERVER_NAME_LABEL],
+)
+
+locally_joined_rooms_gauge = Gauge(
+    "synapse_locally_joined_rooms_total",
+    "Total number of locally joined rooms",
+    labelnames=[SERVER_NAME_LABEL],
 )
 
 

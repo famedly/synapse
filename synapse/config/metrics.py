@@ -54,6 +54,9 @@ class MetricsConfig(Config):
         self.report_stats_endpoint = config.get(
             "report_stats_endpoint", "https://matrix.org/report-usage-stats/push"
         )
+        self.report_stats_exclude_alias_list = config.get(
+            "report_stats_exclude_alias_list", []
+        )
         self.metrics_port = config.get("metrics_port")
         self.metrics_bind_host = config.get("metrics_bind_host", "127.0.0.1")
 

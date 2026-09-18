@@ -19,13 +19,14 @@
 #
 #
 import threading
+from http import HTTPStatus
 from typing import TYPE_CHECKING, Any
 from unittest.mock import AsyncMock, Mock
 
 from twisted.internet.testing import MemoryReactor
 
 from synapse.api.constants import EventTypes, LoginType, Membership
-from synapse.api.errors import SynapseError
+from synapse.api.errors import Codes, SynapseError
 from synapse.api.room_versions import RoomVersion
 from synapse.config.homeserver import HomeServerConfig
 from synapse.events import EventBase
@@ -33,13 +34,14 @@ from synapse.module_api.callbacks.third_party_event_rules_callbacks import (
     load_legacy_third_party_event_rules,
 )
 from synapse.rest import admin
-from synapse.rest.client import account, login, profile, room
+from synapse.rest.client import account, login, profile, room, room_upgrade_rest_servlet
 from synapse.server import HomeServer
 from synapse.types import JsonDict, Requester, StateMap
 from synapse.util.clock import Clock
 from synapse.util.frozenutils import unfreeze
 
 from tests import unittest
+from tests.server import make_request
 
 if TYPE_CHECKING:
     from synapse.module_api import ModuleApi
@@ -93,11 +95,36 @@ class LegacyChangeEvents(LegacyThirdPartyRulesTestModule):
         return d
 
 
+class OnUpgradeRoomModule:
+    def __init__(self, config: dict, module_api: "ModuleApi") -> None:
+        self.allowed_room_versions: list[str] = []
+        if allowed_room_ver_from_config := config.get("allowed_room_versions"):
+            self.allowed_room_versions = allowed_room_ver_from_config
+
+        module_api.register_third_party_rules_callbacks(
+            on_upgrade_room=self.on_upgrade_room
+        )
+
+    async def on_upgrade_room(
+        self, requester: Requester, room_version: RoomVersion, is_requester_admin: bool
+    ) -> None:
+        if (
+            not is_requester_admin
+            and room_version.identifier not in self.allowed_room_versions
+        ):
+            raise SynapseError(
+                400,
+                "You can not upgrade room to that version",
+                Codes.UNSUPPORTED_ROOM_VERSION,
+            )
+
+
 class ThirdPartyRulesTestCase(unittest.FederatingHomeserverTestCase):
     servlets = [
         admin.register_servlets,
         login.register_servlets,
         room.register_servlets,
+        room_upgrade_rest_servlet.register_servlets,
         profile.register_servlets,
         account.register_servlets,
     ]
@@ -206,7 +233,7 @@ class ThirdPartyRulesTestCase(unittest.FederatingHomeserverTestCase):
 
         # add a callback that will raise our hacky exception
         async def check(
-            ev: EventBase, state: StateMap[EventBase]
+            ev: EventBase, state: StateMap[EventBase], requesting_user: Requester | None
         ) -> tuple[bool, JsonDict | None]:
             raise NastyHackException(429, "message")
 
@@ -234,7 +261,7 @@ class ThirdPartyRulesTestCase(unittest.FederatingHomeserverTestCase):
 
         # first patch the event checker so that it will try to modify the event
         async def check(
-            ev: EventBase, state: StateMap[EventBase]
+            ev: EventBase, state: StateMap[EventBase], requesting_user: Requester | None
         ) -> tuple[bool, JsonDict | None]:
             # Try and modify the content, this will fail because the event is
             # immutable. (We therefore need the type ignore linter, as the
@@ -258,18 +285,27 @@ class ThirdPartyRulesTestCase(unittest.FederatingHomeserverTestCase):
         self.assertEqual(channel.code, 500, channel.result)
 
     def test_modify_event(self) -> None:
-        """The module can return a modified version of the event"""
+        """
+        The module can return a modified version of the event. Use this test to check
+        the backwards compatibility for the number of arguments passed to the function.
+        """
 
         # first patch the event checker so that it will modify the event
-        async def check(
-            ev: EventBase, state: StateMap[EventBase]
+        async def check_v2(
+            ev: EventBase, state: StateMap[EventBase], requesting_user: Requester | None
         ) -> tuple[bool, JsonDict | None]:
             d = ev.get_dict()
+            # To make sure that the requesting user argument is giving the correct data,
+            # check that it should be the same as the event sender, as that is the
+            # fallback option when it is not a differing user
+            assert requesting_user is not None
+            self.assertEqual(ev.sender, requesting_user.user.to_string())
+            self.assertEqual(ev.content["x"], "x")
             d["content"] = {"x": "y"}
             return True, d
 
         self.hs.get_module_api_callbacks().third_party_event_rules._check_event_allowed_callbacks = [
-            check
+            check_v2
         ]
 
         # now send the event
@@ -292,12 +328,46 @@ class ThirdPartyRulesTestCase(unittest.FederatingHomeserverTestCase):
         ev = channel.json_body
         self.assertEqual(ev["content"]["x"], "y")
 
+        async def check(
+            ev: EventBase, state: StateMap[EventBase]
+        ) -> tuple[bool, JsonDict | None]:
+            # No requesting_user to check here. Just make sure it does not blow up with
+            # a 500 Internal Server Error
+            d = ev.get_dict()
+            self.assertEqual(ev.content["x"], "x")
+            d["content"] = {"x": "y"}
+            return True, d
+
+        self.hs.get_module_api_callbacks().third_party_event_rules._check_event_allowed_callbacks = [
+            check
+        ]
+
+        # now send the event
+        channel = self.make_request(
+            "PUT",
+            "/_matrix/client/r0/rooms/%s/send/modifyme/2" % self.room_id,
+            {"x": "x"},
+            access_token=self.tok,
+        )
+        self.assertEqual(channel.code, 200, channel.result)
+        event_id = channel.json_body["event_id"]
+
+        # ... and check that it got modified
+        channel = self.make_request(
+            "GET",
+            "/_matrix/client/r0/rooms/%s/event/%s" % (self.room_id, event_id),
+            access_token=self.tok,
+        )
+        self.assertEqual(channel.code, 200, channel.result)
+        ev = channel.json_body
+        self.assertEqual(ev["content"]["x"], "y")
+
     def test_message_edit(self) -> None:
         """Ensure that the module doesn't cause issues with edited messages."""
 
         # first patch the event checker so that it will modify the event
         async def check(
-            ev: EventBase, state: StateMap[EventBase]
+            ev: EventBase, state: StateMap[EventBase], requesting_user: Requester | None
         ) -> tuple[bool, JsonDict | None]:
             d = ev.get_dict()
             d["content"] = {
@@ -429,6 +499,75 @@ class ThirdPartyRulesTestCase(unittest.FederatingHomeserverTestCase):
         """
         self.helper.create_room_as(self.user_id, tok=self.tok, expect_code=403)
 
+    @unittest.override_config(
+        {
+            "third_party_event_rules": {
+                "module": __name__ + ".OnUpgradeRoomModule",
+                "config": {
+                    "allowed_room_versions": ["9", "10"],
+                },
+            }
+        }
+    )
+    def test_on_upgrade_room(self) -> None:
+        """Tests that the on_upgrade_room callbacks works correctly."""
+
+        def upgrade_room_to_version(
+            _room_id: str,
+            room_version: str,
+            tok: str | None = None,
+            expect_code: int = HTTPStatus.OK,
+        ) -> str | None:
+            """
+            Upgrade a room.
+
+            Args:
+                _room_id
+                room_version: The room version to upgrade the room to.
+                tok: The access token to use in the request.
+                expect_code: The expected HTTP response code.
+            Returns:
+                The ID of the newly created room, or None if the request failed.
+            """
+            path = f"/_matrix/client/r0/rooms/{_room_id}/upgrade"
+            content = {"new_version": room_version}
+
+            channel = make_request(
+                self.reactor,
+                self.site,
+                "POST",
+                path,
+                content,
+                access_token=tok,
+            )
+
+            assert channel.code == expect_code, channel.result
+
+            if expect_code == HTTPStatus.OK:
+                return channel.json_body["replacement_room"]
+            else:
+                return None
+
+        # Room in configured list
+        room_id_1 = self.helper.create_room_as(
+            self.user_id, room_version="9", tok=self.tok
+        )
+        upgrade_room_to_version(room_id_1, "10", tok=self.tok, expect_code=200)
+        # Room not in configured list
+        room_id_2 = self.helper.create_room_as(
+            self.user_id, room_version="10", tok=self.tok
+        )
+        upgrade_room_to_version(room_id_2, "11", tok=self.tok, expect_code=400)
+
+        # Room not in configured list as admin
+        admin_user_id = self.register_user("admin_kermit", "monkey", admin=True)
+
+        admin_tok = self.login("admin_kermit", "monkey")
+        room_id_3 = self.helper.create_room_as(
+            admin_user_id, room_version="9", tok=admin_tok
+        )
+        upgrade_room_to_version(room_id_3, "11", tok=admin_tok, expect_code=200)
+
     def test_sent_event_end_up_in_room_state(self) -> None:
         """Tests that a state event sent by a module while processing another state event
         doesn't get dropped from the state of the room. This is to guard against a bug
@@ -445,7 +584,9 @@ class ThirdPartyRulesTestCase(unittest.FederatingHomeserverTestCase):
 
         # Define a callback that sends a custom event on power levels update.
         async def test_fn(
-            event: EventBase, state_events: StateMap[EventBase]
+            event: EventBase,
+            state_events: StateMap[EventBase],
+            requesting_user: Requester | None,
         ) -> tuple[bool, JsonDict | None]:
             if event.is_state() and event.type == EventTypes.PowerLevels:
                 await api.create_and_send_event_into_room(

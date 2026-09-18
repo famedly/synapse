@@ -1,15 +1,11 @@
 # Contributing
 
-This document aims to get you started with contributing to Synapse!
+This document aims to get you started with contributing to Famedly's fork of Synapse!
 
 # 1. Who can contribute to Synapse?
 
 Everyone is welcome to contribute code to
-[Synapse](https://github.com/element-hq/synapse), provided that they are willing
-to license their contributions to Element under a [Contributor License
-Agreement](https://cla-assistant.io/element-hq/synapse) (CLA). This ensures that
-their contribution will be made available under an OSI-approved open-source
-license, currently Affero General Public License v3 (AGPLv3).
+[Famedly's fork of Synapse](https://github.com/famedly/synapse). However, this fork exists for the specific needs of Famedly; if your contributions are not that specific, please contribute to the [upstream](https://github.com/element-hq/synapse) instead.
 
 Please see the
 [Element blog post](https://element.io/blog/synapse-now-lives-at-github-com-element-hq-synapse/)
@@ -99,8 +95,8 @@ Now edit `homeserver.yaml`, things you might want to change include:
 
 - Set a `server_name`
 - Adjusting paths to be correct for your system like the `log_config` to point to the log config you just copied
-- Using a [PostgreSQL database instead of SQLite](https://element-hq.github.io/synapse/latest/usage/configuration/config_documentation.html#database)
-- Adding a [`registration_shared_secret`](https://element-hq.github.io/synapse/latest/usage/configuration/config_documentation.html#registration_shared_secret) so you can use [`register_new_matrix_user` command](https://element-hq.github.io/synapse/latest/setup/installation.html#registering-a-user).
+- Using a [PostgreSQL database instead of SQLite](https://famedly.github.io/synapse/latest/usage/configuration/config_documentation.html#database)
+- Adding a [`registration_shared_secret`](https://famedly.github.io/synapse/latest/usage/configuration/config_documentation.html#registration_shared_secret) so you can use [`register_new_matrix_user` command](https://famedly.github.io/synapse/latest/setup/installation.html#registering-a-user).
 
 And then run Synapse with the following command:
 
@@ -124,22 +120,22 @@ Join our developer community on Matrix: [#synapse-dev:matrix.org](https://matrix
 
 # 6. Pick an issue.
 
-Fix your favorite problem or perhaps find a [Good First Issue](https://github.com/element-hq/synapse/issues?q=is%3Aopen+is%3Aissue+label%3A%22Good+First+Issue%22)
+Fix your favorite problem or perhaps find a [Good First Issue](https://github.com/famedly/synapse/issues?q=is%3Aopen+is%3Aissue+label%3A%22Good+First+Issue%22)
 to work on.
 
 
 # 7. Turn coffee into code and documentation!
 
 There is a growing amount of documentation located in the
-[`docs`](https://github.com/element-hq/synapse/tree/develop/docs)
-directory, with a rendered version [available online](https://element-hq.github.io/synapse).
+[`docs`](https://github.com/famedly/synapse/tree/master/docs)
+directory, with a rendered version [available online](https://famedly.github.io/synapse).
 This documentation is intended primarily for sysadmins running their
 own Synapse instance, as well as developers interacting externally with
 Synapse.
-[`docs/development`](https://github.com/element-hq/synapse/tree/develop/docs/development)
+[`docs/development`](https://github.com/famedly/synapse/tree/master/docs/development)
 exists primarily to house documentation for
 Synapse developers.
-[`docs/admin_api`](https://github.com/element-hq/synapse/tree/develop/docs/admin_api) houses documentation
+[`docs/admin_api`](https://github.com/famedly/synapse/tree/master/docs/admin_api) houses documentation
 regarding Synapse's Admin API, which is used mostly by sysadmins and external
 service developers.
 
@@ -149,7 +145,7 @@ options and documentation](../code_style.md#configuration-code-and-documentation
 
 We welcome improvements and additions to our documentation itself! When
 writing new pages, please
-[build `docs` to a book](https://github.com/element-hq/synapse/tree/develop/docs#adding-to-the-documentation)
+[build `docs` to a book](https://github.com/famedly/synapse/tree/master/docs#adding-to-the-documentation)
 to check that your contributions render correctly. The docs are written in
 [GitHub-Flavoured Markdown](https://guides.github.com/features/mastering-markdown/).
 
@@ -338,11 +334,10 @@ This configuration should generally cover your needs.
 For more details about other configurations, see the [Docker-specific documentation in the SyTest repo](https://github.com/matrix-org/sytest/blob/develop/docker/README.md).
 
 
-## Run the integration tests ([Complement](https://github.com/matrix-org/complement)).
+## Run the integration tests ([Complement](https://github.com/famedly/complement)).
 
-See our [Complement docs](https://github.com/element-hq/synapse/tree/develop/complement)
+See the [Complement docs](https://github.com/famedly/synapse/tree/develop/complement)
 for how to use the `./scripts-dev/complement.sh` test runner script.
-
 
 ### Prettier formatting with `gotestfmt`
 
@@ -368,77 +363,19 @@ To prepare a Pull Request, please:
 2. [sign off](#sign-off) your contribution;
 3. `git push` your commit to your fork of Synapse;
 4. on GitHub, [create the Pull Request](https://docs.github.com/en/github/collaborating-with-issues-and-pull-requests/creating-a-pull-request);
-5. add a [changelog entry](#changelog) and push it to your Pull Request;
-6. that's it for now, a non-draft pull request will automatically request review from the team;
-7. if you need to update your PR, please avoid rebasing and just add new commits to your branch.
+5. that's it for now, a non-draft pull request will automatically request review from the team;
 
 
 ## Changelog
 
-All changes, even minor ones, need a corresponding changelog / newsfragment
-entry. These are managed by [Towncrier](https://github.com/twisted/towncrier).
+Changelog updates are handled during the release process. You don't need to edit `CHANGES.md` yourself.
 
-To create a changelog entry, make a new file in the `changelog.d` directory named
-in the format of `PRnumber.type`. The type can be one of the following:
-
-* `feature`
-* `bugfix`
-* `docker` (for updates to the Docker image)
-* `doc` (for updates to the documentation)
-* `removal` (also used for deprecations)
-* `misc` (for internal-only changes)
-
-This file will become part of our [changelog](
-https://github.com/element-hq/synapse/blob/master/CHANGES.md) at the next
-release, so the content of the file should be a short description of your
-change in the same style as the rest of the changelog. The file can contain Markdown
-formatting, and must end with a full stop (.) or an exclamation mark (!) for
-consistency.
-
-Adding credits to the changelog is encouraged, we value your
-contributions and would like to have you shouted out in the release notes!
-
-For example, a fix in PR #1234 would have its changelog entry in
-`changelog.d/1234.bugfix`, and contain content like:
-
-> The security levels of Florbs are now validated when received
-> via the `/federation/florb` endpoint. Contributed by Jane Matrix.
-
-If there are multiple pull requests involved in a single bugfix/feature/etc, then the
-content for each `changelog.d` file and file extension should be the same. Towncrier
-will merge the matching files together into a single changelog entry when we come to
-release.
-
-### How do I know what to call the changelog file before I create the PR?
-
-Obviously, you don't know if you should call your newsfile
-`1234.bugfix` or `5678.bugfix` until you create the PR, which leads to a
-chicken-and-egg problem.
-
-There are two options for solving this:
-
-1. Open the PR without a changelog file, see what number you got, and *then*
-   add the changelog file to your branch, or:
-
-1. Look at the [list of all
-   issues/PRs](https://github.com/element-hq/synapse/issues?q=), add one to the
-   highest number you see, and quickly open the PR before somebody else claims
-   your number.
-
-   [This
-   script](https://github.com/richvdh/scripts/blob/master/next_github_number.sh)
-   might be helpful if you find yourself doing this a lot.
-
-Sorry, we know it's a bit fiddly, but it's *really* helpful for us when we come
-to put together a release!
 
 ### Debian changelog
 
-Changes which affect the debian packaging files (in `debian`) are an
-exception to the rule that all changes require a `changelog.d` file.
-
-In this case, you will need to add an entry to the debian changelog for the
-next release. For this, run the following command:
+If your changes affect the debian packaging files (in `debian`), 
+you will need to add an entry to the debian changelog for the next release. 
+For this, run the following command:
 
 ```
 dch
@@ -449,26 +386,23 @@ version in flight), and open an editor where you can add a new changelog entry.
 (Our release process will ensure that the version number and maintainer name is
 corrected for the release.)
 
-If your change affects both the debian packaging *and* files outside the debian
-directory, you will need both a regular newsfragment *and* an entry in the
-debian changelog. (Though typically such changes should be submitted as two
-separate pull requests.)
-
 ## Sign off
 
-After you make a PR a comment from @CLAassistant will appear asking you to sign
-the [CLA](https://cla-assistant.io/element-hq/synapse).
-This will link a page to allow you to confirm that you have read and agreed to
-the CLA by signing in with GitHub.
+The sign-off is a simple line at the end of the explanation for the patch, which certifies that you wrote it or otherwise have the right to pass it on as a free software patch. The rules are pretty simple: if you can certify the below [Developer's Certificate of Origin 1.1](https://developercertificate.org/):
 
-Alternatively, you can sign off before opening a PR by going to
-<https://cla-assistant.io/element-hq/synapse>.
+By making a contribution to this project, I certify that:
 
-We accept contributions under a legally identifiable name, such as
-your name on government documentation or common-law names (names
-claimed by legitimate usage or repute). Unfortunately, we cannot
-accept anonymous contributions at this time.
+1. The contribution was created in whole or in part by me and I have the right to submit it under the open source license indicated in the file; or
+2. The contribution is based upon previous work that, to the best of my knowledge, is covered under an appropriate open source license and I have the right under that license to submit that work with modifications, whether created in whole or in part by me, under the same open source license (unless I am permitted to submit under a different license), as indicated in the file; or
+3. The contribution was provided directly to me by some other person who certified (1), (2) or (3) and I have not modified it.
+4. I understand and agree that this project and the contribution are public and that a record of the contribution (including all personal information I submit with it, including my sign-off) is maintained indefinitely and may be redistributed consistent with this project or the open source license(s) involved.
 
+then you just add a line saying:
+```
+Signed-off-by: Random J Developer <random@developer.example.org>
+```
+
+using your real name (sorry, no pseudonyms or anonymous contributions.) This will be done for you automatically if you use `git commit -s`.
 
 # 10. Turn feedback into better code.
 

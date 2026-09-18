@@ -16,6 +16,7 @@ _First introduced in Synapse v1.39.0_
 async def check_event_allowed(
     event: "synapse.events.EventBase",
     state_events: "synapse.types.StateMap",
+    requester: "Requester | None",
 ) -> tuple[bool, dict | None]
 ```
 
@@ -30,6 +31,10 @@ a dictionary that maps tuples containing an event type and a state key to the
 corresponding state event. For example retrieving the room's `m.room.create` event from
 the `state_events` argument would look like this: `state_events.get(("m.room.create", ""))`.
 The module must return a boolean indicating whether the event can be allowed.
+
+**Added for Famedly Synapse 1.157.0**: The `requesting_user_id` argument is added that will
+optionally pass in the `Requester` that placed the request for the event. This may be the
+`sender` of the event, or in the case of a kick/ban the user that placed the request.
 
 Note that this callback function processes incoming events coming via federation
 traffic (on top of client traffic). This means denying an event might cause the local
@@ -228,7 +233,7 @@ wishing this callback to be called on every profile change are encouraged to dis
 per-room profiles globally using the `allow_per_room_profiles` configuration setting in
 Synapse's configuration file.
 This callback is not called when registering a user, even when setting it through the
-[`get_displayname_for_registration`](https://element-hq.github.io/synapse/latest/modules/password_auth_provider_callbacks.html#get_displayname_for_registration)
+[`get_displayname_for_registration`](https://famedly.github.io/synapse/latest/modules/password_auth_provider_callbacks.html#get_displayname_for_registration)
 module callback.
 
 If multiple modules implement this callback, Synapse runs them all in order.

@@ -86,3 +86,19 @@ class ExtremStatisticsTestCase(HomeserverTestCase):
             b'synapse_forward_extremities_gsum{server_name="test"} 10.0',
         ]
         self.assertEqual(items, expected)
+
+
+class UserGaugeTestCase(HomeserverTestCase):
+    def test_get_user_count_per_status_does_not_return_none_value(self) -> None:
+        """
+        Test that get_user_count_per_status never returns None values.
+        """
+        store = self.hs.get_datastores().main
+
+        metrics = self.get_success(store.get_user_count_per_status())
+
+        self.assertIsInstance(metrics.active, int)
+        self.assertIsInstance(metrics.deactivated, int)
+        self.assertIsInstance(metrics.suspended, int)
+        self.assertIsInstance(metrics.locked, int)
+        self.assertIsInstance(metrics.retained_30d, int)

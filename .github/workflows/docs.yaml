@@ -3,10 +3,8 @@ name: Deploy the documentation
 on:
   push:
     branches:
-      # For bleeding-edge documentation
-      - develop
       # For documentation specific to a release
-      - 'release-v*'
+      - "famedly-release/v*"
       # stable docs
       - master
 
@@ -28,9 +26,9 @@ jobs:
           branch="${GITHUB_REF#refs/heads/}"
 
           case $branch in
-              release-*)
-                  # strip 'release-' from the name for release branches.
-                  branch="${branch#release-}"
+              famedly-release/v*)
+                  # strip 'famedly-release/v' from the name for release branches.
+                  branch="${branch#famedly-release/v}"
                   ;;
               master)
                   # deploy to "latest" for the master branch.
@@ -43,22 +41,36 @@ jobs:
     outputs:
       branch-version: ${{ steps.vars.outputs.branch-version }}
 
-################################################################################
+  ################################################################################
   pages-docs:
     name: GitHub Pages
     runs-on: ubuntu-latest
     needs:
       - pre
+    concurrency:
+      group: "pages"
+      cancel-in-progress: false
+    permissions:
+      contents: write
+
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           # Fetch all history so that the schema_versions script works.
           fetch-depth: 0
 
-      - name: Setup mdbook
-        uses: peaceiris/actions-mdbook@ee69d230fe19748b7abf22df32acaa93833fad08 # v2.0.0
+      - name: Caching
+        uses: Swatinem/rust-cache@98c8021b550208e191a6a3145459bfc9fb29c4c0 # v2.8.0
         with:
-          mdbook-version: '0.5.2'
+          shared-key: "mdbook"
+          save-if: ${{ ! startsWith(github.ref, 'gh-readonly-queue/') }}
+
+      - name: Install required tooling
+        env:
+          MDBOOK_VERSION: "0.5.2"
+        run: |
+          cargo install mdbook-linkcheck mdbook-mermaid
+          cargo install mdbook --no-default-features --features search --vers "${{ env.MDBOOK_VERSION }}" --locked
 
       - name: Set version of docs
         run: echo 'window.SYNAPSE_VERSION = "${{ needs.pre.outputs.branch-version }}";' > ./docs/website_files/version.js
@@ -90,10 +102,51 @@ jobs:
           yq < schema/synapse-config.schema.yaml \
             > book/schema/synapse-config.schema.json
 
-      # Deploy to the target directory.
-      - name: Deploy to gh pages
-        uses: peaceiris/actions-gh-pages@84c30a85c19949d7eee79c4ff27748b70285e453 # v4.1.0
-        with:
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-          publish_dir: ./book
-          destination_dir: ./${{ needs.pre.outputs.branch-version }}
+      # Deploy to the target directory without wiping other versions.
+      # We use a git worktree so we can merge into gh-pages incrementally,
+      # equivalent to what peaceiris/actions-gh-pages (action used by element/synapse)
+      # does with destination_dir.
+      #
+      # Important: this workflow publishes by pushing commits directly to the
+      # gh-pages branch. The repository's GitHub Pages settings must therefore
+      # be configured to deploy from the gh-pages branch. If Pages is configured
+      # to deploy from "GitHub Actions", this workflow will push commits but the
+      # site will stop publishing.
+      - name: Deploy to gh-pages
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          VERSION="${{ needs.pre.outputs.branch-version }}"
+
+          # Set up a worktree pointing at the gh-pages branch (create it if absent).
+          # Use ls-remote to check existence before fetching so that a missing
+          # branch is treated as "bootstrap" while any real fetch error still
+          # fails the job.
+          if git ls-remote --heads --exit-code origin gh-pages > /dev/null; then
+            git fetch origin gh-pages
+            git worktree add gh-pages-dir origin/gh-pages
+          else
+            # Branch doesn't exist yet, create an empty root commit.
+            EMPTY_TREE=$(git hash-object -t tree /dev/null)
+            INIT_COMMIT=$(git commit-tree "$EMPTY_TREE" -m "Initialize gh-pages")
+            git branch gh-pages "$INIT_COMMIT"
+            git worktree add gh-pages-dir gh-pages
+          fi
+
+          # Replace only this version's directory, preserving all others.
+          rm -rf "gh-pages-dir/$VERSION"
+          mkdir -p "gh-pages-dir/$VERSION"
+          cp -r book/. "gh-pages-dir/$VERSION/"
+
+          # Keep the root redirect pointing at latest/, creating or updating it
+          # whenever latest is deployed or on initial bootstrap.
+          if [ "$VERSION" = "latest" ] || [ ! -f "gh-pages-dir/index.html" ]; then
+            echo '<!DOCTYPE html><meta http-equiv="refresh" content="0; url=latest/index.html">' \
+              > "gh-pages-dir/index.html"
+          fi
+
+          cd gh-pages-dir
+          git add .
+          git diff --staged --quiet || git commit -m "docs: deploy $VERSION"
+          git push origin HEAD:gh-pages

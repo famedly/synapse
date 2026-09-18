@@ -26,6 +26,7 @@ import hmac
 import json
 import logging
 import secrets
+import sys
 import time
 from typing import (
     AbstractSet,
@@ -178,6 +179,12 @@ def make_homeserver_config_obj(config: dict[str, Any]) -> HomeServerConfig:
     """
     config_obj = _parse_config_dict(json.dumps(config, sort_keys=True))
     return deepcopy_config(config_obj)
+
+
+# There may be tests that will not run correctly when collecting coverage data. Use a
+# decorator on either the TestCase class or on the test method itself to skip the test.
+# `@unittest.skip_unless(not COVERAGE_RUNNING, "reason to skip the test")`
+COVERAGE_RUNNING = "coverage" in sys.modules
 
 
 class TestCase(unittest.TestCase):
@@ -588,7 +595,7 @@ class HomeserverTestCase(TestCase):
             shorthand: Whether to try and be helpful and prefix the given URL
             with the usual REST API path, if it doesn't contain it.
             federation_auth_origin: if set to not-None, we will add a fake
-                Authorization header pretenting to be the given server name.
+                Authorization header pretending to be the given server name.
 
             content_type: The content-type to use for the request. If not set then will default to
                 application/json unless content_is_form is true.

@@ -63,7 +63,7 @@ DEFAULT_LOG_CONFIG = Template(
 # be ingested by ELK stacks. See [2] for details.
 #
 # [1]: https://docs.python.org/3/library/logging.config.html#configuration-dictionary-schema
-# [2]: https://element-hq.github.io/synapse/latest/structured_logging.html
+# [2]: https://famedly.github.io/synapse/latest/structured_logging.html
 
 version: 1
 
@@ -113,6 +113,12 @@ handlers:
         class: logging.StreamHandler
         formatter: precise
 
+    # A commented-out OtlpHandler based on opentelemetry-sdk that reads
+    # its configuration from the common `OTLP_` environment variables:
+    # Requires the extra "opentelemetry-log-handler".
+    #otlp:
+    #    class: synapse.logging.handlers.OtlpHandler
+
 loggers:
     synapse.storage.SQL:
         # beware: increasing this to DEBUG will make synapse log sensitive
@@ -126,6 +132,8 @@ root:
     # then write them to a file.
     #
     # Replace "buffer" with "console" to log to stderr instead.
+    #
+    # Add or set the handler to "otlp" after enabling it in the "handlers" section.
     #
     handlers: [buffer]
 
@@ -141,7 +149,7 @@ removed in Synapse 1.3.0. You should instead set up a separate log configuration
 STRUCTURED_ERROR = """\
 Support for the structured configuration option was removed in Synapse 1.54.0.
 You should instead use the standard logging configuration. See
-https://element-hq.github.io/synapse/v1.54/structured_logging.html
+https://famedly.github.io/synapse/latest/structured_logging.html
 """
 
 

@@ -64,4 +64,4 @@ release of Synapse.
 If you want to get up and running quickly with a trio of homeservers in a
 private federation, there is a script in the `demo` directory. This is mainly
 useful just for development purposes. See
-[demo scripts](https://element-hq.github.io/synapse/develop/development/demo.html).
+[demo scripts](https://famedly.github.io/synapse/latest/development/demo.html).

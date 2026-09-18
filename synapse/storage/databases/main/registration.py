@@ -1643,6 +1643,30 @@ class RegistrationWorkerStore(StatsStore, CacheInvalidationWorkerStore):
             desc="update_access_token_last_validated",
         )
 
+    async def expire_access_token(self, access_token: str) -> None:
+        """Updates the valid_until_ms for the access token to be expired.
+
+        Args:
+            token_id: The ID of the access token to update.
+        Raises:
+            StoreError if there was a problem updating this.
+        """
+        now = self.clock.time_msec() - 100
+
+        def f(txn: LoggingTransaction) -> None:
+            self.db_pool.simple_update_one_txn(
+                txn,
+                "access_tokens",
+                {"token": access_token},
+                {"valid_until_ms": now},
+            )
+
+            self._invalidate_cache_and_stream(
+                txn, self.get_user_by_access_token, (access_token,)
+            )
+
+        await self.db_pool.runInteraction("expire_access_token", f)
+
     async def registration_token_is_valid(self, token: str) -> bool:
         """Checks if a token can be used to authenticate a registration.
 
@@ -2117,6 +2141,76 @@ class RegistrationWorkerStore(StatsStore, CacheInvalidationWorkerStore):
 
         await self.db_pool.runInteraction(
             "replace_refresh_token", _replace_refresh_token_txn
+        )
+
+    async def expire_refresh_tokens_for_device(
+        self, user_id: str, device_id: str
+    ) -> None:
+        """Expires all refresh tokens for a specific user and device.
+
+        Args:
+            user_id: the ID of the user owning the refresh token
+            device_id: the id of the device owning the refresh token
+        """
+
+        now = self.clock.time_msec() - 100
+        await self.db_pool.simple_update(
+            "refresh_tokens",
+            {"user_id": user_id, "device_id": device_id},
+            {"expiry_ts": now},
+            "expire_refresh_tokens",
+        )
+
+    async def set_device_for_refresh_token(
+        self, user_id: str, old_device_id: str, device_id: str
+    ) -> None:
+        """Moves refresh tokens from old device to current device.
+
+        Args:
+            user_id: The user of the devices.
+            old_device_id: The old device.
+            device_id: The new device ID.
+        Returns:
+            None
+        """
+
+        await self.db_pool.simple_update(
+            "refresh_tokens",
+            keyvalues={"user_id": user_id, "device_id": old_device_id},
+            updatevalues={"device_id": device_id},
+            desc="set_device_for_refresh_token",
+        )
+
+    def _set_device_for_access_token_txn(
+        self, txn: LoggingTransaction, token: str, device_id: str
+    ) -> str:
+        old_device_id = self.db_pool.simple_select_one_onecol_txn(
+            txn, "access_tokens", {"token": token}, "device_id"
+        )
+
+        self.db_pool.simple_update_txn(
+            txn, "access_tokens", {"token": token}, {"device_id": device_id}
+        )
+
+        self._invalidate_cache_and_stream(txn, self.get_user_by_access_token, (token,))
+
+        return old_device_id
+
+    async def set_device_for_access_token(self, token: str, device_id: str) -> str:
+        """Sets the device ID associated with an access token.
+
+        Args:
+            token: The access token to modify.
+            device_id: The new device ID.
+        Returns:
+            The old device ID associated with the access token.
+        """
+
+        return await self.db_pool.runInteraction(
+            "set_device_for_access_token",
+            self._set_device_for_access_token_txn,
+            token,
+            device_id,
         )
 
     async def add_login_token_to_user(

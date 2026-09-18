@@ -12,8 +12,8 @@ Note that running Synapse's unit tests from within the docker image is not suppo
 
 `scripts-dev/complement.sh` is a script that will automatically build
 and run Synapse against Complement.
-Consult our [Complement docs][https://github.com/element-hq/synapse/tree/develop/complement] for instructions on how to use it.
 
+Consult the local [Complement docs](https://github.com/famedly/synapse/tree/develop/complement) for instructions on how to use it.
 
 ## Building and running the images manually
 

@@ -132,6 +132,7 @@ from synapse.module_api.callbacks.third_party_event_rules_callbacks import (
     ON_PROFILE_UPDATE_CALLBACK,
     ON_REMOVE_USER_THIRD_PARTY_IDENTIFIER_CALLBACK,
     ON_THREEPID_BIND_CALLBACK,
+    ON_UPGRADE_ROOM_CALLBACK,
     ON_USER_DEACTIVATION_STATUS_CHANGED_CALLBACK,
 )
 from synapse.push.httppusher import HttpPusher
@@ -515,6 +516,7 @@ class ModuleApi:
         | None = None,
         on_remove_user_third_party_identifier: ON_REMOVE_USER_THIRD_PARTY_IDENTIFIER_CALLBACK
         | None = None,
+        on_upgrade_room: ON_UPGRADE_ROOM_CALLBACK | None = None,
     ) -> None:
         """Registers callbacks for third party event rules capabilities.
 
@@ -533,6 +535,7 @@ class ModuleApi:
             on_threepid_bind=on_threepid_bind,
             on_add_user_third_party_identifier=on_add_user_third_party_identifier,
             on_remove_user_third_party_identifier=on_remove_user_third_party_identifier,
+            on_upgrade_room=on_upgrade_room,
         )
 
     def register_presence_router_callbacks(
@@ -1406,7 +1409,7 @@ class ModuleApi:
             f: The function to call repeatedly. f can be either synchronous or
                 asynchronous, and must follow Synapse's logcontext rules.
                 More info about logcontexts is available at
-                https://element-hq.github.io/synapse/latest/log_contexts.html
+                https://famedly.github.io/synapse/latest/log_contexts.html
             msec: How long to wait between calls in milliseconds.
             *args: Positional arguments to pass to function.
             desc: The background task's description. Default to the function's name.
@@ -1462,7 +1465,7 @@ class ModuleApi:
             f: The function to call once. f can be either synchronous or
                 asynchronous, and must follow Synapse's logcontext rules.
                 More info about logcontexts is available at
-                https://element-hq.github.io/synapse/latest/log_contexts.html
+                https://famedly.github.io/synapse/latest/log_contexts.html
             *args: Positional arguments to pass to function.
             desc: The background task's description. Default to the function's name.
             **kwargs: Keyword arguments to pass to function.

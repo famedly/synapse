@@ -20,6 +20,10 @@ thinking about options, the config as generated sets sensible defaults for all v
 database defaults to SQLite, which is not recommended for production usage. You can read more on this subject
 [here](../../setup/installation.md#using-postgresql).
 
+## Famedly's Synapse specifics
+
+Some config options are specific to Famedly's Synapse version. They can be found [here](#famedlys-synapse-specific-options).
+
 ## Config Conventions
 
 Configuration options that take a time period can be set using a number
@@ -104,6 +108,14 @@ apply if you want your config file to be read properly. A few helpful things to 
   shown.
 """
 SECTION_HEADERS = {
+    "famedly_maximum_refresh_token_lifetime": {
+        "title": "Famedly's Synapse specific options",
+        "description": "Those options are specific to Famedly's Synapse version.",
+    },
+    "experimental_features": {
+        "title": "Experimental features",
+        "description": "They all come from Element's Synapse except for `msc3706_enabled`",
+    },
     "modules": {
         "title": "Modules",
         "description": (

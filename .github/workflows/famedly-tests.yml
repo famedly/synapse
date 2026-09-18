@@ -1,0 +1,622 @@
+name: Tests
+
+# By separating push and pull_request by 'branches', they won't both run if there is a
+# push to a pull request. In other words, any change on any branch is considered a 'push',
+# so a change to a pull request was triggering both. Also run tests when a tag is pushed.
+on:
+  push:
+    branches: ["master", "release-*"]
+    tags:
+      - "**"
+  pull_request:
+  merge_group:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check-sampleconfig:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: Swatinem/rust-cache@98c8021b550208e191a6a3145459bfc9fb29c4c0 # v2.8.0
+      - uses: matrix-org/setup-python-poetry@v2
+        with:
+          python-version: "3.13"
+          poetry-version: "2.2.1"
+          extras: "all"
+      - run: poetry run scripts-dev/generate_sample_config.sh --check
+      - run: poetry run scripts-dev/config-lint.sh
+
+  # We don't update develop currently
+  #check-schema-delta:
+  #  runs-on: ubuntu-latest
+
+  #  steps:
+  #    - uses: actions/checkout@v4
+  #    - uses: actions/setup-python@83679a892e2d95755f2dac6acb0bfd1e9ac5d548 # v6.1.0
+  #      with:
+  #        python-version: "3.x"
+  #    - run: "pip install 'click==8.1.1' 'GitPython>=3.1.20'"
+  #    - run: scripts-dev/check_schema_delta.py --force-colors
+
+  check-lockfile:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@83679a892e2d95755f2dac6acb0bfd1e9ac5d548 # v6.1.0
+        with:
+          python-version: "3.13"
+      - run: .ci/scripts/check_lockfile.py
+
+  lint:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Poetry
+        uses: matrix-org/setup-python-poetry@v2
+        with:
+          poetry-version: "2.2.1"
+          python-version: "3.13"
+          install-project: "false"
+
+      - name: Run ruff check
+        run: poetry run ruff check --output-format=github .
+
+      - name: Run ruff format
+        run: poetry run ruff format --check .
+
+  lint-mypy:
+    runs-on: ubuntu-latest
+    name: Typechecking
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - uses: Swatinem/rust-cache@98c8021b550208e191a6a3145459bfc9fb29c4c0 # v2.8.0
+
+      - name: Setup Poetry
+        uses: matrix-org/setup-python-poetry@v2
+        with:
+          # We want to make use of type hints in optional dependencies too.
+          extras: all
+          # We have seen odd mypy failures that were resolved when we started
+          # installing the project again:
+          # https://github.com/matrix-org/synapse/pull/15376#issuecomment-1498983775
+          # To make CI green, err towards caution and install the project.
+          install-project: "true"
+          python-version: "3.13"
+          poetry-version: "2.2.1"
+
+      # Cribbed from
+      # https://github.com/AustinScola/mypy-cache-github-action/blob/85ea4f2972abed39b33bd02c36e341b28ca59213/src/restore.ts#L10-L17
+      - name: Restore/persist mypy's cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            .mypy_cache
+          key: mypy-cache-${{ github.context.sha }}
+          restore-keys: mypy-cache-
+
+      - name: Run mypy
+        run: poetry run mypy
+
+  lint-crlf:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check line endings
+        run: scripts-dev/check_line_terminators.sh
+
+  #lint-clippy:
+  #  runs-on: ubuntu-latest
+
+  #  steps:
+  #    - uses: actions/checkout@v4
+
+  #    - uses: Swatinem/rust-cache@98c8021b550208e191a6a3145459bfc9fb29c4c0 # v2.8.0
+
+  #    - run: cargo clippy -- -D warnings
+
+  #lint-rustfmt:
+  #  runs-on: ubuntu-latest
+
+  #  steps:
+  #    - uses: actions/checkout@v4
+
+  #    - name: Install Rust
+  #      uses: dtolnay/rust-toolchain@master
+  #      with:
+  #        # We use nightly so that it correctly groups together imports
+  #        toolchain: nightly-2022-12-01
+  #        components: rustfmt
+  #    - uses: Swatinem/rust-cache@98c8021b550208e191a6a3145459bfc9fb29c4c0 # v2.8.0
+
+  #    - run: cargo fmt --check
+
+  # This is to detect issues with the rst file, which can otherwise cause issues
+  # when uploading packages to PyPi.
+  lint-readme:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@83679a892e2d95755f2dac6acb0bfd1e9ac5d548 # v6.1.0
+        with:
+          python-version: "3.13"
+      - run: "pip install rstcheck"
+      - run: "rstcheck --report-level=WARNING README.rst"
+
+  # Dummy step to gate other tests on without repeating the whole list
+  linting-done:
+    if: ${{ !cancelled() }} # Run this even if prior jobs were skipped
+    needs:
+      - lint
+      - lint-mypy
+      - lint-crlf
+      - check-sampleconfig
+      #- check-schema-delta
+      - check-lockfile
+      #- lint-clippy
+      #- lint-clippy-nightly
+      #- lint-rustfmt
+      - lint-readme
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "done"
+
+  calculate-test-jobs:
+    if: ${{ !cancelled() && !failure() }} # Allow previous steps to be skipped, but not fail
+    needs: linting-done
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@83679a892e2d95755f2dac6acb0bfd1e9ac5d548 # v6.1.0
+        with:
+          python-version: "3.x"
+      - id: get-matrix
+        run: .ci/scripts/calculate_jobs.py
+    outputs:
+      trial_test_matrix: ${{ steps.get-matrix.outputs.trial_test_matrix }}
+      sytest_test_matrix: ${{ steps.get-matrix.outputs.sytest_test_matrix }}
+
+  trial:
+    if: ${{ !cancelled() && !failure() }} # Allow previous steps to be skipped, but not fail
+    needs:
+      - calculate-test-jobs
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+    strategy:
+      matrix:
+        job: ${{ fromJson(needs.calculate-test-jobs.outputs.trial_test_matrix) }}
+    env:
+      # Both of these are used for the coverage system. TOP gives the directory that is
+      # the root of the source code, and COVERAGE_PROCESS_START points at the coverage
+      # settings file to use(which also enables multiprocess implicit mode for coverage.py)
+      TOP: ${{ github.workspace }}
+      COVERAGE_PROCESS_START: ${{ github.workspace }}/.coveragerc
+
+    steps:
+      - uses: actions/checkout@v4
+      - run: sudo apt-get -qq install xmlsec1
+      - name: Set up PostgreSQL ${{ matrix.job.postgres-version }}
+        if: ${{ matrix.job.postgres-version }}
+        # 1. Mount postgres data files onto a tmpfs in-memory filesystem to reduce overhead of docker's overlayfs layer.
+        # 2. Expose the unix socket for postgres. This removes latency of using docker-proxy for connections.
+        run: |
+          docker run -d -p 5432:5432 \
+            --tmpfs /var/lib/postgresql/data:rw,size=6144m \
+            --mount 'type=bind,src=/var/run/postgresql,dst=/var/run/postgresql' \
+            -e POSTGRES_PASSWORD=postgres \
+            -e POSTGRES_INITDB_ARGS="--lc-collate C --lc-ctype C --encoding UTF8" \
+            postgres:${{ matrix.job.postgres-version }}
+
+      - uses: Swatinem/rust-cache@98c8021b550208e191a6a3145459bfc9fb29c4c0 # v2.8.0
+
+      - uses: matrix-org/setup-python-poetry@v2
+        with:
+          python-version: ${{ matrix.job.python-version }}
+          poetry-version: "2.2.1"
+          extras: ${{ matrix.job.extras }}
+      - name: Await PostgreSQL
+        if: ${{ matrix.job.postgres-version }}
+        timeout-minutes: 2
+        run: until pg_isready -h localhost; do sleep 1; done
+      # coverage is already installed from the pyproject.toml file
+      - run: poetry run pip install coverage-enable-subprocess
+        # Normally, this Github runner has 4 cores(vCPUs) available to it.
+        # Just use that number to define the number of runners. Adding in
+        # --debug=core will display which measurement core is in use. For python 3.14+
+        # this is educational.
+      - run: poetry run coverage run --debug=core -m twisted.trial -j$((`nproc`)) tests
+        env:
+          SYNAPSE_POSTGRES: ${{ matrix.job.database == 'postgres' || '' }}
+          SYNAPSE_POSTGRES_HOST: /var/run/postgresql
+          SYNAPSE_POSTGRES_USER: postgres
+          SYNAPSE_POSTGRES_PASSWORD: postgres
+      - name: Dump logs
+        # Logs are most useful when the command fails, always include them.
+        if: ${{ always() }}
+        # Note: Dumps to workflow logs instead of using actions/upload-artifact
+        #       This keeps logs colocated with failing jobs
+        #       It also ignores find's exit code; this is a best effort affair
+        run: >-
+          find _trial_temp -name '*.log'
+          -exec echo "::group::{}" \;
+          -exec cat {} \;
+          -exec echo "::endgroup::" \;
+          || true
+      - run: poetry run coverage combine
+      - run: poetry run coverage xml
+      - name: Codecov - Upload coverage
+        uses: codecov/codecov-action@v5
+        with:
+          use_oidc: true
+
+  sytest:
+    if: ${{ !failure() && !cancelled() }}
+    needs:
+      - calculate-test-jobs
+    runs-on: ubuntu-latest
+    container:
+      image: matrixdotorg/sytest-synapse:${{ matrix.job.sytest-tag }}
+      volumes:
+        - ${{ github.workspace }}:/src
+      env:
+        # If this is a pull request to a release branch, use that branch as default branch for sytest, else use develop
+        # This works because the release script always create a branch on the sytest repo with the same name as the release branch
+        SYTEST_DEFAULT_BRANCH: ${{ startsWith(github.base_ref, 'release-') && github.base_ref || 'develop' }}
+        SYTEST_BRANCH: ${{ github.head_ref }}
+        POSTGRES: ${{ matrix.job.postgres && 1}}
+        MULTI_POSTGRES: ${{ (matrix.job.postgres == 'multi-postgres') || '' }}
+        ASYNCIO_REACTOR: ${{ (matrix.job.reactor == 'asyncio') || '' }}
+        WORKERS: ${{ matrix.job.workers && 1 }}
+        BLACKLIST: ${{ matrix.job.workers && 'synapse-blacklist-with-workers' }}
+        TOP: ${{ github.workspace }}
+
+    strategy:
+      fail-fast: false
+      matrix:
+        job: ${{ fromJson(needs.calculate-test-jobs.outputs.sytest_test_matrix) }}
+
+    steps:
+      - uses: actions/checkout@v4
+      - name: Prepare test blacklist
+        run: cat sytest-blacklist .ci/worker-blacklist > synapse-blacklist-with-workers
+
+      - uses: Swatinem/rust-cache@98c8021b550208e191a6a3145459bfc9fb29c4c0 # v2.8.0
+
+      - name: Run SyTest
+        run: /bootstrap.sh synapse
+        working-directory: /src
+      - name: Summarise results.tap
+        if: ${{ always() }}
+        run: /sytest/scripts/tap_to_gha.pl /logs/results.tap
+      - name: Upload SyTest logs
+        uses: actions/upload-artifact@v4
+        if: ${{ always() }}
+        with:
+          name: Sytest Logs - ${{ job.status }} - (${{ join(matrix.job.*, ', ') }})
+          path: |
+            /logs/results.tap
+            /logs/**/*.log*
+
+  complement:
+    if: "${{ !failure() && !cancelled() }}"
+    needs:
+      - linting-done
+    runs-on: ubuntu-latest
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arrangement: monolith
+            database: SQLite
+
+          - arrangement: monolith
+            database: Postgres
+
+          - arrangement: workers
+            database: Postgres
+
+    steps:
+      - name: Run actions/checkout@v4 for synapse
+        uses: actions/checkout@v4
+        with:
+          path: synapse
+
+      # `poetry` is used in `complement.sh`
+      - uses: matrix-org/setup-python-poetry@v2
+        with:
+          poetry-version: "2.2.1"
+          # Matches the `path` where we checkout Synapse above
+          working-directory: "synapse"
+
+      - name: Prepare Complement's Prerequisites
+        run: synapse/.ci/scripts/setup_complement_prerequisites.sh
+
+      - uses: actions/setup-go@v5
+        with:
+          cache-dependency-path: complement/go.sum
+          go-version-file: complement/go.mod
+
+        # use p=1 concurrency as GHA boxes are underpowered and don't like running tons of synapses at once.
+      - name: Run Complement Tests
+        id: run_complement_tests
+        # -p=1: We're using `-p 1` to force the test packages to run serially as GHA boxes
+        #     are underpowered and don't like running tons of Synapse instances at once.
+        # -json: Output JSON format so that gotestfmt can parse it.
+        #
+        # tee /tmp/gotest.log: We tee the output to a file so that we can re-process it
+        # later on for better formatting with gotestfmt. But we still want the command
+        # to output to the terminal as it runs so we can see what's happening in
+        # real-time.
+        run: |
+          set -o pipefail
+          COMPLEMENT_DIR=`pwd`/complement synapse/scripts-dev/complement.sh -p 1 -json 2>&1 | tee /tmp/gotest.log
+        shell: bash
+        env:
+          POSTGRES: ${{ (matrix.database == 'Postgres') && 1 || '' }}
+          WORKERS: ${{ (matrix.arrangement == 'workers') && 1 || '' }}
+
+      - name: Formatted Complement test logs
+        # Always run this step if we attempted to run the Complement tests.
+        if: always() && steps.run_complement_tests.outcome != 'skipped'
+        run: cat /tmp/gotest.log | gotestfmt -hide "successful-downloads,empty-packages"
+
+  cargo-test:
+    runs-on: ubuntu-latest
+    needs:
+      - linting-done
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: Swatinem/rust-cache@98c8021b550208e191a6a3145459bfc9fb29c4c0 # v2.8.0
+
+      - run: cargo test
+
+  invite-checker:
+    if: ${{ !failure() && !cancelled() }}
+    needs:
+      - linting-done
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout synapse
+        uses: actions/checkout@v4
+
+      - name: Checkout synapse-invite-checker
+        uses: actions/checkout@v4
+        with:
+          repository: famedly/synapse-invite-checker
+          path: synapse-invite-checker
+
+      - name: Setup Python
+        uses: actions/setup-python@83679a892e2d95755f2dac6acb0bfd1e9ac5d548 # v6.1.0
+        with:
+          python-version: "3.13"
+
+      - name: Install hatch and poetry
+        run: pip install hatch poetry poetry-plugin-export
+
+      - name: Generate requirements from Synapse lockfile
+        # hatch can't read synapse's lock file, we export it in a format hatch can use,
+        # this allows us to install synapse dependencies on the version they are locked at,
+        # this avoids errors due to new dependency versions with breaking changes.
+        run: |
+          poetry export --without-hashes --format requirements.txt --output "${{ github.workspace }}/synapse-invite-checker/synapse-requirements.txt"
+
+      - name: Determine synapse git ref
+        id: synapse-ref
+        run: |
+          if [ "${{ github.event_name }}" == "pull_request" ]; then
+            echo "ref=${{ github.event.pull_request.head.ref }}" >> "$GITHUB_OUTPUT"
+            echo "repo=${{ github.event.pull_request.head.repo.full_name }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "ref=${{ github.ref_name }}" >> "$GITHUB_OUTPUT"
+            echo "repo=${{ github.repository }}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Update dependency to the current branch
+        working-directory: synapse-invite-checker
+        # the synapse dependency of the invite-checker is already pointing to synapse's master branch
+        # we skip the branch update when the CI runs on master
+        run: |
+          if [ "${{ steps.synapse-ref.outputs.ref }}" != "master" ]; then
+            sed -i 's|"matrix-synapse[^"]*"|"matrix-synapse @ git+https://github.com/${{ steps.synapse-ref.outputs.repo }}.git@${{ steps.synapse-ref.outputs.ref }}"|' pyproject.toml
+            # Check if the file was actually modified
+            if git diff --exit-code pyproject.toml > /dev/null; then
+              echo "::error::The sed command did not modify pyproject.toml. Check if the 'matrix-synapse' dependency exists in the file."
+              exit 1
+            fi
+          fi
+
+      - name: Run invite-checker tests
+        working-directory: synapse-invite-checker
+        run: hatch run pip install -r synapse-requirements.txt && hatch test -p -c
+
+      - name: Display Hatch Environment Info
+        if: always()
+        working-directory: synapse-invite-checker
+        run: |
+          echo "### Hatch Environment Details"
+          hatch env show
+          echo "### Installed Packages"
+          hatch run pip freeze
+
+  token-authenticator:
+    if: ${{ !failure() && !cancelled() }}
+    needs:
+      - linting-done
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout synapse
+        uses: actions/checkout@v4
+
+      - name: Checkout synapse-token-authenticator
+        uses: actions/checkout@v4
+        with:
+          repository: famedly/synapse-token-authenticator
+          path: synapse-token-authenticator
+
+      - name: Setup Python
+        uses: actions/setup-python@83679a892e2d95755f2dac6acb0bfd1e9ac5d548 # v6.1.0
+        with:
+          python-version: "3.13"
+
+      - name: Install hatch and poetry
+        run: pip install hatch poetry poetry-plugin-export
+
+      - name: Generate requirements from Synapse lockfile
+        # hatch can't read synapse's lock file, we export it in a format hatch can use
+        # this allows us to install synapse dependencies on the version they are locked at,
+        # this avoids errors due to new dependency versions with breaking changes
+        run: |
+          poetry export --without-hashes --format requirements.txt --output "${{ github.workspace }}/synapse-token-authenticator/synapse-requirements.txt"
+
+      - name: Determine synapse git ref
+        id: synapse-ref
+        run: |
+          if [ "${{ github.event_name }}" == "pull_request" ]; then
+            echo "ref=${{ github.event.pull_request.head.ref }}" >> "$GITHUB_OUTPUT"
+            echo "repo=${{ github.event.pull_request.head.repo.full_name }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "ref=${{ github.ref_name }}" >> "$GITHUB_OUTPUT"
+            echo "repo=${{ github.repository }}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Update dependency to the current branch
+        working-directory: synapse-token-authenticator
+        run: |
+          sed -i 's|"matrix-synapse[^"]*"|"matrix-synapse @ git+https://github.com/${{ steps.synapse-ref.outputs.repo }}.git@${{ steps.synapse-ref.outputs.ref }}"|' pyproject.toml
+          # Check if the file was actually modified
+          if git diff --exit-code pyproject.toml > /dev/null; then
+            echo "::error::The sed command did not modify pyproject.toml. Check if the 'matrix-synapse' dependency exists in the file."
+            exit 1
+          fi
+
+      - name: Run token-authenticator tests
+        working-directory: synapse-token-authenticator
+        run: hatch run pip install -r synapse-requirements.txt && hatch test -p -c
+
+      - name: Display Hatch Environment Info
+        if: always()
+        working-directory: synapse-token-authenticator
+        run: |
+          echo "### Hatch Environment Details"
+          hatch env show
+          echo "### Installed Packages"
+          hatch run pip freeze
+
+  famedly-control:
+    if: ${{ !failure() && !cancelled() }}
+    needs:
+      - linting-done
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout synapse
+        uses: actions/checkout@v4
+
+      - name: Checkout famedly-control-synapse
+        uses: actions/checkout@v4
+        with:
+          repository: famedly/famedly-control-synapse
+          path: famedly-control-synapse
+
+      - name: Setup Python
+        uses: actions/setup-python@83679a892e2d95755f2dac6acb0bfd1e9ac5d548 # v6.1.0
+        with:
+          python-version: "3.13"
+
+      - name: Install hatch and poetry
+        run: pip install hatch poetry poetry-plugin-export
+
+      - name: Generate requirements from Synapse lockfile
+        # hatch can't read synapse's lock file, we export it in a format hatch can use,
+        # this allows us to install synapse dependencies on the version they are locked at,
+        # this avoids errors due to new dependency versions with breaking changes.
+        run: |
+          poetry export --without-hashes --format requirements.txt --output "${{ github.workspace }}/famedly-control-synapse/synapse-requirements.txt"
+
+      - name: Determine synapse git ref
+        id: synapse-ref
+        run: |
+          if [ "${{ github.event_name }}" == "pull_request" ]; then
+            echo "ref=${{ github.event.pull_request.head.ref }}" >> "$GITHUB_OUTPUT"
+            echo "repo=${{ github.event.pull_request.head.repo.full_name }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "ref=${{ github.ref_name }}" >> "$GITHUB_OUTPUT"
+            echo "repo=${{ github.repository }}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Update dependency to the current branch
+        working-directory: famedly-control-synapse
+        # the synapse dependency of the famedly-control is already pointing to synapse's master branch
+        # we skip the branch update when the CI runs on master
+        run: |
+          if [ "${{ steps.synapse-ref.outputs.ref }}" != "master" ]; then
+            sed -i 's|"matrix-synapse[^"]*"|"matrix-synapse @ git+https://github.com/${{ steps.synapse-ref.outputs.repo }}.git@${{ steps.synapse-ref.outputs.ref }}"|' pyproject.toml
+            # Check if the file was actually modified
+            if git diff --exit-code pyproject.toml > /dev/null; then
+              echo "::error::The sed command did not modify pyproject.toml. Check if the 'matrix-synapse' dependency exists in the file."
+              exit 1
+            fi
+          fi
+
+      - name: Run famedly-control tests
+        working-directory: famedly-control-synapse
+        run: hatch run pip install -r synapse-requirements.txt && hatch test -p -c
+
+      - name: Display Hatch Environment Info
+        if: always()
+        working-directory: famedly-control-synapse
+        run: |
+          echo "### Hatch Environment Details"
+          hatch env show
+          echo "### Installed Packages"
+          hatch run pip freeze
+
+  otlp:
+    if: ${{ !failure() && !cancelled() }}
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Run actions/checkout@v4 for synapse
+        uses: actions/checkout@v4
+      - run: |
+          set -e
+          DOCKER_BUILDKIT=1 docker build -t famedly/synapse -f docker/Dockerfile .
+          cd otlp-test
+          success() { [ -s out/traces.json ] && [ -s out/logs.json ]; }
+          (until success; do sleep 1; done && docker compose down >/dev/null 2>&1) &
+          timeout 30 docker compose up
+          ! sudo grep -q '"ERROR"' out/logs.json  # ensure no errors occurred
+          success  # ensure both traces and logs are present
+          sudo grep -q 'Main loop terminated.' out/logs.json  # ensure log is complete (to the end)
+
+  # a job which marks all the other jobs as complete, thus allowing PRs to be merged.
+  tests-done:
+    if: ${{ always() }}
+    needs:
+      - trial
+      - sytest
+      - complement
+      - cargo-test
+      - invite-checker
+      - token-authenticator
+      - famedly-control
+      - linting-done
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "done"

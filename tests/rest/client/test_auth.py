@@ -1071,6 +1071,231 @@ class RefreshAuthTests(unittest.HomeserverTestCase):
         )
 
     @override_config(
+        {"refreshable_access_token_lifetime": "1m", "refresh_token_lifetime": "2m"}
+    )
+    def test_custom_refresh_token_expiry(self) -> None:
+        """
+        The client might override the refresh token lifetime using the custom com.famedly.refresh_token_lifetime_ms parameter.
+        """
+
+        def use_custom_refresh_token(refresh_token: str) -> FakeChannel:
+            """
+            Helper that makes a request to use a refresh token with a custom lifetime (3 minutes).
+            """
+            return self.make_request(
+                "POST",
+                "/_matrix/client/v3/refresh",
+                {
+                    "refresh_token": refresh_token,
+                    "com.famedly.refresh_token_lifetime_ms": 3 * 60 * 1000,
+                },
+            )
+
+        body = {
+            "type": "m.login.password",
+            "user": "test",
+            "password": self.user_pass,
+            "refresh_token": True,
+        }
+        login_response = self.make_request(
+            "POST",
+            "/_matrix/client/r0/login",
+            body,
+        )
+        self.assertEqual(login_response.code, HTTPStatus.OK, login_response.result)
+        refresh_token1 = login_response.json_body["refresh_token"]
+
+        # refresh immediately to set custom expiry time
+        refresh_response = use_custom_refresh_token(refresh_token1)
+        self.assertEqual(refresh_response.code, HTTPStatus.OK, refresh_response.result)
+        self.assertIn(
+            "refresh_token",
+            refresh_response.json_body,
+            "No new refresh token returned after refresh.",
+        )
+        refresh_token2 = refresh_response.json_body["refresh_token"]
+
+        # Advance 179 seconds in the future (just shy of 3 minutes)
+        self.reactor.advance(179.0)
+
+        # Refresh our session. The refresh token should still JUST be valid right now.
+        # By doing so, we get a new access token and a new refresh token.
+        refresh_response = use_custom_refresh_token(refresh_token2)
+        self.assertEqual(refresh_response.code, HTTPStatus.OK, refresh_response.result)
+        self.assertIn(
+            "refresh_token",
+            refresh_response.json_body,
+            "No new refresh token returned after refresh.",
+        )
+        refresh_token3 = refresh_response.json_body["refresh_token"]
+
+        # Advance 181 seconds in the future (just a bit more than 3 minutes)
+        self.reactor.advance(181.0)
+
+        # Try to refresh our session, but instead notice that the refresh token is
+        # not valid (it just expired).
+        refresh_response = use_custom_refresh_token(refresh_token3)
+        self.assertEqual(
+            refresh_response.code, HTTPStatus.FORBIDDEN, refresh_response.result
+        )
+
+    @override_config(
+        {
+            "refreshable_access_token_lifetime": "1m",
+            "refresh_token_lifetime": "2m",
+            "famedly_maximum_refresh_token_lifetime": "10m",
+        }
+    )
+    def test_custom_refresh_token_expiry_maximum(self) -> None:
+        """
+        The client might override the refresh token lifetime using the custom com.famedly.refresh_token_lifetime_ms parameter. Ensure we clamp to the maximum.
+        """
+
+        def use_custom_refresh_token(refresh_token: str) -> FakeChannel:
+            """
+            Helper that makes a request to use a refresh token with a custom lifetime (30 minutes).
+            """
+            return self.make_request(
+                "POST",
+                "/_matrix/client/v3/refresh",
+                {
+                    "refresh_token": refresh_token,
+                    "com.famedly.refresh_token_lifetime_ms": 30 * 60 * 1000,
+                },
+            )
+
+        body = {
+            "type": "m.login.password",
+            "user": "test",
+            "password": self.user_pass,
+            "refresh_token": True,
+        }
+        login_response = self.make_request(
+            "POST",
+            "/_matrix/client/r0/login",
+            body,
+        )
+        self.assertEqual(login_response.code, HTTPStatus.OK, login_response.result)
+        refresh_token1 = login_response.json_body["refresh_token"]
+
+        # refresh immediately to set custom expiry time
+        refresh_response = use_custom_refresh_token(refresh_token1)
+        self.assertEqual(refresh_response.code, HTTPStatus.OK, refresh_response.result)
+        self.assertIn(
+            "refresh_token",
+            refresh_response.json_body,
+            "No new refresh token returned after refresh.",
+        )
+        refresh_token2 = refresh_response.json_body["refresh_token"]
+
+        # Advance 179 seconds in the future (just shy of 3 minutes)
+        self.reactor.advance(179.0)
+
+        # Refresh our session. The refresh token should still JUST be valid right now.
+        # By doing so, we get a new access token and a new refresh token.
+        refresh_response = use_custom_refresh_token(refresh_token2)
+        self.assertEqual(refresh_response.code, HTTPStatus.OK, refresh_response.result)
+        self.assertIn(
+            "refresh_token",
+            refresh_response.json_body,
+            "No new refresh token returned after refresh.",
+        )
+        refresh_token3 = refresh_response.json_body["refresh_token"]
+
+        # Advance 610 seconds in the future (just a bit more than 10 minutes)
+        self.reactor.advance(610.0)
+
+        # Try to refresh our session, but instead notice that the refresh token is
+        # not valid (it just expired).
+        refresh_response = use_custom_refresh_token(refresh_token3)
+        self.assertEqual(
+            refresh_response.code, HTTPStatus.FORBIDDEN, refresh_response.result
+        )
+
+    def test_explicit_soft_logout(self) -> None:
+        """
+        Doing an explicit soft logout should invalidate all tokens.
+        """
+
+        body = {
+            "type": "m.login.password",
+            "user": "test",
+            "password": self.user_pass,
+            "refresh_token": True,
+        }
+        login_response = self.make_request(
+            "POST",
+            "/_matrix/client/v3/login",
+            body,
+        )
+        self.assertEqual(login_response.code, HTTPStatus.OK, login_response.result)
+        refresh_token = login_response.json_body["refresh_token"]
+        access_token = login_response.json_body["access_token"]
+        device_id = login_response.json_body["device_id"]
+
+        # access token should be valid
+        whoami_response = self.make_request(
+            "GET",
+            "/_matrix/client/v3/account/whoami",
+            access_token=access_token,
+        )
+        self.assertEqual(whoami_response.code, HTTPStatus.OK, whoami_response.result)
+
+        # Do a soft logout
+        logout_response = self.make_request(
+            "POST",
+            "/_matrix/client/v3/logout",
+            {
+                "com.famedly.soft_logout": True,
+            },
+            access_token=access_token,
+        )
+        self.assertEqual(logout_response.code, HTTPStatus.OK, logout_response.result)
+
+        # Assert that we can't refresh the token anymore
+        refresh_response = self.use_refresh_token(refresh_token)
+        self.assertEqual(
+            refresh_response.code, HTTPStatus.FORBIDDEN, refresh_response.result
+        )
+
+        # access token should be invalid
+        whoami_response = self.make_request(
+            "GET",
+            "/_matrix/client/v3/account/whoami",
+            access_token=access_token,
+        )
+        self.assertEqual(
+            whoami_response.code, HTTPStatus.UNAUTHORIZED, whoami_response.result
+        )
+        self.assertEqual(
+            whoami_response.json_body["soft_logout"], True, whoami_response.result
+        )
+
+        # Log back into the existing session
+        body = {
+            "type": "m.login.password",
+            "user": "test",
+            "password": self.user_pass,
+            "refresh_token": True,
+            "device_id": device_id,
+        }
+        login_response = self.make_request(
+            "POST",
+            "/_matrix/client/v3/login",
+            body,
+        )
+        self.assertEqual(login_response.code, HTTPStatus.OK, login_response.result)
+        access_token = login_response.json_body["access_token"]
+
+        # access token should be valid again
+        whoami_response = self.make_request(
+            "GET",
+            "/_matrix/client/v3/account/whoami",
+            access_token=access_token,
+        )
+        self.assertEqual(whoami_response.code, HTTPStatus.OK, whoami_response.result)
+
+    @override_config(
         {
             "refreshable_access_token_lifetime": "2m",
             "refresh_token_lifetime": "2m",

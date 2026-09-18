@@ -114,6 +114,9 @@ No significant changes since 1.160.0rc2.
 
 No significant changes since 1.159.0rc1.
 
+## Famedly additions for v1.159.0_1
+
+- fix: presence stream stalling intermittently ([\#282](https://github.com/famedly/synapse/pull/282)) (FrenchGithubUser)
 
 # Synapse 1.159.0rc1 (2026-08-11)
 
@@ -228,6 +231,10 @@ Low severity:
 
 - Fix [ELEMENTSEC-2026-1703](https://github.com/element-hq/synapse/security/advisories/GHSA-vh4c-pqh4-w3wq)
 - Fix [ELEMENTSEC-2026-1760](https://github.com/element-hq/synapse/security/advisories/GHSA-hgcg-p9gx-fq5f)
+
+## Famedly additions for v1.157.2_1
+
+- feat: Add requester as an argument to the third party module callback "check_event_allowed" (Jason Little)
 
 
 # Synapse 1.157.1 (2026-07-22)
@@ -355,6 +362,10 @@ as it reached end of life on the 10th of June 2026.
 
 - When building releases, don't cancel Debian package builds when one of them fails. ([\#19842](https://github.com/element-hq/synapse/issues/19842))
 
+## Famedly additions for v1.155.0_1
+
+- add destination to incoming federation responses metrics (Jason Little)
+
 # Synapse 1.155.0rc1 (2026-06-09)
 
 ## Bugfixes
@@ -380,6 +391,10 @@ as it reached end of life on the 10th of June 2026.
 # Synapse 1.154.0 (2026-06-04)
 
 No significant changes since 1.154.0rc1.
+
+## Famedly additions for v1.154.0_1
+
+- Disabled in-repo dependabot pull requests, as this fork relies on upstream to handle dependency changes (Jason Little)
 
 # Synapse 1.154.0rc1 (2026-05-27)
 
@@ -487,6 +502,8 @@ Please see the [the relevant section in the upgrade notes](https://github.com/el
 
 Without configuring this new stream writer, only the main process will be able to handle the `/media/quarantine` admin API endpoints for quarantining media.
 
+## No Famedly additions for v1.152.0_1
+
 # Synapse 1.152.0rc1 (2026-04-22)
 
 ## Features
@@ -533,7 +550,10 @@ Without configuring this new stream writer, only the main process will be able t
 
 - Fix `KNOWN_ROOM_VERSIONS.__contains__` raising `TypeError` for non-string keys, which could cause `/sync` to fail for rooms with a `NULL` room version in the database. Bug introduced in [#19589](https://github.com/element-hq/synapse/pull/19589) as part of v1.151.0rc1. ([\#19649](https://github.com/element-hq/synapse/issues/19649))
 
+### Famedly additions for v1.151.0_1
 
+- bump: Synapse Token Authenticator to `v0.13.1` in the Famedly docker image
+- bump: Synapse Invite Checker to `0.5.0` in the Famedly docker image
 
 
 # Synapse 1.151.0rc1 (2026-03-31)
@@ -579,7 +599,10 @@ Without configuring this new stream writer, only the main process will be able t
 
 No significant changes since 1.150.0rc1.
 
+### Famedly additions for v1.150.0_1
 
+- chore: Prohibit dependencies on included modules from causing unexpected version changes ([\#247](https://github.com/famedly/synapse/pull/247))
+- fix(again): Allow account deactivation even with disabled profile changes ([\#248](https://github.com/famedly/synapse/pull/249))
 
 
 # Synapse 1.150.0rc1 (2026-03-17)
@@ -620,6 +643,13 @@ No significant changes since 1.150.0rc1.
 ## Internal Changes
 
 - Bump `matrix-synapse-ldap3` to `0.4.0` to support `setuptools>=82.0.0`. Fixes [\#19541](https://github.com/element-hq/synapse/issues/19541). ([\#19543](https://github.com/element-hq/synapse/issues/19543))
+
+### Famedly additions for v1.149.1_1
+
+- chore: Remove gosu usage from Synapse (Jason Little)
+- chore: Add in CI testing of the module based on its own test suite (Jason Little)
+- fix: include modpack build for TIM 1.1 and adjust for actual version that exists (Jason Little)
+- feat: add famedly control module in docker image (FrenchGithubUser)
 
 
 
@@ -664,6 +694,10 @@ No significant changes since 1.149.0rc1.
 # Synapse 1.148.0 (2026-02-24)
 
 No significant changes since 1.148.0rc1.
+
+### Famedly additions for v1.148.0_1
+
+- chore: fix the inconsistent stream error log message to contain the proper information instead of rasing value error ([\#238](https://github.com/famedly/synapse/pull/238)) (itsoyou & FrenchGithubUser)
 
 
 
@@ -734,7 +768,8 @@ No significant changes since 1.146.0rc1.
 - [MSC2697](https://github.com/matrix-org/matrix-spec-proposals/pull/2697) (Dehydrated devices) has been removed, as the MSC is closed. Developers should migrate to [MSC3814](https://github.com/matrix-org/matrix-spec-proposals/pull/3814). ([\#19346](https://github.com/element-hq/synapse/issues/19346))
 - Support for Ubuntu 25.04 (Plucky Puffin) has been dropped. Synapse no longer builds debian packages for Ubuntu 25.04.
 
-
+### Famedly additions for v1.146.0_1
+- feat: trigger CI actions (that are triggered on PRs) in merge queue (FrenchGithubUser)
 
 # Synapse 1.146.0rc1 (2026-01-20)
 
@@ -792,6 +827,13 @@ Ubuntu 25.04 (Plucky Puffin) will be end of life on Jan 17, 2026. Synapse will s
 
 The "Updates to locked dependencies" section has been removed from the changelog due to lack of use and the maintenance burden. ([\#19254](https://github.com/element-hq/synapse/issues/19254))
 
+### Famedly additions for v1.145.0_2
+- fix: invalidate access token cache on device deletion (FrenchGithubUser)
+
+### Famedly additions for v1.145.0_1
+- fix: typo in changelog (FrenchGithubUser)
+- chore: remove dependabot config as we use renovate instead (FrenchGithubUser)
+- chore: bump Github actions versions in Famedly workflows ([\#229](https://github.com/famedly/synapse/pull/229)) (jason-famedly)
 
 
 
@@ -891,6 +933,10 @@ that disable that endpoint by default.
 No significant changes since 1.144.0rc1.
 
 
+### Famedly additions for v1.144.0_1
+- ci: generate requirements.txt file from synapse's poetry.lock for invite-checker and token-authenticator tests ([\#227(https://github.com/famedly/synapse/pull/227)]) (FrenchGithubUser)
+- ci: fix tests failing as the token-authenticator's synapse dependency is already pointing to the master branch ([\#226](https://github.com/famedly/synapse/pull/226)) (FrenchGithubUser)
+- chore: Remove unused make_release.sh script and update README.rst ([\#224](https://github.com/famedly/synapse/pull/224)) (Jason Little)
 
 
 # Synapse 1.144.0rc1 (2025-12-02)
@@ -965,7 +1011,19 @@ This release of Synapse requires PostgreSQL 14+.
 No significant changes since 1.143.0rc2.
 
 
-
+### Famedly additions for v1.143.0_1
+- fix: docs url broken on /version ([\#219](https://github.com/famedly/synapse/pull/219)) (FrenchGithubUser)
+- fix: provide remote servers a way to find out about an event created during the remote join handshake ([\#71](https://github.com/famedly/synapse/pull/71)) (FrenchGithubUser)
+- fix: ci: fix up test coverage:
+  - [bump: codecov-action to v5](https://github.com/famedly/synapse/pull/220/commits/1158faf443b7493e6eadd82788a377397b8ab48e) (Jason Little)
+  - [ci: generate xml coverage file](https://github.com/famedly/synapse/pull/220/commits/cced457e7d14dd4b19c4ffedeb6ced1b2da5ab35) (Jason Little)
+  - [ci: use oidc for codecov access](https://github.com/famedly/synapse/pull/220/commits/e08f4f25d39fb441c6c1702b88553203ac8c6c77) (Jason Little)
+  - [ci: Stop forcing debug level logging for this one test](https://github.com/famedly/synapse/pull/220/commits/1994509e55397305448f856308218821999230c1) (Jason Little)
+  - [ci: Allow a test to selectively not run if coverage is being collected](https://github.com/famedly/synapse/pull/220/commits/26426cac0f5c3f5b298c495746b65199265411f4) (Jason Little) 
+  - [bump: coverage to v7.13.1](https://github.com/famedly/synapse/pull/220/commits/82d865ac3d0295427d73a575834d9080284088e2) (Jason Little)
+  - [fix: bump the tolerance of cpu_average stats collected for test to a wider margin](https://github.com/famedly/synapse/pull/220/commits/bcf0b812abc204d0579973f71bdea2a299e9fe78) (Jason Little)
+- bump: Synapse Invite Checker to version v0.4.13[(b601d6f)](https://github.com/famedly/synapse/pull/220/commits/b601d6fd4bd25d9909bcfba0a595538133340f88) (Jason Little)
+- tests: run the invite-checker and token-authenticator tests in the CI([\#222](https://github.com/famedly/synapse/pull/222/commits/3dd03b161807d868edbe8c26d46c80264ccca0c9)) (FrenchGithubUser)
 
 # Synapse 1.143.0rc2 (2025-11-18)
 
@@ -1046,6 +1104,8 @@ This release of Synapse requires PostgreSQL 14+.
 - Fixed a bug introduced in v1.142.0 preventing subpaths in MAS endpoints from working. ([\#19186](https://github.com/element-hq/synapse/issues/19186))
 
 
+### Famedly additions for v1.142.1_1
+- docs: update contributing guidelines ([\#209](https://github.com/famedly/synapse/pull/209)) (FrenchGithubUser)
 
 
 # Synapse 1.142.0 (2025-11-11)
@@ -1212,6 +1272,10 @@ paths you mount any additional Python packages at.
 No significant changes since 1.141.0rc2.
 
 
+### Famedly additions for v1.141.0_1
+
+- update `poetry.lock` file (FrenchgGithubUser)
+- disable dependabot [4560a77](https://github.com/famedly/synapse/commit/4560a77b154e039ee56ed0703c544967f2dca2f4) (FrenchgGithubUser)
 
 
 # Synapse 1.141.0rc2 (2025-10-28)
@@ -1263,6 +1327,23 @@ users from being able to upload or download media.
 No significant changes since 1.140.0rc1.
 
 
+### Famedly additions for v1.140.0_2
+- bump: Update module versions (Jason Little)
+  - Synapse Invite Checker is bumped to v0.2.2 for TIM 1.1 and v0.4.11 for TIM Pro
+  - Synapse Token Authenticator is bumped to v0.12.0 for TIM 1.1
+
+### Famedly additions for v1.140.0_1
+- bump: Synapse Invite Checker to 0.4.10 (Jason Little)
+- fix: adjust for Clock attribute being renamed (Jason Little)
+- feat: expose loaded modules over the admin API ([\#165](https://github.com/famedly/synapse/pull/165)) (FrenchGithubUser)
+- feat: include loaded module info in prometheus endpoint ([\#163](https://github.com/famedly/synapse/pull/163)) (FrenchGithubUser)
+- bump: python version to 3.10 (FrenchgGithubUser)
+- docs: update contribution process ([\#179](https://github.com/famedly/synapse/pull/179)) (FrenchGithubUser)
+- fix: logo path ([\#181](https://github.com/famedly/synapse/pull/181)) (FrenchGithubUser)
+- docs: mention configuration option changes from upstream ([\#180](https://github.com/famedly/synapse/pull/180)) (FrenchGithubUser)
+- docs: use Famedly's branding and contact ([\#178](https://github.com/famedly/synapse/pull/178)) (FrenchGithubUser)
+- docs: host Famedly's version, support latest mdbook and use internally approved github actions ([\#157](https://github.com/famedly/synapse/pull/157)) (FrenchGithubUser)
+- docs: mention fork relationship, update all appropriate references to new repo and update contribution guidelines (FrenchGithubUser)
 
 
 # Synapse 1.140.0rc1 (2025-10-10)
@@ -1353,6 +1434,13 @@ No significant changes since 1.140.0rc1.
 - Fix a bug introduced in 1.139.1 where a client could receive an Internal Server Error if they set `device_keys: null` in the request to [`POST /_matrix/client/v3/keys/upload`](https://spec.matrix.org/v1.16/client-server-api/#post_matrixclientv3keysupload). ([\#19023](https://github.com/element-hq/synapse/issues/19023))
 
 
+### Famedly additions for v1.139.2_1
+
+- feat: add user metrics (Soyoung Kim)
+- feat: add room count metrics (Soyoung Kim)
+
+### Famedly additions for v1.139.2_2
+- fix: Nonetype when the db query doesn't return value (Soyoung Kim)
 
 
 # Synapse 1.139.1 (2025-10-07)
@@ -1489,8 +1577,13 @@ No significant changes since 1.139.0rc3.
 
 ## Internal Changes
 
-- Drop support for Ubuntu 24.10 Oracular Oriole, and add support for Ubuntu 25.04 Plucky Puffin. This change was applied on top of 1.138.1. ([\#18962](https://github.com/element-hq/synapse/issues/18962))
+- Drop support for Ubuntu 24.10 Oracular Oriole, and add support for Ubuntu 25.04 Plucky Puffin. ([\#18962](https://github.com/element-hq/synapse/issues/18962))
 
+
+
+
+### Famedly additions for v1.138.2_1
+- Update poetry.lock file
 
 
 # Synapse 1.138.1 (2025-09-24)
@@ -1594,6 +1687,12 @@ No significant changes since 1.137.0rc1.
 * Bump types-pyyaml from 6.0.12.20250516 to 6.0.12.20250809. ([\#18798](https://github.com/element-hq/synapse/issues/18798))
 * Bump types-setuptools from 80.9.0.20250529 to 80.9.0.20250809. ([\#18796](https://github.com/element-hq/synapse/issues/18796))
 
+
+### Famedly additions for v1.137.0_1
+
+- chore: Add some useful data to the database inconsistency error to help with reporting (Jason Little)
+- chore: update workflow for nightly image (Soyoung Kim)
+
 # Synapse 1.136.0 (2025-08-12)
 
 Note: This release includes the security fixes from `1.135.2` and `1.136.0rc2`, detailed below.
@@ -1603,30 +1702,13 @@ Note: This release includes the security fixes from `1.135.2` and `1.136.0rc2`, 
 - Fix bug introduced in 1.135.2 and 1.136.0rc2 where the [Make Room Admin API](https://element-hq.github.io/synapse/latest/admin_api/rooms.html#make-room-admin-api) would not treat a room v12's creator power level as the highest in room. ([\#18805](https://github.com/element-hq/synapse/issues/18805))
 
 
-# Synapse 1.135.2 (2025-08-11)
 
-This is the Synapse portion of the [Matrix coordinated security release](https://matrix.org/blog/2025/07/security-predisclosure/). This release includes support for [room version](https://spec.matrix.org/v1.15/rooms/) 12 which fixes a number of security vulnerabilities, including [CVE-2025-49090](https://www.cve.org/CVERecord?id=CVE-2025-49090).
 
-The default room version is not changed. Not all clients will support room version 12 immediately, and not all users will be using the latest version of their clients. Large, public rooms are advised to wait a few weeks before upgrading to room version 12 to allow users throughout the Matrix ecosystem to update their clients.
+### Famedly additions for v1.136.0_1
 
-Note: release 1.135.1 was skipped due to issues discovered during the release process.
-
-Two patched Synapse releases are now available:
-
-* `1.135.2`: stable release comprised of `1.135.0` + security patches
-    * Upgrade to this release **if you are currently running 1.135.0 or below**.
-* `1.136.0rc2`: unstable release candidate comprised of `1.136.0rc1` + security patches.
-    * Upgrade to this release **only if you are on 1.136.0rc1**.
-
-### Bugfixes
-
-- Fix invalidation of storage cache that was broken in 1.135.0. ([\#18786](https://github.com/element-hq/synapse/issues/18786))
-
-### Internal Changes
-
-- Add a parameter to `upgrade_rooms(..)` to allow auto join local users. ([\#82](https://github.com/element-hq/synapse/issues/82))
-- Speed up upgrading a room with large numbers of banned users. ([\#18574](https://github.com/element-hq/synapse/issues/18574))
-
+- chore: Remove matrix-synapse-ldap3 from Famedly module docker layer (Jason Little)
+- fix: Allow a user to GDPR erase their profile data even when changing profile data is disabled in configuration (Jason Little)
+- chore: Update mod packs to include invite checker v0.4.9
 
 # Synapse 1.136.0rc2 (2025-08-11)
 
@@ -1699,6 +1781,37 @@ Please check [the relevant section in the upgrade notes](https://github.com/elem
 * Bump tokio from 1.46.1 to 1.47.0. ([\#18740](https://github.com/element-hq/synapse/issues/18740))
 * Bump types-jsonschema from 4.24.0.20250708 to 4.25.0.20250720. ([\#18703](https://github.com/element-hq/synapse/issues/18703))
 * Bump types-psycopg2 from 2.9.21.20250516 to 2.9.21.20250718. ([\#18706](https://github.com/element-hq/synapse/issues/18706))
+
+# Synapse 1.135.2 (2025-08-11)
+
+This is the Synapse portion of the [Matrix coordinated security release](https://matrix.org/blog/2025/07/security-predisclosure/). This release includes support for [room version](https://spec.matrix.org/v1.15/rooms/) 12 which fixes a number of security vulnerabilities, including [CVE-2025-49090](https://www.cve.org/CVERecord?id=CVE-2025-49090).
+
+The default room version is not changed. Not all clients will support room version 12 immediately, and not all users will be using the latest version of their clients. Large, public rooms are advised to wait a few weeks before upgrading to room version 12 to allow users throughout the Matrix ecosystem to update their clients.
+
+Note: release 1.135.1 was skipped due to issues discovered during the release process.
+
+Two patched Synapse releases are now available:
+
+* `1.135.2`: stable release comprised of `1.135.0` + security patches
+    * Upgrade to this release **if you are currently running 1.135.0 or below**.
+* `1.136.0rc2`: unstable release candidate comprised of `1.136.0rc1` + security patches.
+    * Upgrade to this release **only if you are on 1.136.0rc1**.
+
+### Bugfixes
+
+- Fix invalidation of storage cache that was broken in 1.135.0. ([\#18786](https://github.com/element-hq/synapse/issues/18786))
+
+### Internal Changes
+
+- Add a parameter to `upgrade_rooms(..)` to allow auto join local users. ([\#82](https://github.com/element-hq/synapse/issues/82))
+- Speed up upgrading a room with large numbers of banned users. ([\#18574](https://github.com/element-hq/synapse/issues/18574))
+
+
+
+
+### Famedly additions for v1.135.2_2
+
+- chore: Update mod packs to include fixed invite checker `v0.4.8` (Jason Little)
 
 # Synapse 1.135.0 (2025-08-01)
 
@@ -1790,6 +1903,21 @@ No significant changes since 1.134.0rc1.
 
 
 
+
+### Famedly additions for v1.134.0_1
+
+- New docker image tagging for Famedly production builds (Jason Little)
+- Reduce trial test runners to `nproc * 2` from `* 3` (Jason Little)
+
+### Famedly additions for v1.134.0_2
+
+- chore: bump SIC version to v0.4.7 (Jason Little)
+
+### Famedly additions for v1.134.0_3
+
+- chore: Add workflows to build docker image on pull request (Soyoung Kim)
+- chore: update docker registry (Soyoung Kim)
+- chore: bump STA version to v0.12.0 (Matheus Zaniolo)
 
 # Synapse 1.134.0rc1 (2025-07-09)
 

@@ -242,10 +242,15 @@ class PhoneHomeStatsTestCase(unittest.HomeserverTestCase):
 
         # Our users have not been around for >30 days, hence these are all 0.
         self.assertEqual(phone_home_stats["r30v2_users_all"], 0)
-        self.assertEqual(phone_home_stats["r30v2_users_android"], 0)
-        self.assertEqual(phone_home_stats["r30v2_users_ios"], 0)
-        self.assertEqual(phone_home_stats["r30v2_users_electron"], 0)
+        self.assertEqual(phone_home_stats["r30v2_users_element_android"], 0)
+        self.assertEqual(phone_home_stats["r30v2_users_element_ios"], 0)
+        self.assertEqual(phone_home_stats["r30v2_users_element_electron"], 0)
+        self.assertEqual(phone_home_stats["r30v2_users_famedly_android"], 0)
+        self.assertEqual(phone_home_stats["r30v2_users_famedly_ios"], 0)
+        self.assertEqual(phone_home_stats["r30v2_users_unknown_android"], 0)
+        self.assertEqual(phone_home_stats["r30v2_users_unknown_ios"], 0)
         self.assertEqual(phone_home_stats["r30v2_users_web"], 0)
+        self.assertEqual(phone_home_stats["r30v2_users_unknown"], 0)
         self.assertEqual(
             phone_home_stats["cache_factor"], self.hs.config.caches.global_factor
         )

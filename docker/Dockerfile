@@ -136,7 +136,6 @@ RUN \
   apt-get update -qq && \
   apt-cache depends --recurse --no-recommends --no-suggests --no-conflicts --no-breaks --no-replaces --no-enhances --no-pre-depends \
       curl \
-      gosu \
       libjpeg62-turbo \
       libpq5 \
       libwebp7 \
@@ -179,10 +178,10 @@ ARG SYNAPSE_VERSION_STRING
 # Pass it through to Synapse as an environment variable.
 ENV SYNAPSE_VERSION_STRING=${SYNAPSE_VERSION_STRING}
 
-LABEL org.opencontainers.image.url='https://github.com/element-hq/synapse'
-LABEL org.opencontainers.image.documentation='https://element-hq.github.io/synapse/latest/'
-LABEL org.opencontainers.image.source='https://github.com/element-hq/synapse.git'
-LABEL org.opencontainers.image.licenses='AGPL-3.0-or-later OR LicenseRef-Element-Commercial'
+LABEL org.opencontainers.image.url='https://github.com/famedly/synapse'
+LABEL org.opencontainers.image.documentation='https://github.com/famedly/synapse/blob/master/docker/README.md'
+LABEL org.opencontainers.image.source='https://github.com/famedly/synapse.git'
+LABEL org.opencontainers.image.licenses='AGPL-3.0-or-later'
 
 COPY --from=runtime-deps /install-${TARGETARCH}/etc /etc
 COPY --from=runtime-deps /install-${TARGETARCH}/usr /usr
