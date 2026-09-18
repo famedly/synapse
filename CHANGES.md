@@ -2,8 +2,10 @@
 
 No significant changes since 1.161.0rc1.
 
+## Famedly additions for v1.161.0_1
 
-
+- chore: bump module versions to SIC v0.6.1 STA v0.14.1 FCS v0.2.0 (Soyoung Kim)
+- feat: add more client labels for count_r30v2_users ([\#285])(https://github.com/famedly/synapse/pull/285) (Soyoung Kim)
 
 # Synapse 1.161.0rc1 (2026-09-08)
 
