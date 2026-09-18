@@ -38,7 +38,7 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-c0e8b6b6.js";
+            window.path_to_searchindex_js = "searchindex-da56489f.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="toc-561cdce4.js"></script>
@@ -17616,10 +17616,15 @@ homeserver configuration options that exist to tweak it.</p>
 <tr><td><code>daily_sent_messages</code></td><td>int</td><td>The number of (state) events sent by a local user with the type <code>m.room.message</code> seen in the last 24 hours.</td></tr>
 <tr><td><code>daily_sent_e2ee_messages</code></td><td>int</td><td>The number of (state) events sent by a local user with the type <code>m.room.encrypted</code> seen in the last 24 hours.</td></tr>
 <tr><td><code>r30v2_users_all</code></td><td>int</td><td>The number of 30 day retained users, with a revised algorithm. Defined as users that appear more than once in the past 60 days, and have more than 30 days between the most and least recent appearances in the past 60 days. Includes clients that do not fit into the below r30 client types.</td></tr>
-<tr><td><code>r30v2_users_android</code></td><td>int</td><td>The number of 30 day retained users, as defined above. Filtered only to clients with (“riot” or “element”) and “android” (case-insensitive) in the user agent string.</td></tr>
-<tr><td><code>r30v2_users_ios</code></td><td>int</td><td>The number of 30 day retained users, as defined above. Filtered only to clients with (“riot” or “element”) and “ios” (case-insensitive) in the user agent string.</td></tr>
-<tr><td><code>r30v2_users_electron</code></td><td>int</td><td>The number of 30 day retained users, as defined above. Filtered only to clients with (“riot” or “element”) and “electron” (case-insensitive) in the user agent string.</td></tr>
-<tr><td><code>r30v2_users_web</code></td><td>int</td><td>The number of 30 day retained users, as defined above. Filtered only to clients with “mozilla” or “gecko” (case-insensitive) in the user agent string.</td></tr>
+<tr><td><code>r30v2_users_element_android</code></td><td>int</td><td>The number of 30 day retained users, as defined above. Filtered only to clients with (“riot” or “element”) and “android” (case-insensitive) in the user agent string.</td></tr>
+<tr><td><code>r30v2_users_element_ios</code></td><td>int</td><td>The number of 30 day retained users, as defined above. Filtered only to clients with (“riot” or “element”) and “ios” (case-insensitive) in the user agent string.</td></tr>
+<tr><td><code>r30v2_users_element_electron</code></td><td>int</td><td>The number of 30 day retained users, as defined above. Filtered only to clients with (“riot” or “element”) and “electron” (case-insensitive) in the user agent string.</td></tr>
+<tr><td><code>r30v2_users_web</code></td><td>int</td><td>The number of 30 day retained users, as defined above. Filtered only to clients with “mozilla” or “gecko” (case-insensitive) in the user agent string. This is checked before bare android/ios matching so mobile browsers are counted as web.</td></tr>
+<tr><td><code>r30v2_users_famedly_android</code></td><td>int</td><td>The number of 30 day retained users, as defined above. Filtered only to clients with “famedly” and “android” (case-insensitive) in the user agent string.</td></tr>
+<tr><td><code>r30v2_users_famedly_ios</code></td><td>int</td><td>The number of 30 day retained users, as defined above. Filtered only to clients with “famedly” and “ios” (case-insensitive) in the user agent string.</td></tr>
+<tr><td><code>r30v2_users_unknown_android</code></td><td>int</td><td>The number of 30 day retained users, as defined above. Filtered only to clients with “android” but neither branded (Element/Riot/Famedly) nor browser (mozilla/gecko) tokens (case-insensitive) in the user agent string.</td></tr>
+<tr><td><code>r30v2_users_unknown_ios</code></td><td>int</td><td>The number of 30 day retained users, as defined above. Filtered only to clients with “ios” but neither branded (Element/Riot/Famedly) nor browser (mozilla/gecko) tokens (case-insensitive) in the user agent string.</td></tr>
+<tr><td><code>r30v2_users_unknown</code></td><td>int</td><td>The number of 30 day retained users, as defined above, that do not match any of the other client types.</td></tr>
 <tr><td><code>cache_factor</code></td><td>int</td><td>The configured <a href="#caching"><code>global factor</code></a> value for caching.</td></tr>
 <tr><td><code>event_cache_size</code></td><td>int</td><td>The configured <a href="#caching"><code>event_cache_size</code></a> value for caching.</td></tr>
 <tr><td><code>database_engine</code></td><td>string</td><td>The database engine that is in use. Either “psycopg2” meaning PostgreSQL is in use, or “sqlite3” for SQLite3.</td></tr>
