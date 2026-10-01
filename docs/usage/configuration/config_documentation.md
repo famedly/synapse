@@ -1342,6 +1342,8 @@ If specified as an empty list (`[]`), federation will be denied with all servers
 
 If unset or null, allows federation with all servers.
 
+An entry may use a wildcard as its entire first label, e.g. `*.example.com`. This matches any server name ending in `.example.com` (including deeper subdomains such as `a.b.example.com`), but not `example.com` itself; list that separately if needed. Entries are matched against the full server name including any port, so `*.example.com` does not match `a.example.com:8448`. Wildcards are not supported in any other position.
+
 Note: this does not stop a server from joining rooms that servers not on the whitelist are in. As such, this option is really only useful to establish a "private federation", where a group of servers all whitelist each other and have the same whitelist.
 
 Defaults to `null`.
@@ -1352,6 +1354,7 @@ federation_domain_whitelist:
 - lon.example.com
 - nyc.example.com
 - syd.example.com
+- '*.matrix.example.org'
 ```
 ---
 ### `federation_whitelist_endpoint_enabled`

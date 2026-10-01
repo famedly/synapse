@@ -121,9 +121,7 @@ class MediaRepository:
         self.recently_accessed_remotes: set[tuple[str, str]] = set()
         self.recently_accessed_locals: set[str] = set()
 
-        self.federation_domain_whitelist = (
-            hs.config.federation.federation_domain_whitelist
-        )
+        self._federation_config = hs.config.federation
         self.prevent_media_downloads_from = hs.config.media.prevent_media_downloads_from
 
         self.download_ratelimiter = Ratelimiter(
@@ -625,9 +623,8 @@ class MediaRepository:
         Returns:
             Resolves once a response has successfully been written to request
         """
-        if (
-            self.federation_domain_whitelist is not None
-            and server_name not in self.federation_domain_whitelist
+        if not self._federation_config.is_domain_allowed_according_to_federation_whitelist(
+            server_name
         ):
             raise FederationDeniedError(server_name)
 
@@ -706,9 +703,8 @@ class MediaRepository:
         Returns:
             The media info of the file
         """
-        if (
-            self.federation_domain_whitelist is not None
-            and server_name not in self.federation_domain_whitelist
+        if not self._federation_config.is_domain_allowed_according_to_federation_whitelist(
+            server_name
         ):
             raise FederationDeniedError(server_name)
 
