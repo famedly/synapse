@@ -14,6 +14,12 @@ jobs:
   pre:
     name: Calculate variables for GitHub Pages deployment
     runs-on: ubuntu-latest
+    # Only publish for the stable docs (master -> "latest") and release branches
+    # (famedly-release/v* -> version directory). The `push` trigger above already
+    # restricts this, but `workflow_dispatch` can be invoked on any branch; without
+    # this guard such a run would deploy a directory named after the branch (this is
+    # how the "syk/update-poetry-action" directory ended up on gh-pages). SYN-146.
+    if: github.ref == 'refs/heads/master' || startsWith(github.ref, 'refs/heads/famedly-release/v')
     steps:
       # Figure out the target directory.
       #
