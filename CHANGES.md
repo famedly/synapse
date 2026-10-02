@@ -2,8 +2,9 @@
 
 No significant changes since 1.162.0rc1.
 
+## Famedly additions for v1.162.0_1
 
-
+- chore: update CI poetry version to 2.4.1 (Soyoung Kim)
 
 # Synapse 1.162.0rc1 (2026-09-22)
 
