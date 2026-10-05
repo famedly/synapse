@@ -66,6 +66,26 @@ class MediaFilePathsTestCase(unittest.TestCase):
             "/media_store/local_thumbnails/Ge/rZ/NDnDZVjsOtardLuwfIBg",
         )
 
+    def test_content_hash_blob_paths(self) -> None:
+        """Local and remote blobs are separate trees, sharded like media ids."""
+        sha256 = "ebf4f635a17d10d6eb46ba680b70142419aa3220f228001a036d311a22ee9d2a"
+        self.assertEqual(
+            self.filepaths.local_media_blob_rel(sha256),
+            "local_blobs/eb/f4/f635a17d10d6eb46ba680b70142419aa3220f228001a036d311a22ee9d2a",
+        )
+        self.assertEqual(
+            self.filepaths.local_media_blob_filepath(sha256),
+            "/media_store/local_blobs/eb/f4/f635a17d10d6eb46ba680b70142419aa3220f228001a036d311a22ee9d2a",
+        )
+        self.assertEqual(
+            self.filepaths.remote_media_blob_rel(sha256),
+            "remote_blobs/eb/f4/f635a17d10d6eb46ba680b70142419aa3220f228001a036d311a22ee9d2a",
+        )
+        self.assertEqual(
+            self.filepaths.remote_media_blob_filepath(sha256),
+            "/media_store/remote_blobs/eb/f4/f635a17d10d6eb46ba680b70142419aa3220f228001a036d311a22ee9d2a",
+        )
+
     def test_remote_media_filepath(self) -> None:
         """Test remote media paths"""
         self.assertEqual(

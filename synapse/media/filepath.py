@@ -134,6 +134,16 @@ FORBIDDEN_NAMES = {
 }
 
 
+def _content_hash_rel(directory: str, sha256: str) -> str:
+    """Relative path of a content-addressed blob inside `directory`."""
+    return os.path.join(
+        directory,
+        _validate_path_component(sha256[0:2]),
+        _validate_path_component(sha256[2:4]),
+        _validate_path_component(sha256[4:]),
+    )
+
+
 def _validate_path_component(name: str) -> str:
     """Checks that the given string can be safely used as a path component
 
@@ -185,6 +195,17 @@ class MediaFilePaths:
     local_media_filepath = _wrap_in_base_path(local_media_filepath_rel)
 
     @_wrap_with_jail_check(relative=True)
+    def local_media_blob_rel(self, sha256: str) -> str:
+        """Relative path of the local content-hash blob.
+
+        Downloads keep using `local_media_filepath`. This path is an extra
+        hardlink so identical local uploads share one inode.
+        """
+        return _content_hash_rel("local_blobs", sha256)
+
+    local_media_blob_filepath = _wrap_in_base_path(local_media_blob_rel)
+
+    @_wrap_with_jail_check(relative=True)
     def local_media_thumbnail_rel(
         self, media_id: str, width: int, height: int, content_type: str, method: str
     ) -> str:
@@ -229,6 +250,18 @@ class MediaFilePaths:
         )
 
     remote_media_filepath = _wrap_in_base_path(remote_media_filepath_rel)
+
+    @_wrap_with_jail_check(relative=True)
+    def remote_media_blob_rel(self, sha256: str) -> str:
+        """Relative path of the remote content-hash blob.
+
+        Remote downloads keep using `remote_media_filepath`. This path is a
+        separate tree from `local_blobs`, so local and remote media never
+        share an inode.
+        """
+        return _content_hash_rel("remote_blobs", sha256)
+
+    remote_media_blob_filepath = _wrap_in_base_path(remote_media_blob_rel)
 
     @_wrap_with_jail_check(relative=True)
     def remote_media_thumbnail_rel(
