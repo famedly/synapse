@@ -332,6 +332,33 @@ class MediaStorage:
 
         return None
 
+    def _blob_path(self, sha256: str, remote: bool) -> str | None:
+        try:
+            if remote:
+                return self.filepaths.remote_media_blob_filepath(sha256)
+            return self.filepaths.local_media_blob_filepath(sha256)
+        except ValueError:
+            logger.warning("Ignoring invalid media sha256 %r", sha256)
+            return None
+
+    async def link_id_path_to_blob(
+        self, id_path: str, sha256: str, remote: bool
+    ) -> None:
+        """Hardlink `id_path` to the content-hash blob depending on the remote flag.
+        Args:
+            id_path: Absolute path of the media id file that was just stored.
+            sha256: Hex digest of that file.
+            remote: True when the file is remote media.
+        """
+        if not sha256 or self.local_media_directory is None:
+            return
+
+        blob_path = self._blob_path(sha256, remote)
+        if blob_path is None:
+            return
+
+        _link_id_path_to_blob(id_path, blob_path)
+
     @trace
     @contextlib.asynccontextmanager
     async def ensure_media_is_in_local_cache(
@@ -462,6 +489,46 @@ class MediaStorage:
                 method=file_info.thumbnail.method,
             )
         return self.filepaths.local_media_filepath_rel(file_info.file_id)
+
+
+def _link_id_path_to_blob(id_path: str, blob_path: str) -> None:
+    """Point `id_path` at the inode named by `blob_path`, creating the blob if needed.
+
+    A failed link leaves `id_path` in place.
+    """
+    if not os.path.isfile(id_path):
+        return
+
+    tmp_link = id_path + ".dedup-link"
+    try:
+        os.makedirs(os.path.dirname(blob_path), exist_ok=True)
+        if not os.path.exists(blob_path):
+            try:
+                os.link(id_path, blob_path)
+                return
+            except FileExistsError:
+                pass
+        if os.path.samefile(id_path, blob_path):
+            return
+
+        try:
+            os.remove(tmp_link)
+        except FileNotFoundError:
+            pass
+        # Link the existing blob to a temporary name first, replacing the id path only happens after that link succeeds.
+        os.link(blob_path, tmp_link)
+        os.replace(tmp_link, id_path)
+    except OSError:
+        logger.warning(
+            "Failed to hardlink media file %s to %s",
+            id_path,
+            blob_path,
+            exc_info=True,
+        )
+        try:
+            os.remove(tmp_link)
+        except OSError:
+            pass
 
 
 @trace

@@ -439,6 +439,8 @@ class MediaRepository:
                 quarantined_by="system" if should_quarantine else None,
             )
 
+        await self.media_storage.link_id_path_to_blob(fname, sha256, remote=False)
+
         try:
             await self._generate_thumbnails(None, media_id, media_id, media_type)
         except Exception as e:
@@ -879,6 +881,8 @@ class MediaRepository:
                 pass
             # Re-raise so the caller can handle it
             raise
+
+        await self.media_storage.link_id_path_to_blob(fname, sha256, remote=True)
 
     async def _download_remote_file(
         self,
