@@ -18,6 +18,7 @@
 # [This file includes modifications made by New Vector Limited]
 #
 #
+import hashlib
 import os
 import shutil
 import tempfile
@@ -47,7 +48,8 @@ from synapse.http.types import QueryParams
 from synapse.logging.context import make_deferred_yieldable
 from synapse.media._base import FileInfo, ThumbnailInfo
 from synapse.media.filepath import MediaFilePaths
-from synapse.media.media_storage import MediaStorage, ReadableFileWrapper
+from synapse.media.media_repository import MediaRepository
+from synapse.media.media_storage import FileResponder, MediaStorage, ReadableFileWrapper
 from synapse.media.storage_provider import (
     FileStorageProviderBackend,
     StorageProviderWrapper,
@@ -72,10 +74,17 @@ from tests.unittest import override_config
 from tests.utils import default_config
 
 
+@parameterized_class(("use_dedupe",), [(True,), (False,)])
 class MediaStorageTests(unittest.HomeserverTestCase):
+    use_dedupe: bool
     needs_threadpool = True
+    use_isolated_media_paths = True
 
     def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
+        """
+        This tests applies to both de-duplication enabled and disabled cases. Parameter
+        `use_dedupe` controls `enable_local_media_storage_deduplication` config.
+        """
         self.test_dir = tempfile.mkdtemp(prefix="synapse-tests-")
         self.addCleanup(shutil.rmtree, self.test_dir)
 
@@ -83,9 +92,10 @@ class MediaStorageTests(unittest.HomeserverTestCase):
         self.secondary_base_path = os.path.join(self.test_dir, "secondary")
 
         hs.config.media.media_store_path = self.primary_base_path
+        hs.config.media.enable_local_media_storage_deduplication = self.use_dedupe
 
         local_provider = FileStorageProviderBackend(hs, self.primary_base_path)
-        storage_providers = [
+        self.storage_providers = [
             StorageProviderWrapper(
                 FileStorageProviderBackend(hs, self.secondary_base_path),
                 store_local=True,
@@ -96,47 +106,188 @@ class MediaStorageTests(unittest.HomeserverTestCase):
 
         self.filepaths = MediaFilePaths(self.primary_base_path)
         self.media_storage = MediaStorage(
-            hs, self.filepaths, storage_providers, local_provider
+            hs, self.filepaths, self.storage_providers, local_provider
         )
 
-    def test_ensure_media_is_in_local_cache(self) -> None:
-        media_id = "some_media_id"
-        test_body = "Test\n"
+        self.media_id = "some_media_id"
+        self.test_body = b"Test\n"
+        self.sha256 = hashlib.sha256(self.test_body).hexdigest()
+        self.file_info = FileInfo(None, self.media_id, sha256=self.sha256)
 
-        # First we create a file that is in a storage provider but not in the
-        # local primary media store
-        rel_path = self.filepaths.local_media_filepath_rel(media_id)
+        self.expected_relative_media_id_path_fragment = (
+            self.filepaths.local_media_filepath_rel(self.media_id)
+        )
+        self.expected_relative_sha256_path_fragment = self.filepaths.filepath_sha_rel(
+            self.sha256
+        )
+
+    def write_media_to_storage_provider(self) -> str:
+        """Write a media file to the configured storage provider"""
+        # Storage providers only get to work with the provided relative directory
+        rel_path = self.expected_relative_media_id_path_fragment
         secondary_path = os.path.join(self.secondary_base_path, rel_path)
 
         os.makedirs(os.path.dirname(secondary_path))
 
-        with open(secondary_path, "w") as f:
-            f.write(test_body)
+        with open(secondary_path, "wb") as f:
+            f.write(self.test_body)
 
-        # Now we run ensure_media_is_in_local_cache, which should copy the file
-        # to the local cache.
-        file_info = FileInfo(None, media_id)
+        return secondary_path
 
-        async def test_ensure_media() -> None:
-            async with self.media_storage.ensure_media_is_in_local_cache(
+    def write_media_to_local_media_cache(self) -> str:
+        """Write a media file to the local media cache directory"""
+        if self.use_dedupe:
+            rel_path = self.expected_relative_sha256_path_fragment
+        else:
+            rel_path = self.expected_relative_media_id_path_fragment
+        primary_path = os.path.join(self.primary_base_path, rel_path)
+
+        os.makedirs(os.path.dirname(primary_path))
+
+        with open(primary_path, "wb") as f:
+            f.write(self.test_body)
+
+        return primary_path
+
+    def write_media_to_local_media_cache_fallback(self) -> str:
+        """
+        Unlike write_media_to_local_media_cache() above, this writes it to the opposite
+        path that was expected. So if de-duplication is not enabled, it is written to
+        the media ID path instead. This allows testing of flipping the switch
+        """
+        if not self.use_dedupe:
+            rel_path = self.expected_relative_sha256_path_fragment
+        else:
+            rel_path = self.expected_relative_media_id_path_fragment
+        primary_path = os.path.join(self.primary_base_path, rel_path)
+
+        os.makedirs(os.path.dirname(primary_path))
+
+        with open(primary_path, "wb") as f:
+            f.write(self.test_body)
+
+        return primary_path
+
+    def run_ensure_media_is_in_local_cache_to_completion(
+        self, file_info: FileInfo, media_storage: MediaStorage | None = None
+    ) -> tuple[str, bytes]:
+        """
+        Enter and exit the ensure_media_is_in_local_cache() context manager, reading
+        the file while inside it.
+
+        The yielded path is only guaranteed to be valid inside the context, so the
+        body must be read there. ensure_media_is_in_local_cache() uses a real
+        threadpool (BackgroundFileConsumer), which get_success() waits on.
+
+        Returns:
+            The yielded path and the file contents read inside the context.
+        """
+        media_storage = media_storage or self.media_storage
+
+        async def _read_local_copy() -> tuple[str, bytes]:
+            async with media_storage.ensure_media_is_in_local_cache(
                 file_info
             ) as local_path:
-                self.assertTrue(os.path.exists(local_path))
+                with open(local_path, "rb") as f:
+                    return local_path, f.read()
 
-                # Asserts the file is under the expected local cache directory
-                self.assertEqual(
-                    os.path.commonprefix([self.primary_base_path, local_path]),
-                    self.primary_base_path,
-                )
+        return self.get_success(_read_local_copy())
 
-                with open(local_path) as f:
-                    body = f.read()
+    def test_ensure_media_is_in_local_cache(self) -> None:
+        """
+        Test ensure_media_is_in_local_cache() behavior when copying media to the local
+        cache
+        """
+        # First we create a file that is in a storage provider but not in the
+        # local primary media store
+        self.write_media_to_storage_provider()
 
-                self.assertEqual(test_body, body)
+        # Now we run ensure_media_is_in_local_cache(), which should copy the file
+        # to the local cache.
+        local_path, body = self.run_ensure_media_is_in_local_cache_to_completion(
+            self.file_info
+        )
 
-        # This uses a real blocking threadpool so we have to wait for it to be
-        # actually done :/
-        self.get_success(test_ensure_media())
+        self.assertEqual(self.test_body, body)
+
+        # Asserts the file is under the expected local cache directory
+        self.assertEqual(
+            os.path.commonprefix([self.primary_base_path, local_path]),
+            self.primary_base_path,
+        )
+
+        # The local cache is persistent, so the file must survive the context exiting
+        self.assertTrue(os.path.exists(local_path))
+
+    def test_ensure_media_is_in_local_cache_without_local_provider_cleans_up_on_error(
+        self,
+    ) -> None:
+        """
+        Test the temporary file is still removed when the context body raises
+        """
+        self.write_media_to_storage_provider()
+        media_storage = MediaStorage(
+            self.hs, self.filepaths, self.storage_providers, local_provider=None
+        )
+        seen_paths: list[str] = []
+
+        async def _raise_inside_context() -> None:
+            async with media_storage.ensure_media_is_in_local_cache(
+                self.file_info
+            ) as temp_path:
+                seen_paths.append(temp_path)
+                self.assertTrue(os.path.exists(temp_path))
+                raise RuntimeError("Simulated failure while using the file")
+
+        self.get_failure(_raise_inside_context(), RuntimeError)
+
+        self.assertEqual(len(seen_paths), 1)
+        self.assertFalse(os.path.exists(seen_paths[0]))
+
+    def test_fetch_media_from_local_media_cache(self) -> None:
+        """Tests that fetch_media() can retrieve media from any local media cache path"""
+        # First we create a file that is in the local primary media store based on the
+        # path dictated by the de-duplication setting
+        self.write_media_to_local_media_cache()
+        # Now we run fetch_media(), which should return a responder with the file
+        responder = self.get_success(self.media_storage.fetch_media(self.file_info))
+        assert responder is not None
+        assert isinstance(responder, FileResponder)
+        # Use the context manager, so it will close the responder for us
+        with responder:
+            responder.open_file.seek(0)
+            content = responder.open_file.read()
+            assert content == self.test_body
+
+    def test_fetch_media_from_local_media_cache_fallback(self) -> None:
+        """Test that if de-duplication is turned on and off, the media is still usable"""
+        # First we create a file that is in the local primary media store based on the
+        # inverse of the path dictated by the de-duplication setting
+        self.write_media_to_local_media_cache_fallback()
+        # Now we run fetch_media(), which should return a responder with the file
+        responder = self.get_success(self.media_storage.fetch_media(self.file_info))
+        assert responder is not None
+        assert isinstance(responder, FileResponder)
+        # Use the context manager, so it will close the responder for us
+        with responder:
+            responder.open_file.seek(0)
+            content = responder.open_file.read()
+            assert content == self.test_body
+
+    def test_fetch_media_from_storage_provider(self) -> None:
+        """Test that media in the storage provider can be served back directly"""
+        # First we create a file that is in a storage provider but not in the
+        # local primary media store
+        self.write_media_to_storage_provider()
+        # Now we run fetch_media(), which should return a responder with the file
+        responder = self.get_success(self.media_storage.fetch_media(self.file_info))
+        assert responder is not None
+        assert isinstance(responder, FileResponder)
+        # Use the context manager, so it will close the responder for us
+        with responder:
+            responder.open_file.seek(0)
+            content = responder.open_file.read()
+            assert content == self.test_body
 
 
 @attr.s(auto_attribs=True, slots=True, frozen=True)
@@ -354,13 +505,7 @@ class MediaRepoTests(unittest.HomeserverTestCase):
         client = Mock()
         client.get_file = get_file
 
-        self.storage_path = self.mktemp()
-        self.media_store_path = self.mktemp()
-        os.mkdir(self.storage_path)
-        os.mkdir(self.media_store_path)
-
         config = self.default_config()
-        config["media_store_path"] = self.media_store_path
         config["max_image_pixels"] = 2000000
 
         provider_config = {
@@ -368,7 +513,7 @@ class MediaRepoTests(unittest.HomeserverTestCase):
             "store_local": True,
             "store_synchronous": False,
             "store_remote": True,
-            "config": {"directory": self.storage_path},
+            "config": {"directory": self._media_storage_provider_path},
         }
         config["media_storage_providers"] = [provider_config]
 
@@ -379,7 +524,8 @@ class MediaRepoTests(unittest.HomeserverTestCase):
     def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
         self.store = hs.get_datastores().main
         self.media_repo = hs.get_media_repository()
-
+        assert isinstance(self.media_repo, MediaRepository)
+        self.media_storage = self.media_repo.media_storage
         self.media_id = "example.com/12345"
 
     def create_resource_dict(self) -> dict[str, Resource]:
@@ -641,7 +787,7 @@ class MediaRepoTests(unittest.HomeserverTestCase):
         info = self.get_success(self.store.get_cached_remote_media(origin, media_id))
         assert info is not None
         file_id = info.filesystem_id
-
+        assert isinstance(self.media_repo, MediaRepository)
         thumbnail_dir = self.media_repo.filepaths.remote_media_thumbnail_dir(
             origin, file_id
         )
@@ -742,6 +888,7 @@ class MediaRepoTests(unittest.HomeserverTestCase):
 
         content_type = self.test_image.content_type.decode()
         media_repo = self.hs.get_media_repository()
+        assert isinstance(media_repo, MediaRepository)
         thumbnail_provider = ThumbnailProvider(
             self.hs, media_repo, media_repo.media_storage
         )
@@ -1017,18 +1164,12 @@ class RemoteDownloadLimiterTestCase(unittest.HomeserverTestCase):
     def make_homeserver(self, reactor: MemoryReactor, clock: Clock) -> HomeServer:
         config = self.default_config()
 
-        self.storage_path = self.mktemp()
-        self.media_store_path = self.mktemp()
-        os.mkdir(self.storage_path)
-        os.mkdir(self.media_store_path)
-        config["media_store_path"] = self.media_store_path
-
         provider_config = {
             "module": "synapse.media.storage_provider.FileStorageProviderBackend",
             "store_local": True,
             "store_synchronous": False,
             "store_remote": True,
-            "config": {"directory": self.storage_path},
+            "config": {"directory": self._media_storage_provider_path},
         }
 
         config["media_storage_providers"] = [provider_config]

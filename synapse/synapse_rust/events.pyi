@@ -61,6 +61,8 @@ class EventInternalMetadata:
     """The access token ID of the user who sent this event, if any."""
     device_id: str
     """The device ID of the user who sent this event, if any."""
+    media_references: list[str] | None
+    """The media references that acts as a restriction to this event, if any."""
 
     # MSC4242 state dags
     calculated_auth_event_ids: list[str]

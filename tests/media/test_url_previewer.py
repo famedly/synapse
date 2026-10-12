@@ -18,10 +18,10 @@
 # [This file includes modifications made by New Vector Limited]
 #
 #
-import os
 
 from twisted.internet.testing import MemoryReactor
 
+from synapse.media.media_repository import MediaRepository
 from synapse.server import HomeServer
 from synapse.util.clock import Clock
 
@@ -49,18 +49,12 @@ class URLPreviewTests(unittest.HomeserverTestCase):
             "2001:800::/21",
         )
 
-        self.storage_path = self.mktemp()
-        self.media_store_path = self.mktemp()
-        os.mkdir(self.storage_path)
-        os.mkdir(self.media_store_path)
-        config["media_store_path"] = self.media_store_path
-
         provider_config = {
             "module": "synapse.media.storage_provider.FileStorageProviderBackend",
             "store_local": True,
             "store_synchronous": False,
             "store_remote": True,
-            "config": {"directory": self.storage_path},
+            "config": {"directory": self._media_storage_provider_path},
         }
 
         config["media_storage_providers"] = [provider_config]
@@ -69,6 +63,7 @@ class URLPreviewTests(unittest.HomeserverTestCase):
 
     def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
         media_repo = hs.get_media_repository()
+        assert isinstance(media_repo, MediaRepository)
         assert media_repo.url_previewer is not None
         self.url_previewer = media_repo.url_previewer
 

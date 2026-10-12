@@ -749,14 +749,14 @@ class OidcProvider:
             Looks like this::
 
                 {
-                    'keys': [
+                    "keys": [
                         {
-                            'kid': 'abcdef',
-                            'kty': 'RSA',
-                            'alg': 'RS256',
-                            'use': 'sig',
-                            'e': 'XXXX',
-                            'n': 'XXXX',
+                            "kid": "abcdef",
+                            "kty": "RSA",
+                            "alg": "RS256",
+                            "use": "sig",
+                            "e": "XXXX",
+                            "n": "XXXX",
                         }
                     ]
                 }
@@ -801,11 +801,11 @@ class OidcProvider:
             May look like this::
 
                 {
-                    'token_type': 'bearer',
-                    'access_token': 'abcdef',
-                    'expires_in': 3599,
-                    'id_token': 'ghijkl',
-                    'refresh_token': 'mnopqr',
+                    "token_type": "bearer",
+                    "access_token": "abcdef",
+                    "expires_in": 3599,
+                    "id_token": "ghijkl",
+                    "refresh_token": "mnopqr",
                 }
 
         Raises:

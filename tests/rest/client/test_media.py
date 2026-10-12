@@ -25,7 +25,15 @@ import json
 import os
 import re
 import shutil
-from typing import Any, BinaryIO, ClassVar, Sequence
+import time
+from contextlib import nullcontext
+from http import HTTPStatus
+from typing import (
+    Any,
+    BinaryIO,
+    ClassVar,
+    Sequence,
+)
 from unittest.mock import MagicMock, Mock, patch
 from urllib import parse
 from urllib.parse import quote, urlencode
@@ -46,7 +54,12 @@ from twisted.web.http_headers import Headers
 from twisted.web.iweb import UNKNOWN_LENGTH, IResponse
 from twisted.web.resource import Resource
 
-from synapse.api.errors import HttpResponseException
+from synapse.api.constants import EventTypes, HistoryVisibility, Membership
+from synapse.api.errors import (
+    Codes,
+    HttpResponseException,
+    UnauthorizedRequestAPICallError,
+)
 from synapse.api.ratelimiting import Ratelimiter
 from synapse.config._base import Config
 from synapse.config.oembed import OEmbedEndpointConfig
@@ -54,19 +67,24 @@ from synapse.http.client import MultipartResponse
 from synapse.http.types import QueryParams
 from synapse.logging.context import make_deferred_yieldable
 from synapse.media._base import FileInfo, ThumbnailInfo
+from synapse.media.media_repository import MediaRepository
 from synapse.media.thumbnailer import ThumbnailProvider
 from synapse.media.url_previewer import IMAGE_CACHE_EXPIRY_MS
 from synapse.module_api import MediaUploadLimit
 from synapse.rest import admin
-from synapse.rest.client import login, media
+from synapse.rest.client import login, media, profile, room
 from synapse.rest.synapse.client import build_synapse_client_resource_tree
 from synapse.rest.synapse.client.media_upload_limit_exceeded import (
     MEDIA_UPLOAD_LIMIT_EXCEEDED_PATH,
 )
 from synapse.server import HomeServer
-from synapse.types import JsonDict, UserID
+from synapse.storage.databases.main.media_repository import (
+    LocalMedia,
+)
+from synapse.types import JsonDict, UserID, create_requester
 from synapse.util.clock import Clock
-from synapse.util.stringutils import parse_and_validate_mxc_uri
+from synapse.util.json import json_encoder
+from synapse.util.stringutils import parse_and_validate_mxc_uri, random_string
 
 from tests import unittest
 from tests.media.test_media_storage import (
@@ -79,7 +97,7 @@ from tests.media.test_media_storage import (
     small_png_with_transparency,
 )
 from tests.server import FakeChannel, FakeTransport, ThreadedMemoryReactorClock
-from tests.test_utils import SMALL_PNG
+from tests.test_utils import SMALL_PNG, SMALL_PNG_SHA256
 from tests.unittest import override_config
 
 try:
@@ -102,18 +120,12 @@ class MediaDomainBlockingTests(unittest.HomeserverTestCase):
     ) -> HomeServer:
         config = self.default_config()
 
-        self.storage_path = self.mktemp()
-        self.media_store_path = self.mktemp()
-        os.mkdir(self.storage_path)
-        os.mkdir(self.media_store_path)
-        config["media_store_path"] = self.media_store_path
-
         provider_config = {
             "module": "synapse.media.storage_provider.FileStorageProviderBackend",
             "store_local": True,
             "store_synchronous": False,
             "store_remote": True,
-            "config": {"directory": self.storage_path},
+            "config": {"directory": self._media_storage_provider_path},
         }
 
         config["media_storage_providers"] = [provider_config]
@@ -128,8 +140,9 @@ class MediaDomainBlockingTests(unittest.HomeserverTestCase):
         # from a regular 404.
         file_id = "abcdefg12345"
         file_info = FileInfo(server_name=self.remote_server_name, file_id=file_id)
-
-        media_storage = hs.get_media_repository().media_storage
+        media_repo = hs.get_media_repository()
+        assert isinstance(media_repo, MediaRepository)
+        media_storage = media_repo.media_storage
 
         ctx = media_storage.store_into_file(file_info)
         (f, fname) = self.get_success(ctx.__aenter__())
@@ -206,6 +219,7 @@ class URLPreviewTests(unittest.HomeserverTestCase):
         b'<meta property="og:description" content="hi" />'
         b"</head></html>"
     )
+    use_isolated_media_paths = True
 
     def make_homeserver(self, reactor: MemoryReactor, clock: Clock) -> HomeServer:
         config = self.default_config()
@@ -225,18 +239,12 @@ class URLPreviewTests(unittest.HomeserverTestCase):
             "*;q=0.7",
         ]
 
-        self.storage_path = self.mktemp()
-        self.media_store_path = self.mktemp()
-        os.mkdir(self.storage_path)
-        os.mkdir(self.media_store_path)
-        config["media_store_path"] = self.media_store_path
-
         provider_config = {
             "module": "synapse.media.storage_provider.FileStorageProviderBackend",
             "store_local": True,
             "store_synchronous": False,
             "store_remote": True,
-            "config": {"directory": self.storage_path},
+            "config": {"directory": self._media_storage_provider_path},
         }
 
         config["media_storage_providers"] = [provider_config]
@@ -268,6 +276,7 @@ class URLPreviewTests(unittest.HomeserverTestCase):
 
     def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
         self.media_repo = hs.get_media_repository()
+        assert isinstance(self.media_repo, MediaRepository)
         assert self.media_repo.url_previewer is not None
         self.url_previewer = self.media_repo.url_previewer
 
@@ -1400,9 +1409,12 @@ class URLPreviewTests(unittest.HomeserverTestCase):
         """Test that files are not stored in or fetched from storage providers."""
         host, media_id = self._download_image()
 
+        assert isinstance(self.media_repo, MediaRepository)
         rel_file_path = self.media_repo.filepaths.url_cache_filepath_rel(media_id)
-        media_store_path = os.path.join(self.media_store_path, rel_file_path)
-        storage_provider_path = os.path.join(self.storage_path, rel_file_path)
+        media_store_path = os.path.join(self._media_store_path, rel_file_path)
+        storage_provider_path = os.path.join(
+            self._media_storage_provider_path, rel_file_path
+        )
 
         # Check storage
         self.assertTrue(os.path.isfile(media_store_path))
@@ -1442,14 +1454,15 @@ class URLPreviewTests(unittest.HomeserverTestCase):
         """Test that thumbnails are not stored in or fetched from storage providers."""
         host, media_id = self._download_image()
 
+        assert isinstance(self.media_repo, MediaRepository)
         rel_thumbnail_path = (
             self.media_repo.filepaths.url_cache_thumbnail_directory_rel(media_id)
         )
         media_store_thumbnail_path = os.path.join(
-            self.media_store_path, rel_thumbnail_path
+            self._media_store_path, rel_thumbnail_path
         )
         storage_provider_thumbnail_path = os.path.join(
-            self.storage_path, rel_thumbnail_path
+            self._media_storage_provider_path, rel_thumbnail_path
         )
 
         # Check storage
@@ -1470,8 +1483,9 @@ class URLPreviewTests(unittest.HomeserverTestCase):
         self.assertEqual(channel.code, 200)
 
         # Remove the original, otherwise thumbnails will regenerate
+        assert isinstance(self.media_repo, MediaRepository)
         rel_file_path = self.media_repo.filepaths.url_cache_filepath_rel(media_id)
-        media_store_path = os.path.join(self.media_store_path, rel_file_path)
+        media_store_path = os.path.join(self._media_store_path, rel_file_path)
         os.remove(media_store_path)
 
         # Move cached thumbnails into the storage provider
@@ -1495,6 +1509,7 @@ class URLPreviewTests(unittest.HomeserverTestCase):
         """Test that URL cache files and thumbnails are cleaned up properly on expiry."""
         _host, media_id = self._download_image()
 
+        assert isinstance(self.media_repo, MediaRepository)
         file_path = self.media_repo.filepaths.url_cache_filepath(media_id)
         file_dirs = self.media_repo.filepaths.url_cache_filepath_dirs_to_delete(
             media_id
@@ -1515,7 +1530,7 @@ class URLPreviewTests(unittest.HomeserverTestCase):
         for path in [file_path] + file_dirs + [thumbnail_dir] + thumbnail_dirs:
             self.assertFalse(
                 os.path.exists(path),
-                f"{os.path.relpath(path, self.media_store_path)} was not deleted",
+                f"{os.path.relpath(path, self._media_store_path)} was not deleted",
             )
 
     @unittest.override_config({"url_preview_url_blacklist": [{"port": "*"}]})
@@ -1645,18 +1660,12 @@ class MediaConfigTest(unittest.HomeserverTestCase):
     ) -> HomeServer:
         config = self.default_config()
 
-        self.storage_path = self.mktemp()
-        self.media_store_path = self.mktemp()
-        os.mkdir(self.storage_path)
-        os.mkdir(self.media_store_path)
-        config["media_store_path"] = self.media_store_path
-
         provider_config = {
             "module": "synapse.media.storage_provider.FileStorageProviderBackend",
             "store_local": True,
             "store_synchronous": False,
             "store_remote": True,
-            "config": {"directory": self.storage_path},
+            "config": {"directory": self._media_storage_provider_path},
         }
 
         config["media_storage_providers"] = [provider_config]
@@ -1692,18 +1701,12 @@ class MediaConfigModuleCallbackTestCase(unittest.HomeserverTestCase):
     ) -> HomeServer:
         config = self.default_config()
 
-        self.storage_path = self.mktemp()
-        self.media_store_path = self.mktemp()
-        os.mkdir(self.storage_path)
-        os.mkdir(self.media_store_path)
-        config["media_store_path"] = self.media_store_path
-
         provider_config = {
             "module": "synapse.media.storage_provider.FileStorageProviderBackend",
             "store_local": True,
             "store_synchronous": False,
             "store_remote": True,
-            "config": {"directory": self.storage_path},
+            "config": {"directory": self._media_storage_provider_path},
         }
 
         config["media_storage_providers"] = [provider_config]
@@ -1747,18 +1750,12 @@ class RemoteDownloadLimiterTestCase(unittest.HomeserverTestCase):
     def make_homeserver(self, reactor: MemoryReactor, clock: Clock) -> HomeServer:
         config = self.default_config()
 
-        self.storage_path = self.mktemp()
-        self.media_store_path = self.mktemp()
-        os.mkdir(self.storage_path)
-        os.mkdir(self.media_store_path)
-        config["media_store_path"] = self.media_store_path
-
         provider_config = {
             "module": "synapse.media.storage_provider.FileStorageProviderBackend",
             "store_local": True,
             "store_synchronous": False,
             "store_remote": True,
-            "config": {"directory": self.storage_path},
+            "config": {"directory": self._media_storage_provider_path},
         }
 
         config["media_storage_providers"] = [provider_config]
@@ -2134,13 +2131,7 @@ class DownloadAndThumbnailTestCase(unittest.HomeserverTestCase):
         client.federation_get_file = federation_get_file
         client.get_file = get_file
 
-        self.storage_path = self.mktemp()
-        self.media_store_path = self.mktemp()
-        os.mkdir(self.storage_path)
-        os.mkdir(self.media_store_path)
-
         config = self.default_config()
-        config["media_store_path"] = self.media_store_path
         config["max_image_pixels"] = 2000000
 
         provider_config = {
@@ -2148,7 +2139,7 @@ class DownloadAndThumbnailTestCase(unittest.HomeserverTestCase):
             "store_local": True,
             "store_synchronous": False,
             "store_remote": True,
-            "config": {"directory": self.storage_path},
+            "config": {"directory": self._media_storage_provider_path},
         }
         config["media_storage_providers"] = [provider_config]
 
@@ -2453,6 +2444,7 @@ class DownloadAndThumbnailTestCase(unittest.HomeserverTestCase):
         assert info is not None
         file_id = info.filesystem_id
 
+        assert isinstance(self.media_repo, MediaRepository)
         thumbnail_dir = self.media_repo.filepaths.remote_media_thumbnail_dir(
             self.remote, file_id
         )
@@ -2555,6 +2547,7 @@ class DownloadAndThumbnailTestCase(unittest.HomeserverTestCase):
 
         content_type = self.test_image.content_type.decode()
         media_repo = self.hs.get_media_repository()
+        assert isinstance(media_repo, MediaRepository)
         thumbnail_provider = ThumbnailProvider(
             self.hs, media_repo, media_repo.media_storage
         )
@@ -2609,11 +2602,6 @@ class AuthenticatedMediaTestCase(unittest.HomeserverTestCase):
         config = self.default_config()
 
         self.clock = clock
-        self.storage_path = self.mktemp()
-        self.media_store_path = self.mktemp()
-        os.mkdir(self.storage_path)
-        os.mkdir(self.media_store_path)
-        config["media_store_path"] = self.media_store_path
         config["enable_authenticated_media"] = True
 
         provider_config = {
@@ -2621,7 +2609,7 @@ class AuthenticatedMediaTestCase(unittest.HomeserverTestCase):
             "store_local": True,
             "store_synchronous": False,
             "store_remote": True,
-            "config": {"directory": self.storage_path},
+            "config": {"directory": self._media_storage_provider_path},
         }
 
         config["media_storage_providers"] = [provider_config]
@@ -2694,7 +2682,9 @@ class AuthenticatedMediaTestCase(unittest.HomeserverTestCase):
         file_id = "abcdefg12345"
         file_info = FileInfo(server_name="lonelyIsland", file_id=file_id)
 
-        media_storage = self.hs.get_media_repository().media_storage
+        media_repo = self.hs.get_media_repository()
+        assert isinstance(media_repo, MediaRepository)
+        media_storage = media_repo.media_storage
 
         ctx = media_storage.store_into_file(file_info)
         (f, fname) = self.get_success(ctx.__aenter__())
@@ -2826,7 +2816,9 @@ class AuthenticatedMediaTestCase(unittest.HomeserverTestCase):
         file_id = "abcdefg12345"
         file_info = FileInfo(server_name="lonelyIsland", file_id=file_id)
 
-        media_storage = self.hs.get_media_repository().media_storage
+        media_repo = self.hs.get_media_repository()
+        assert isinstance(media_repo, MediaRepository)
+        media_storage = media_repo.media_storage
 
         ctx = media_storage.store_into_file(file_info)
         (f, fname) = self.get_success(ctx.__aenter__())
@@ -2922,18 +2914,12 @@ class MediaUploadLimits(unittest.HomeserverTestCase):
     def make_homeserver(self, reactor: MemoryReactor, clock: Clock) -> HomeServer:
         config = self.default_config()
 
-        self.storage_path = self.mktemp()
-        self.media_store_path = self.mktemp()
-        os.mkdir(self.storage_path)
-        os.mkdir(self.media_store_path)
-        config["media_store_path"] = self.media_store_path
-
         provider_config = {
             "module": "synapse.media.storage_provider.FileStorageProviderBackend",
             "store_local": True,
             "store_synchronous": False,
             "store_remote": True,
-            "config": {"directory": self.storage_path},
+            "config": {"directory": self._media_storage_provider_path},
         }
 
         config["media_storage_providers"] = [provider_config]
@@ -3584,3 +3570,2569 @@ class AnimatedThumbnailTestCase(unittest.HomeserverTestCase):
             any(info.type == "image/webp" for info in thumbnails),
             thumbnails,
         )
+
+
+class DisableUnrestrictedResourceTestCase(unittest.HomeserverTestCase):
+    """
+    This test case simulates a homeserver with media create and upload endpoints are
+    limited when `msc3911.block_unrestricted_media_upload` is configured to be True.
+    """
+
+    servlets = [
+        media.register_servlets,
+        admin.register_servlets,
+        login.register_servlets,
+        profile.register_servlets,
+        room.register_servlets,
+    ]
+
+    def default_config(self) -> JsonDict:
+        config = super().default_config()
+        config.setdefault("experimental_features", {})
+        config["experimental_features"].update(
+            {"msc3911": {"enabled": True, "block_unrestricted_media_upload": True}}
+        )
+        return config
+
+    def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
+        self.media_repo = hs.get_media_repository()
+        self.store = hs.get_datastores().main
+        self.user = self.register_user("david", "password")
+        self.tok = self.login("david", "password")
+
+    def create_resource_dict(self) -> dict[str, Resource]:
+        # Important detail: while we are specifically testing these endpoints are
+        # logically disabled, if we do not load them then this would test the wrong
+        # thing.
+        resources = super().create_resource_dict()
+        resources["/_matrix/media"] = self.hs.get_media_repository_resource()
+        return resources
+
+    def test_unrestricted_resource_creation_disabled(self) -> None:
+        """
+        Tests that CreateResource raises an error when
+        `msc3911.block_unrestricted_media_upload` is True.
+        """
+        channel = self.make_request(
+            "POST",
+            "/_matrix/media/v1/create",
+        )
+        self.assertEqual(channel.code, 403)
+        self.assertEqual(channel.json_body["errcode"], Codes.FORBIDDEN)
+        self.assertEqual(
+            channel.json_body["error"], "Unrestricted media creation is disabled"
+        )
+
+    def test_unrestricted_resource_upload_disabled(self) -> None:
+        """
+        Tests that UploadServlet raises an error when
+        `msc3911.block_unrestricted_media_upload` is True.
+        """
+        channel = self.make_request(
+            "POST",
+            "/_matrix/media/v3/upload?filename=test_png_upload",
+            content=SMALL_PNG,
+            content_type=b"image/png",
+            custom_headers=[("Content-Length", str(67))],
+        )
+        self.assertEqual(channel.code, 403)
+        self.assertEqual(channel.json_body["errcode"], Codes.FORBIDDEN)
+        self.assertEqual(
+            channel.json_body["error"], "Unrestricted media upload is disabled"
+        )
+
+    def test_attaching_unrestricted_media_to_profile_fails(self) -> None:
+        """
+        Test that attaching unrestricted media to user profile fails when unrestricted
+        media is banned by configuration.
+        """
+        # Create unrestricted media.
+        content = io.BytesIO(SMALL_PNG)
+        assert isinstance(self.media_repo, MediaRepository)
+        content_uri = self.get_success(
+            self.media_repo.create_or_update_content(
+                "image/png",
+                "test_png_upload",
+                content,
+                67,
+                UserID.from_string(self.user),
+                restricted=False,
+            )
+        )
+
+        # Check media is unrestricted.
+        media_info = self.get_success(self.store.get_local_media(content_uri.media_id))
+        assert media_info is not None
+        assert not media_info.restricted
+
+        # Try to update user profile with unrestricted media.
+        channel = self.make_request(
+            "PUT",
+            f"/_matrix/client/v3/profile/{self.user}/avatar_url",
+            access_token=self.tok,
+            content={"avatar_url": str(content_uri)},
+        )
+        assert channel.code == HTTPStatus.BAD_REQUEST, channel.json_body
+        assert channel.json_body["errcode"] == Codes.INVALID_PARAM
+        assert "is not restricted" in channel.json_body["error"]
+
+    def test_attaching_unreachable_remote_media_to_profile_fails(self) -> None:
+        """
+        Test that media that can not be retrieved will fail to be attached to a user
+        profile when legacy unrestricted media is disabled.
+        """
+        # Generate non-existing media.
+        nonexistent_mxc_uri = MXCUri.from_str("mxc://remote/fakeMediaId_2")
+        channel = self.make_request(
+            "PUT",
+            f"/_matrix/client/v3/profile/{self.user}/avatar_url",
+            access_token=self.tok,
+            content={"avatar_url": str(nonexistent_mxc_uri)},
+        )
+
+        assert channel.code == HTTPStatus.NOT_FOUND, channel.json_body
+        assert channel.json_body["errcode"] == Codes.NOT_FOUND
+
+    def test_create_room_with_missing_profile_avatar_media_succeeds(self) -> None:
+        """
+        Test that a profile avatar that should automatically be included in a room
+        creator's join event does not break the room when the actual media of the avatar
+        is missing.
+        """
+        # First inject a profile avatar url directly into the database. The handler
+        # functions for such can not be used as they do validation, and it would fail as
+        # the media does not actually exist.
+        avatar_mxc_uri = MXCUri.from_str("mxc://fake-domain/whatever")
+        # Make sure to add the restrictions too
+        self.get_success_or_raise(
+            self.store.set_media_restricted_to_user_profile(
+                avatar_mxc_uri.server_name,
+                avatar_mxc_uri.media_id,
+                self.user,
+            )
+        )
+        self.get_success_or_raise(
+            self.store.set_profile_field(
+                user_id=UserID.from_string(self.user),
+                field_name="avatar_url",
+                new_value=str(avatar_mxc_uri),
+            )
+        )
+
+        # try and create room. This should succeed, but the avatar will have been
+        # stripped from the join event of the creator
+        room_id = self.helper.create_room_as(
+            self.user,
+            tok=self.tok,
+        )
+        assert room_id is not None
+        # Make sure the avatar is not on the event
+        membership_as_set = self.get_success_or_raise(
+            self.store.get_membership_event_ids_for_user(self.user, room_id)
+        )
+        join_event_id = membership_as_set.pop()
+        join_event = self.get_success_or_raise(self.store.get_event(join_event_id))
+        assert join_event.content["membership"] == Membership.JOIN
+        assert "avatar_url" not in join_event.content
+
+        # The display name would have been added, see if that is still there
+        assert "displayname" in join_event.content
+        assert join_event.content["displayname"] == "david"
+
+
+class RestrictedResourceUploadTestCase(unittest.HomeserverTestCase):
+    """
+    Tests restricted media creation and upload endpoints when `msc3911.enabled` is
+    configured to be True.
+    """
+
+    servlets = [
+        media.register_servlets,
+        login.register_servlets,
+        admin.register_servlets,
+    ]
+
+    def default_config(self) -> JsonDict:
+        config = super().default_config()
+        config.setdefault("experimental_features", {})
+        config["experimental_features"].update({"msc3911": {"enabled": True}})
+        return config
+
+    def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
+        self.register_user("creator", "testpass")
+        self.creator_tok = self.login("creator", "testpass")
+
+        self.register_user("random_user", "testpass")
+        self.other_user_tok = self.login("random_user", "testpass")
+
+    def create_resource_dict(self) -> dict[str, Resource]:
+        # Need this for test_async_upload_restricted_resource()
+        resources = super().create_resource_dict()
+        resources["/_matrix/media"] = self.hs.get_media_repository_resource()
+        return resources
+
+    def test_create_restricted_resource(self) -> None:
+        """
+        Tests that the new create endpoint creates a restricted resource.
+        """
+        channel = self.make_request(
+            "POST",
+            "/_matrix/client/unstable/org.matrix.msc3911/media/create",
+            access_token=self.creator_tok,
+        )
+        self.assertEqual(channel.code, 200)
+        self.assertIn("content_uri", channel.json_body)
+        self.assertIn("unused_expires_at", channel.json_body)
+        media_id = channel.json_body["content_uri"].split("/")[-1]
+
+        # Check the `restricted` field is True.
+        local_media = self.get_success(
+            self.hs.get_datastores().main.get_local_media(media_id)
+        )
+        assert local_media is not None
+        self.assertEqual(local_media.media_id, media_id)
+        self.assertTrue(local_media.restricted)
+
+    def test_upload_restricted_resource(self) -> None:
+        """
+        Tests that the new upload endpoints uploads a restricted resource.
+        """
+        channel = self.make_request(
+            "POST",
+            "/_matrix/client/unstable/org.matrix.msc3911/media/upload?filename=test_png_upload",
+            content=SMALL_PNG,
+            content_type=b"image/png",
+            access_token=self.creator_tok,
+            custom_headers=[("Content-Length", str(67))],
+        )
+        self.assertEqual(channel.code, 200)
+        self.assertIn("content_uri", channel.json_body)
+        media_id = channel.json_body["content_uri"].split("/")[-1]
+
+        # Check the `restricted` field is True.
+        local_media = self.get_success(
+            self.hs.get_datastores().main.get_local_media(media_id)
+        )
+        assert local_media is not None
+        self.assertEqual(local_media.media_id, media_id)
+        self.assertTrue(local_media.restricted)
+
+        # The media is not attached to any event yet, only creator can see it.
+        # The creator can download the restricted resource.
+        channel = self.make_request(
+            "GET",
+            f"/_matrix/client/v1/media/download/{self.hs.hostname}/{media_id}",
+            access_token=self.creator_tok,
+        )
+        assert channel.code == 200, channel.json_body
+
+        # The other user cannot download the restricted resource in pending state.
+        channel = self.make_request(
+            "GET",
+            f"/_matrix/client/v1/media/download/{self.hs.hostname}/{media_id}",
+            access_token=self.other_user_tok,
+        )
+        assert channel.code == 403, channel.json_body
+
+    def test_async_upload_restricted_resource(self) -> None:
+        """
+        Tests the combination of new create endpoint and the existing async upload
+        endpoint uploads a restricted resource.
+        """
+        # Create media with new endpoint.
+        channel = self.make_request(
+            "POST",
+            "/_matrix/client/unstable/org.matrix.msc3911/media/create",
+            access_token=self.creator_tok,
+        )
+        self.assertEqual(channel.code, 200)
+        self.assertIn("content_uri", channel.json_body)
+        self.assertIn("unused_expires_at", channel.json_body)
+        media_id = channel.json_body["content_uri"].split("/")[-1]
+
+        # Async upload with existing endpoint.
+        channel = self.make_request(
+            "PUT",
+            f"/_matrix/media/v3/upload/{self.hs.hostname}/{media_id}",
+            content=SMALL_PNG,
+            content_type=b"image/png",
+            access_token=self.creator_tok,
+            custom_headers=[("Content-Length", str(67))],
+        )
+        self.assertEqual(channel.code, 200)
+
+        # Check the `restricted` field is True.
+        local_media = self.get_success(
+            self.hs.get_datastores().main.get_local_media(media_id)
+        )
+        assert local_media is not None
+        self.assertEqual(local_media.media_id, media_id)
+        self.assertTrue(local_media.restricted)
+
+        # Media is not attached to any event yet, only creator can see it.
+        # The creator can download the restricted resource.
+        channel = self.make_request(
+            "GET",
+            f"/_matrix/client/v1/media/download/{self.hs.hostname}/{media_id}",
+            access_token=self.creator_tok,
+        )
+        assert channel.code == 200, channel.json_body
+
+        # The other user cannot download the restricted resource.
+        channel = self.make_request(
+            "GET",
+            f"/_matrix/client/v1/media/download/{self.hs.hostname}/{media_id}",
+            access_token=self.other_user_tok,
+        )
+        assert channel.code == 403, channel.json_body
+
+
+class CopyRestrictedResourceTestCase(unittest.HomeserverTestCase):
+    """
+    Tests copy API when `msc3911.enabled` is configured to be True.
+    """
+
+    servlets = [
+        media.register_servlets,
+        login.register_servlets,
+        admin.register_servlets,
+        room.register_servlets,
+    ]
+    use_isolated_media_paths = True
+
+    def default_config(self) -> JsonDict:
+        config = super().default_config()
+        config.setdefault("experimental_features", {})
+        config["experimental_features"].update({"msc3911": {"enabled": True}})
+        return config
+
+    def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
+        self.media_repo = hs.get_media_repository()
+        self.profile_handler = self.hs.get_profile_handler()
+        self.user = self.register_user("user", "testpass")
+        self.user_tok = self.login("user", "testpass")
+        self.other_user = self.register_user("other", "testpass")
+        self.other_user_tok = self.login("other", "testpass")
+
+    def fetch_media(
+        self,
+        mxc_uri: MXCUri,
+        access_token: str | None = None,
+        expected_code: int = 200,
+    ) -> FakeChannel:
+        """
+        Test retrieving the media. We do not care about the content of the media, just
+        that the response is correct
+        """
+        channel = self.make_request(
+            "GET",
+            f"/_matrix/client/v1/media/download/{mxc_uri.server_name}/{mxc_uri.media_id}",
+            access_token=access_token,
+        )
+        assert channel.code == expected_code, channel.code
+        return channel
+
+    def test_copy_local_restricted_resource(self) -> None:
+        """
+        Tests that the new copy endpoint creates a new mxc uri for restricted resource.
+        """
+        # Create a private room
+        room_id = self.helper.create_room_as(
+            self.user,
+            is_public=False,
+            tok=self.user_tok,
+            extra_content={
+                "initial_state": [
+                    {
+                        "type": EventTypes.RoomHistoryVisibility,
+                        "state_key": "",
+                        "content": {"history_visibility": HistoryVisibility.JOINED},
+                    },
+                ]
+            },
+        )
+        # Invite the other user
+        self.helper.invite(room_id, self.user, self.other_user, tok=self.user_tok)
+        self.helper.join(room_id, self.other_user, tok=self.other_user_tok)
+
+        # The media is created with user_tok
+        content = io.BytesIO(SMALL_PNG)
+        content_uri = self.get_success(
+            self.media_repo.create_or_update_content(
+                "image/png",
+                "test_png_upload",
+                content,
+                67,
+                UserID.from_string(self.user),
+                restricted=True,
+            )
+        )
+        media_id = content_uri.media_id
+
+        # User sends a message with media
+        channel = self.make_request(
+            "PUT",
+            f"/rooms/{room_id}/send/m.room.message/{str(time.time())}?org.matrix.msc3911.attach_media={str(content_uri)}",
+            content={"msgtype": "m.text", "body": "Hi, this is a message"},
+            access_token=self.user_tok,
+        )
+        self.assertEqual(channel.code, HTTPStatus.OK, channel.json_body)
+        assert "event_id" in channel.json_body
+        event_id = channel.json_body["event_id"]
+        restrictions = self.get_success(
+            self.hs.get_datastores().main.get_media_restrictions(
+                content_uri.server_name, content_uri.media_id
+            )
+        )
+        assert restrictions is not None, str(restrictions)
+        assert restrictions.event_id == event_id
+
+        # The other_user copies the media from local server
+        channel = self.make_request(
+            "POST",
+            f"/_matrix/client/unstable/org.matrix.msc3911/media/copy/{self.hs.hostname}/{media_id}",
+            access_token=self.other_user_tok,
+        )
+        self.assertEqual(channel.code, 200)
+        self.assertIn("content_uri", channel.json_body)
+        new_media_id = channel.json_body["content_uri"].split("/")[-1]
+        assert new_media_id != media_id
+
+        # Check if the original media there.
+        original_media = self.get_success(
+            self.hs.get_datastores().main.get_local_media(media_id)
+        )
+        assert original_media is not None
+        assert original_media.user_id == self.user
+
+        # Check the copied media.
+        copied_media = self.get_success(
+            self.hs.get_datastores().main.get_local_media(new_media_id)
+        )
+        assert copied_media is not None
+        assert copied_media.user_id == self.other_user
+
+        # Check if they are referencing the same image.
+        assert original_media.sha256 == copied_media.sha256
+
+        # Check if media is unattached to any event or user profile yet.
+        assert copied_media.attachments is None
+
+        original_media_download = self.fetch_media(
+            MXCUri.from_str(f"mxc://{self.hs.hostname}/{media_id}"), self.user_tok
+        )
+        # This is a hex encoded byte stream of the raw file
+        old_media_payload = original_media_download.result.get("body")
+        assert old_media_payload is not None, old_media_payload
+
+        new_media_download = self.fetch_media(
+            MXCUri.from_str(f"mxc://{self.hs.hostname}/{new_media_id}"),
+            self.other_user_tok,
+        )
+        # Again, a hex encoded byte stream of the raw file
+        new_media_payload = new_media_download.result.get("body")
+        assert new_media_payload is not None
+
+        # If they match, this was a successful copy
+        assert old_media_payload == new_media_payload
+
+    def test_copy_local_restricted_resource_fails_when_requester_does_not_have_access(
+        self,
+    ) -> None:
+        """
+        Tests that the new copy endpoint performs permission checks and it prevents the
+        copy when the requester does not have access to the original media.
+        """
+        # Create a private room
+        room_id = self.helper.create_room_as(
+            self.user,
+            is_public=False,
+            tok=self.user_tok,
+            extra_content={
+                "initial_state": [
+                    {
+                        "type": EventTypes.RoomHistoryVisibility,
+                        "state_key": "",
+                        "content": {"history_visibility": HistoryVisibility.JOINED},
+                    },
+                ]
+            },
+        )
+
+        # Create the media content
+        content_uri = self.get_success(
+            self.media_repo.create_or_update_content(
+                "image/png",
+                "test_png_upload",
+                io.BytesIO(SMALL_PNG),
+                67,
+                UserID.from_string(self.user),
+                restricted=True,
+            )
+        )
+        # User sends a message with media
+        channel = self.make_request(
+            "PUT",
+            f"/rooms/{room_id}/send/m.room.message/{str(time.time())}?org.matrix.msc3911.attach_media={str(content_uri)}",
+            content={"msgtype": "m.text", "body": "Hi, this is a message"},
+            access_token=self.user_tok,
+        )
+        self.assertEqual(channel.code, HTTPStatus.OK, channel.json_body)
+        assert "event_id" in channel.json_body
+        event_id = channel.json_body["event_id"]
+        restrictions = self.get_success(
+            self.hs.get_datastores().main.get_media_restrictions(
+                content_uri.server_name, content_uri.media_id
+            )
+        )
+        assert restrictions is not None, str(restrictions)
+        assert restrictions.event_id == event_id
+
+        # Invite the other user
+        self.helper.invite(room_id, self.user, self.other_user, tok=self.user_tok)
+        self.helper.join(room_id, self.other_user, tok=self.other_user_tok)
+
+        # User who does not have access to the media tries to copy it.
+        channel = self.make_request(
+            "POST",
+            f"/_matrix/client/unstable/org.matrix.msc3911/media/copy/{self.hs.hostname}/{content_uri.media_id}",
+            access_token=self.other_user_tok,
+        )
+        self.assertEqual(channel.code, 403)
+
+    @override_config(
+        {
+            "limit_profile_requests_to_users_who_share_rooms": True,
+        }
+    )
+    def test_copy_local_restricted_resource_fails_when_profile_lookup_is_not_allowed(
+        self,
+    ) -> None:
+        user_id = UserID.from_string(self.user)
+        # User setup a profile
+        content_uri = self.get_success(
+            self.media_repo.create_or_update_content(
+                "image/png",
+                "test_png_upload",
+                io.BytesIO(SMALL_PNG),
+                67,
+                user_id,
+                restricted=True,
+            )
+        )
+        self.get_success(
+            self.profile_handler.set_avatar_url(
+                target_user=user_id,
+                requester=create_requester(user_id),
+                new_avatar_url=str(content_uri),
+            )
+        )
+        # The users do not share any rooms, and other user tries to copy the profile picture
+        channel = self.make_request(
+            "POST",
+            f"/_matrix/client/unstable/org.matrix.msc3911/media/copy/{self.hs.hostname}/{content_uri.media_id}",
+            access_token=self.other_user_tok,
+        )
+        self.assertEqual(channel.code, 403)
+
+    def test_copy_remote_restricted_resource(self) -> None:
+        """
+        Tests that the new copy endpoint creates a new mxc uri for restricted resource.
+        """
+        # create remote media
+        remote_server = "remoteserver.com"
+        media_id = "remotemedia"
+        remote_file_id = media_id
+        file_info = FileInfo(server_name=remote_server, file_id=remote_file_id)
+
+        media_repo = self.hs.get_media_repository()
+        assert isinstance(media_repo, MediaRepository)
+        media_storage = media_repo.media_storage
+        ctx = media_storage.store_into_file(file_info)
+        (f, _) = self.get_success(ctx.__aenter__())
+        f.write(SMALL_PNG)
+        self.get_success(ctx.__aexit__(None, None, None))
+        self.get_success(
+            self.hs.get_datastores().main.store_cached_remote_media(
+                origin=remote_server,
+                media_id=media_id,
+                media_type="image/png",
+                media_length=67,
+                time_now_ms=self.clock.time_msec(),
+                upload_name="test.png",
+                filesystem_id=remote_file_id,
+                sha256=SMALL_PNG_SHA256,
+                restricted=True,
+            )
+        )
+
+        # Remote media is attached to a user profile
+        remote_user_id = f"@remote-user:{remote_server}"
+        self.get_success(
+            self.hs.get_datastores().main.set_media_restricted_to_user_profile(
+                remote_server, media_id, remote_user_id
+            )
+        )
+        remote_media = self.get_success(
+            self.hs.get_datastores().main.get_cached_remote_media(
+                remote_server, media_id
+            )
+        )
+        assert remote_media is not None
+        assert remote_media.attachments is not None
+        assert str(remote_media.attachments.profile_user_id) == remote_user_id
+
+        # The other_user copies the media from remote server
+        channel = self.make_request(
+            "POST",
+            f"/_matrix/client/unstable/org.matrix.msc3911/media/copy/{remote_server}/{media_id}",
+            access_token=self.other_user_tok,
+        )
+        self.assertEqual(channel.code, 200)
+        self.assertIn("content_uri", channel.json_body)
+        new_media_id = channel.json_body["content_uri"].split("/")[-1]
+        assert new_media_id != media_id
+
+        # Check if the original media there.
+        original_media = self.get_success(
+            self.hs.get_datastores().main.get_cached_remote_media(
+                remote_server, media_id
+            )
+        )
+        assert original_media is not None
+        assert original_media.upload_name == "test.png"
+
+        # Check the copied media.
+        copied_media = self.get_success(
+            self.hs.get_datastores().main.get_local_media(new_media_id)
+        )
+        assert copied_media is not None
+        assert copied_media.user_id == self.other_user
+
+        # Check if they are referencing the same image.
+        assert original_media.sha256 == copied_media.sha256
+
+        # Check if copied media is unattached to any event or user profile yet.
+        assert copied_media.attachments is None
+
+        original_media_download = self.fetch_media(
+            MXCUri.from_str(f"mxc://{remote_server}/{media_id}"), self.user_tok
+        )
+        # This is a hex encoded byte stream of the raw file
+        old_media_payload = original_media_download.result.get("body")
+        assert old_media_payload is not None, old_media_payload
+
+        new_media_download = self.fetch_media(
+            MXCUri.from_str(f"mxc://{self.hs.hostname}/{new_media_id}"),
+            self.other_user_tok,
+        )
+        # Again, a hex encoded byte stream of the raw file
+        new_media_payload = new_media_download.result.get("body")
+        assert new_media_payload is not None
+
+        # If they match, this was a successful copy
+        assert old_media_payload == new_media_payload
+
+    @override_config(
+        {
+            "limit_profile_requests_to_users_who_share_rooms": True,
+        }
+    )
+    def test_copy_remote_restricted_resource_fails_when_requester_does_not_have_access(
+        self,
+    ) -> None:
+        # Create remote media
+        remote_server = "remoteserver.com"
+        remote_file_id = "remote1"
+        file_info = FileInfo(server_name=remote_server, file_id=remote_file_id)
+
+        media_repo = self.hs.get_media_repository()
+        assert isinstance(media_repo, MediaRepository)
+        media_storage = media_repo.media_storage
+        ctx = media_storage.store_into_file(file_info)
+        (f, _) = self.get_success(ctx.__aenter__())
+        f.write(SMALL_PNG)
+        self.get_success(ctx.__aexit__(None, None, None))
+        media_id = "remotemedia"
+        self.get_success(
+            self.hs.get_datastores().main.store_cached_remote_media(
+                origin=remote_server,
+                media_id=media_id,
+                media_type="image/png",
+                media_length=1,
+                time_now_ms=self.clock.time_msec(),
+                upload_name="test.png",
+                filesystem_id=remote_file_id,
+                sha256=remote_file_id,
+                restricted=True,
+            )
+        )
+
+        # Media is attached to a user profile
+        remote_user_id = f"@remote-user:{remote_server}"
+        self.get_success(
+            self.hs.get_datastores().main.set_media_restricted_to_user_profile(
+                remote_server, media_id, remote_user_id
+            )
+        )
+        remote_media = self.get_success(
+            self.hs.get_datastores().main.get_cached_remote_media(
+                remote_server, media_id
+            )
+        )
+        assert remote_media is not None
+        assert remote_media.attachments is not None
+        assert str(remote_media.attachments.profile_user_id) == remote_user_id
+
+        # The other user tries to copy that media from remote server, but fails because
+        # user does not have the access to the profile_user_id
+        channel = self.make_request(
+            "POST",
+            f"/_matrix/client/unstable/org.matrix.msc3911/media/copy/{remote_server}/{media_id}",
+            access_token=self.other_user_tok,
+        )
+        self.assertEqual(channel.code, 403)
+
+
+class RestrictedMediaVisibilityTestCase(unittest.HomeserverTestCase):
+    servlets = [
+        admin.register_servlets,
+        login.register_servlets,
+        media.register_servlets,
+        room.register_servlets,
+    ]
+
+    def default_config(self) -> JsonDict:
+        config = super().default_config()
+        config.setdefault("experimental_features", {})
+        config["experimental_features"].update({"msc3911": {"enabled": True}})
+        return config
+
+    def prepare(
+        self, reactor: MemoryReactor, clock: Clock, homeserver: HomeServer
+    ) -> None:
+        self.store = homeserver.get_datastores().main
+        self.server_name = self.hs.config.server.server_name
+        self.media_repo = self.hs.get_media_repository()
+        self.profile_handler = self.hs.get_profile_handler()
+
+        self.alice_user_id = self.register_user("alice", "password")
+        self.alice_tok = self.login("alice", "password")
+
+    def create_restricted_media(self, user: str | None = None) -> MXCUri:
+        mxc_uri = self.get_success(
+            self.media_repo.create_or_update_content(
+                "image/png",
+                "test_png_upload",
+                io.BytesIO(SMALL_PNG),
+                67,
+                UserID.from_string(user or self.alice_user_id),
+                restricted=True,
+            )
+        )
+        return mxc_uri
+
+    def retrieve_media_from_store(self, mxc_uri: MXCUri) -> LocalMedia:
+        local_media_object = self.get_success(
+            self.store.get_local_media(mxc_uri.media_id)
+        )
+        assert local_media_object is not None
+        return local_media_object
+
+    def create_test_room(
+        self,
+        visibility: str,
+        initial_room_avatar_mxc: MXCUri | None = None,
+        invite_list: list[str] | None = None,
+    ) -> str:
+        initial_state_list = [
+            {
+                "type": EventTypes.RoomHistoryVisibility,
+                "state_key": "",
+                "content": {"history_visibility": visibility},
+            }
+        ]
+
+        if initial_room_avatar_mxc:
+            # Simulate the same situation as `create_room()`, placing the room avatar
+            # after the history visibility event.
+            initial_state_list.append(
+                {
+                    "type": EventTypes.RoomAvatar,
+                    "state_key": "",
+                    "content": {
+                        "info": {"h": 1, "mimetype": "image/png", "size": 67, "w": 1},
+                        "url": str(initial_room_avatar_mxc),
+                    },
+                }
+            )
+        extra_content: dict[str, Any] = {
+            "initial_state": initial_state_list,
+        }
+
+        if invite_list:
+            extra_content.update({"invite": invite_list})
+
+        room_id = self.helper.create_room_as(
+            self.alice_user_id,
+            is_public=True,
+            tok=self.alice_tok,
+            extra_content=extra_content,
+        )
+        assert room_id is not None
+        return room_id
+
+    def send_event_with_attached_media(
+        self, room_id: str, mxc_uri: MXCUri, tok: str | None = None
+    ) -> FakeChannel:
+        txn_id = "m%s" % (str(time.time()))
+
+        channel1 = self.make_request(
+            "PUT",
+            f"/rooms/{room_id}/send/m.room.message/{txn_id}?org.matrix.msc3911.attach_media={str(mxc_uri)}",
+            content={"msgtype": "m.text", "body": "Hi, this is a message"},
+            access_token=tok or self.alice_tok,
+        )
+        return channel1
+
+    def insert_message_with_attached_media(self, room_id: str) -> LocalMedia:
+        mxc_uri = self.create_restricted_media()
+
+        channel = self.send_event_with_attached_media(room_id, mxc_uri)
+        self.assertEqual(channel.code, HTTPStatus.OK, channel.json_body)
+        assert "event_id" in channel.json_body
+        event_id = channel.json_body["event_id"]
+
+        # check restrictions are applied
+        restrictions = self.get_success(
+            self.store.get_media_restrictions(mxc_uri.server_name, mxc_uri.media_id)
+        )
+        assert restrictions is not None, str(restrictions)
+        assert restrictions.event_id == event_id
+        assert restrictions.profile_user_id is None
+
+        # Retrieve the media object for inspection in the test
+        local_media_object = self.retrieve_media_from_store(mxc_uri)
+
+        return local_media_object
+
+    def assert_expected_result(
+        self, target_user: UserID, media_object: LocalMedia, expected_bool: bool
+    ) -> None:
+        # If the expectation is True, it is expected the function is a success
+        # If the expectation is False, it is expected to raise the exception
+        #
+        # It may be easier to think of True and False here as Visible and Not Visible in
+        # the context of this TestCase.
+        if expected_bool:
+            # As a note about nullcontext manager: Support for async context behavior
+            # was added in python 3.10. However, we don't need that even when testing an
+            # async function, as it is wrapped into a sync function('get_success()' and
+            # 'get_success_or_raise()') to pump the reactor.
+            maybe_assert_exception = nullcontext()
+        else:
+            maybe_assert_exception = self.assertRaises(UnauthorizedRequestAPICallError)
+        with maybe_assert_exception:
+            self.get_success_or_raise(
+                self.media_repo.is_media_visible(target_user, media_object)
+            )
+
+    @parameterized.expand(
+        [
+            (HistoryVisibility.WORLD_READABLE, True),
+            (HistoryVisibility.SHARED, True),
+            (HistoryVisibility.JOINED, False),
+            (HistoryVisibility.INVITED, False),
+        ]
+    )
+    def test_message_media_visibility_to_users_not_sharing_room(
+        self, visibility: str, expected_result_bool: bool
+    ) -> None:
+        """
+        Test that a message with restricted media is not visible if appropriate to
+        someone not in that room
+        """
+
+        second_user = self.register_user("second_user_message_test", "password")
+        second_user_id = UserID.from_string(second_user)
+        self.login("second_user_message_test", "password")
+
+        room_id = self.create_test_room(
+            visibility,
+        )
+
+        local_media_object = self.insert_message_with_attached_media(room_id)
+
+        self.assert_expected_result(
+            second_user_id, local_media_object, expected_result_bool
+        )
+
+    @parameterized.expand(
+        [
+            (HistoryVisibility.WORLD_READABLE, True, True),
+            (HistoryVisibility.SHARED, True, True),
+            (HistoryVisibility.INVITED, False, True),
+            (HistoryVisibility.JOINED, False, False),
+        ]
+    )
+    def test_message_media_visibility_to_users_invited_to_room(
+        self,
+        visibility: str,
+        expected_before_result_bool: bool,
+        expected_after_result_bool: bool,
+    ) -> None:
+        """
+        Test that a message with restricted media is visible if appropriate to someone
+        invited to a room
+        """
+
+        invited_user = self.register_user("invited_user_message_test", "password")
+        invited_user_id = UserID.from_string(invited_user)
+        self.login("invited_user_message_test", "password")
+
+        room_id = self.create_test_room(
+            visibility,
+        )
+
+        # We will need two pieces of media: one to check for before the invite and one
+        # for after.
+
+        # Send the first attached media message
+        first_media_object = self.insert_message_with_attached_media(room_id)
+
+        self.assert_expected_result(
+            invited_user_id, first_media_object, expected_before_result_bool
+        )
+
+        # Good, now do the invite and check the second expectation
+        self.helper.invite(
+            room_id, self.alice_user_id, invited_user, tok=self.alice_tok
+        )
+
+        # Send the second attached media message
+        second_media_object = self.insert_message_with_attached_media(room_id)
+
+        self.assert_expected_result(
+            invited_user_id, second_media_object, expected_after_result_bool
+        )
+
+    @parameterized.expand(
+        [
+            (HistoryVisibility.WORLD_READABLE, True, True),
+            (HistoryVisibility.SHARED, True, True),
+            (HistoryVisibility.INVITED, False, True),
+            (HistoryVisibility.JOINED, False, True),
+        ]
+    )
+    def test_message_media_visibility_to_users_joined_to_room(
+        self,
+        visibility: str,
+        expected_before_result_bool: bool,
+        expected_after_result_bool: bool,
+    ) -> None:
+        """
+        Test that a message with restricted media is visible if appropriate to someone
+        joined to a room
+        """
+
+        joining_user = self.register_user("joining_user_message_test", "password")
+        joining_user_id = UserID.from_string(joining_user)
+        joining_user_tok = self.login("joining_user_message_test", "password")
+
+        room_id = self.create_test_room(
+            visibility,
+        )
+
+        # We will need two pieces of media: one to check for before the join and one
+        # for after.
+
+        # Send the first attached media message
+        first_media_object = self.insert_message_with_attached_media(room_id)
+
+        self.assert_expected_result(
+            joining_user_id, first_media_object, expected_before_result_bool
+        )
+
+        # Good, now do the join and check the second expectation
+        self.helper.join(room_id, joining_user, tok=joining_user_tok)
+
+        # Send the second attached media message
+        second_media_object = self.insert_message_with_attached_media(room_id)
+
+        self.assert_expected_result(
+            joining_user_id, second_media_object, expected_after_result_bool
+        )
+
+    @parameterized.expand(
+        [
+            (HistoryVisibility.WORLD_READABLE, True, True),
+            (HistoryVisibility.SHARED, True, True),
+            (HistoryVisibility.INVITED, True, False),
+            (HistoryVisibility.JOINED, True, False),
+        ]
+    )
+    def test_message_media_visibility_to_users_that_left_a_room(
+        self,
+        visibility: str,
+        expected_before_result_bool: bool,
+        expected_after_result_bool: bool,
+    ) -> None:
+        """
+        Test that a message with restricted media is visible if appropriate to someone
+        that left a room
+        """
+        # make another user for this test only. This user will be invited to the room,
+        # but will not actually join.
+        leaving_user = self.register_user("leaving_user_message_test", "password")
+        leaving_user_id = UserID.from_string(leaving_user)
+        leaving_user_tok = self.login("leaving_user_message_test", "password")
+
+        room_id = self.create_test_room(
+            visibility,
+        )
+        # Join the user, or else they can not leave
+        self.helper.join(room_id, leaving_user, tok=leaving_user_tok)
+
+        # We will need two pieces of media: one to check for before the leave and one
+        # for after.
+
+        first_media_object = self.insert_message_with_attached_media(room_id)
+
+        self.assert_expected_result(
+            leaving_user_id, first_media_object, expected_before_result_bool
+        )
+
+        self.helper.leave(room_id, leaving_user, tok=leaving_user_tok)
+
+        # Now that the user has left the room, make sure they can not see anything after
+        second_media_object = self.insert_message_with_attached_media(room_id)
+
+        self.assert_expected_result(
+            leaving_user_id, second_media_object, expected_after_result_bool
+        )
+
+    @parameterized.expand(
+        [
+            HistoryVisibility.WORLD_READABLE,
+            HistoryVisibility.SHARED,
+            HistoryVisibility.INVITED,
+            HistoryVisibility.JOINED,
+        ]
+    )
+    def test_message_media_visibility_for_unknown_restriction(
+        self,
+        visibility: str,
+    ) -> None:
+        """
+        Test that a message with restricted media is not visible if an unknown restriction exists
+        """
+        # Borrow the test setup for joining a room
+        joining_user = self.register_user("joining_user_message_test", "password")
+        joining_user_id = UserID.from_string(joining_user)
+        joining_user_tok = self.login("joining_user_message_test", "password")
+
+        room_id = self.create_test_room(
+            visibility,
+        )
+        # We'll go ahead and join the second user to the room, so the visibility of a
+        # non-originating user can check the media's visibility
+        self.helper.join(room_id, joining_user, tok=joining_user_tok)
+
+        # First, create our piece of media and label it as restricted
+        mxc_uri = self.create_restricted_media()
+
+        # Then add the database row that would normally attach this media to something,
+        # but it is an unknown something.
+        self.get_success(
+            self.store.db_pool.simple_insert(
+                "media_attachments",
+                {
+                    "server_name": mxc_uri.server_name,
+                    "media_id": mxc_uri.media_id,
+                    # "restrictions_json" is a JSONB column, so it expects a string
+                    "restrictions_json": json_encoder.encode({"restrictions": {}}),
+                },
+            )
+        )
+
+        # Retrieve the media info from the data store
+        local_media_object = self.retrieve_media_from_store(mxc_uri)
+
+        assert local_media_object.restricted is True
+        # If attachments was None, we would know it had not been attached yet
+        assert local_media_object.attachments is not None
+
+        # Neither user should be able to see the media
+        self.assert_expected_result(joining_user_id, local_media_object, False)
+        self.assert_expected_result(joining_user_id, local_media_object, False)
+
+    def send_membership_with_attached_media(
+        self, room_id: str, mxc_uri: MXCUri, tok: str | None = None
+    ) -> FakeChannel:
+        channel1 = self.make_request(
+            "PUT",
+            f"/rooms/{room_id}/state/m.room.member/{self.alice_user_id}?org.matrix.msc3911.attach_media={str(mxc_uri)}",
+            {
+                "membership": Membership.JOIN,
+                "avatar_url": str(mxc_uri),
+            },
+            access_token=tok or self.alice_tok,
+        )
+        return channel1
+
+    def insert_membership_with_attached_media(self, room_id: str) -> LocalMedia:
+        mxc_uri = self.create_restricted_media()
+
+        channel = self.send_membership_with_attached_media(room_id, mxc_uri)
+        self.assertEqual(channel.code, HTTPStatus.OK, channel.json_body)
+        assert "event_id" in channel.json_body
+        event_id = channel.json_body["event_id"]
+
+        # check restrictions are applied
+        restrictions = self.get_success(
+            self.store.get_media_restrictions(mxc_uri.server_name, mxc_uri.media_id)
+        )
+        assert restrictions is not None, str(restrictions)
+        assert restrictions.event_id == event_id
+        assert restrictions.profile_user_id is None
+
+        # Retrieve the media object for inspection in the test
+        local_media_object = self.retrieve_media_from_store(mxc_uri)
+
+        return local_media_object
+
+    @parameterized.expand(
+        [
+            (HistoryVisibility.WORLD_READABLE, True),
+            (HistoryVisibility.SHARED, True),
+            (HistoryVisibility.JOINED, False),
+            (HistoryVisibility.INVITED, False),
+        ]
+    )
+    def test_membership_avatar_media_visibility_to_users_not_sharing_room(
+        self, visibility: str, expected_result_bool: bool
+    ) -> None:
+        """
+        Test that a user can not see another user's membership-based avatar if they are
+        not in that room
+        """
+
+        second_user = self.register_user("second_user_membership_test", "password")
+        second_user_id = UserID.from_string(second_user)
+        self.login("second_user_membership_test", "password")
+
+        room_id = self.create_test_room(
+            visibility,
+        )
+
+        local_media_object = self.insert_membership_with_attached_media(room_id)
+
+        self.assert_expected_result(
+            second_user_id, local_media_object, expected_result_bool
+        )
+
+    @parameterized.expand(
+        [
+            (HistoryVisibility.WORLD_READABLE, True, True),
+            (HistoryVisibility.SHARED, True, True),
+            # Because invites are expected to see member's avatars
+            (HistoryVisibility.INVITED, False, True),
+            (HistoryVisibility.JOINED, False, True),
+        ]
+    )
+    def test_membership_avatar_media_visibility_to_users_invited_to_room(
+        self,
+        visibility: str,
+        expected_first_result_bool: bool,
+        expected_second_result_bool: bool,
+    ) -> None:
+        """
+        Test that a user invited to a room can see the membership-based avatar of the
+        inviting user in that room. Do not actually join the room
+
+        This test has two parts:
+        First test an invite sent after setting the alice's membership avatar
+
+        Second, test an invite being sent as part of the room creation, before the
+        membership-based avatar is established
+
+        We will use the `expected_after_result_bool` twice, once for each scenario
+        """
+
+        invited_user = self.register_user("invited_user_membership_test", "password")
+        invited_user_id = UserID.from_string(invited_user)
+        self.login("invited_user_membership_test", "password")
+
+        # Test scenario 1
+        room_id = self.create_test_room(
+            visibility,
+        )
+
+        # Set alice's membership avatar to a specific image
+        first_media_object = self.insert_membership_with_attached_media(room_id)
+
+        self.assert_expected_result(
+            invited_user_id, first_media_object, expected_first_result_bool
+        )
+
+        # Good, now do the invite and check the second expectation.
+        self.helper.invite(
+            room_id, self.alice_user_id, invited_user, tok=self.alice_tok
+        )
+
+        self.assert_expected_result(
+            invited_user_id, first_media_object, expected_second_result_bool
+        )
+
+        # Test scenario 2, invite as part of room creation
+        room_2_id = self.create_test_room(visibility, invite_list=[invited_user])
+
+        # Set alice's membership avatar to a specific image in the second room
+        second_media_object = self.insert_membership_with_attached_media(room_2_id)
+
+        # As it turns out, this should be the same result as the second expectation
+        # above, so just reuse it
+        self.assert_expected_result(
+            invited_user_id, second_media_object, expected_second_result_bool
+        )
+
+    @parameterized.expand(
+        [
+            (HistoryVisibility.WORLD_READABLE, True, True),
+            (HistoryVisibility.SHARED, True, True),
+            (HistoryVisibility.INVITED, False, True),
+            (HistoryVisibility.JOINED, False, True),
+        ]
+    )
+    def test_membership_avatar_media_visibility_to_users_joined_to_room(
+        self,
+        visibility: str,
+        expected_first_result_bool: bool,
+        expected_second_result_bool: bool,
+    ) -> None:
+        """
+        Test that a user joined to a room can see the membership-based avatar of another user
+        """
+
+        joining_user = self.register_user("joining_user_membership_test", "password")
+        joining_user_id = UserID.from_string(joining_user)
+        joining_user_tok = self.login("joining_user_membership_test", "password")
+
+        room_id = self.create_test_room(
+            visibility,
+        )
+
+        # We will need two pieces of media: one to check for before the join and one
+        # for after.
+
+        first_media_object = self.insert_membership_with_attached_media(room_id)
+
+        self.assert_expected_result(
+            joining_user_id, first_media_object, expected_first_result_bool
+        )
+
+        # Then join the room
+        self.helper.join(room_id, joining_user, tok=joining_user_tok)
+
+        # Can the user see it now?
+        self.assert_expected_result(
+            joining_user_id, first_media_object, expected_second_result_bool
+        )
+
+        # Test with a second piece of media that was created after the join
+        second_media_object = self.insert_membership_with_attached_media(room_id)
+
+        self.assert_expected_result(
+            joining_user_id, second_media_object, expected_second_result_bool
+        )
+
+    @parameterized.expand(
+        [
+            (HistoryVisibility.WORLD_READABLE, True, True),
+            (HistoryVisibility.SHARED, True, True),
+            (HistoryVisibility.INVITED, True, False),
+            (HistoryVisibility.JOINED, True, False),
+        ]
+    )
+    def test_membership_avatar_media_visibility_to_users_that_left_room(
+        self,
+        visibility: str,
+        expected_first_result_bool: bool,
+        expected_second_result_bool: bool,
+    ) -> None:
+        """
+        Test that a user leaving a room can not see another user's avatar from that room
+        after they have left
+        """
+
+        leaving_user = self.register_user("leaving_user_membership_test", "password")
+        leaving_user_id = UserID.from_string(leaving_user)
+        leaving_user_tok = self.login("leaving_user_membership_test", "password")
+
+        room_id = self.create_test_room(
+            visibility,
+        )
+        # Join the user, or else they can not leave
+        self.helper.join(room_id, leaving_user, tok=leaving_user_tok)
+
+        # We will need two pieces of media: one to check for before the join and one
+        # for after.
+
+        first_media_object = self.insert_membership_with_attached_media(room_id)
+
+        # This should always succeed, we are in the room after all
+        self.assert_expected_result(leaving_user_id, first_media_object, True)
+
+        # Time to leave
+        self.helper.leave(room_id, leaving_user, tok=leaving_user_tok)
+
+        # Recheck the first media object
+        self.assert_expected_result(
+            leaving_user_id, first_media_object, expected_first_result_bool
+        )
+        # Make another one, to make sure it behaves correctly
+        second_media_object = self.insert_membership_with_attached_media(room_id)
+
+        self.assert_expected_result(
+            leaving_user_id, second_media_object, expected_second_result_bool
+        )
+
+    def send_room_avatar_with_attached_media(
+        self, room_id: str, mxc_uri: MXCUri, tok: str | None = None
+    ) -> FakeChannel:
+        channel1 = self.make_request(
+            "PUT",
+            f"/rooms/{room_id}/state/m.room.avatar?org.matrix.msc3911.attach_media={str(mxc_uri)}",
+            {
+                "info": {"h": 1, "mimetype": "image/png", "size": 67, "w": 1},
+                "url": str(mxc_uri),
+            },
+            access_token=tok or self.alice_tok,
+        )
+        return channel1
+
+    def insert_room_avatar_with_attached_media(self, room_id: str) -> LocalMedia:
+        mxc_uri = self.create_restricted_media()
+
+        channel = self.send_room_avatar_with_attached_media(room_id, mxc_uri)
+        self.assertEqual(channel.code, HTTPStatus.OK, channel.json_body)
+        assert "event_id" in channel.json_body
+        event_id = channel.json_body["event_id"]
+
+        # check restrictions are applied
+        restrictions = self.get_success(
+            self.store.get_media_restrictions(mxc_uri.server_name, mxc_uri.media_id)
+        )
+        assert restrictions is not None, str(restrictions)
+        assert restrictions.event_id == event_id
+        assert restrictions.profile_user_id is None
+
+        # Retrieve the media object for inspection in the test
+        local_media_object = self.retrieve_media_from_store(mxc_uri)
+
+        return local_media_object
+
+    @parameterized.expand(
+        [
+            (HistoryVisibility.WORLD_READABLE, True, True),
+            (HistoryVisibility.SHARED, True, True),
+            (HistoryVisibility.JOINED, False, False),
+            (HistoryVisibility.INVITED, False, False),
+        ]
+    )
+    def test_room_avatar_media_visibility_to_users_not_sharing_room(
+        self,
+        visibility: str,
+        expected_room_creation_result_bool: bool,
+        expected_result_bool: bool,
+    ) -> None:
+        """
+        Test that a user can not see the restricted media room avatar.
+
+        Specifically, test the avatar set as part of room creation and changed/set after
+        """
+
+        second_user = self.register_user("second_user_room_avatar_test", "password")
+        second_user_id = UserID.from_string(second_user)
+        self.login("second_user_room_avatar_test", "password")
+
+        # The room needs to be created with an avatar
+        room_creation_avatar_mxc = self.create_restricted_media()
+        room_id = self.create_test_room(visibility, room_creation_avatar_mxc)
+
+        room_avatar_object = self.retrieve_media_from_store(room_creation_avatar_mxc)
+        self.assert_expected_result(
+            second_user_id, room_avatar_object, expected_room_creation_result_bool
+        )
+
+        # Let's change the avatar, and make sure it acts appropriately
+        local_media_object = self.insert_room_avatar_with_attached_media(room_id)
+
+        self.assert_expected_result(
+            second_user_id, local_media_object, expected_result_bool
+        )
+
+    @parameterized.expand(
+        [
+            (HistoryVisibility.WORLD_READABLE, True, True),
+            (HistoryVisibility.SHARED, True, True),
+            # Because invites are expected to see room avatars
+            (HistoryVisibility.INVITED, False, True),
+            (HistoryVisibility.JOINED, False, True),
+        ]
+    )
+    def test_room_avatar_media_visibility_to_users_invited_to_room(
+        self,
+        visibility: str,
+        expected_before_result_bool: bool,
+        expected_after_result_bool: bool,
+    ) -> None:
+        """
+        Test that a user invited to a room can see the avatar of that room
+        """
+
+        invited_user = self.register_user("invited_user_room_avatar_test", "password")
+        invited_user_id = UserID.from_string(invited_user)
+        self.login("invited_user_room_avatar_test", "password")
+
+        creation_room_avatar_mxc = self.create_restricted_media()
+        room_id = self.create_test_room(visibility, creation_room_avatar_mxc)
+
+        # Retrieve the media info for the room avatar. This will have been set after the
+        # visibility event was created and is therefor governed by it.
+        first_media_object = self.retrieve_media_from_store(creation_room_avatar_mxc)
+
+        self.assert_expected_result(
+            invited_user_id, first_media_object, expected_before_result_bool
+        )
+
+        # Good, now do the invite
+        self.helper.invite(
+            room_id, self.alice_user_id, invited_user, tok=self.alice_tok
+        )
+
+        # Recheck the room avatar made during room creation
+        self.assert_expected_result(
+            invited_user_id, first_media_object, expected_after_result_bool
+        )
+
+    @parameterized.expand(
+        [
+            (HistoryVisibility.WORLD_READABLE, True, True),
+            (HistoryVisibility.SHARED, True, True),
+            (HistoryVisibility.INVITED, False, True),
+            (HistoryVisibility.JOINED, False, True),
+        ]
+    )
+    def test_room_avatar_media_visibility_to_users_joined_to_room(
+        self,
+        visibility: str,
+        expected_before_result_bool: bool,
+        expected_after_result_bool: bool,
+    ) -> None:
+        """
+        Test that a user joined to a room can see the avatar of that room
+        """
+
+        joining_user = self.register_user("joining_user_room_avatar_test", "password")
+        joining_user_id = UserID.from_string(joining_user)
+        joining_user_tok = self.login("joining_user_room_avatar_test", "password")
+
+        # We will need two pieces of media: one to check for before the join and one
+        # for after.
+
+        creation_room_avatar_mxc = self.create_restricted_media()
+        room_id = self.create_test_room(visibility, creation_room_avatar_mxc)
+
+        # Retrieve the media info for the room avatar. This will have been set after the
+        # visibility event was created and is therefore governed by it.
+        first_media_object = self.retrieve_media_from_store(creation_room_avatar_mxc)
+
+        self.assert_expected_result(
+            joining_user_id, first_media_object, expected_before_result_bool
+        )
+
+        # Now we join the room, and examine the media object again
+        self.helper.join(room_id, joining_user, tok=joining_user_tok)
+
+        self.assert_expected_result(
+            joining_user_id, first_media_object, expected_after_result_bool
+        )
+
+        # Do a second one that is definitely after the join
+        second_media_object = self.insert_room_avatar_with_attached_media(room_id)
+
+        self.assert_expected_result(
+            joining_user_id, second_media_object, expected_after_result_bool
+        )
+
+    @parameterized.expand(
+        [
+            (HistoryVisibility.WORLD_READABLE, True, True),
+            (HistoryVisibility.SHARED, True, True),
+            # Since the room avatar is set before the join,
+            # after the leave it is not visible at all
+            (HistoryVisibility.INVITED, False, False),
+            (HistoryVisibility.JOINED, False, False),
+        ]
+    )
+    def test_room_avatar_media_visibility_to_users_that_left_room(
+        self,
+        visibility: str,
+        expected_before_result_bool: bool,
+        expected_after_result_bool: bool,
+    ) -> None:
+        """
+        Test that after leaving a room, a user can not see changes to the room's avatar
+        """
+
+        leaving_user = self.register_user("leaving_user_room_avatar_test", "password")
+        leaving_user_id = UserID.from_string(leaving_user)
+        leaving_user_tok = self.login("leaving_user_room_avatar_test", "password")
+
+        # We will need two pieces of media: one to check for from room creation and then after the leave
+
+        creation_room_avatar_mxc = self.create_restricted_media()
+        room_id = self.create_test_room(visibility, creation_room_avatar_mxc)
+        # Retrieve the media info for the room avatar. This will have been set after the
+        # visibility event was created and is therefore governed by it.
+        first_media_object = self.retrieve_media_from_store(creation_room_avatar_mxc)
+
+        # Join the user, or else they can not leave
+        self.helper.join(room_id, leaving_user, tok=leaving_user_tok)
+
+        # Pretty sure this should always be True, we are already in the room
+        self.assert_expected_result(leaving_user_id, first_media_object, True)
+
+        # Bye bye, user
+        self.helper.leave(room_id, leaving_user, tok=leaving_user_tok)
+
+        # The user has left, which means the media may not be visible anymore
+        self.assert_expected_result(
+            leaving_user_id, first_media_object, expected_before_result_bool
+        )
+
+        # Change the avatar, it should not be different to the prior result
+        second_media_object = self.insert_room_avatar_with_attached_media(room_id)
+
+        self.assert_expected_result(
+            leaving_user_id, second_media_object, expected_after_result_bool
+        )
+
+    def test_global_profile_is_visible(self) -> None:
+        """
+        Test that a profile avatar that is not from a membership event is viewable if not limited
+        """
+        profile_viewing_user = self.register_user("profile_viewing_user", "password")
+        profile_viewing_user_id = UserID.from_string(profile_viewing_user)
+
+        # Just to simply a few spots below where the UserID object is needed
+        alice_user_id = UserID.from_string(self.alice_user_id)
+
+        mxc_uri = self.create_restricted_media()
+
+        # The profile handler function wants a Requester object specifically
+        alice_as_requester = create_requester(self.alice_user_id)
+        self.get_success(
+            self.profile_handler.set_avatar_url(
+                target_user=alice_user_id,
+                requester=alice_as_requester,
+                new_avatar_url=str(mxc_uri),
+            )
+        )
+
+        media_object = self.get_success(self.store.get_local_media(mxc_uri.media_id))
+        assert media_object is not None
+
+        # Should be visible by both users
+        self.assert_expected_result(alice_user_id, media_object, True)
+        self.assert_expected_result(profile_viewing_user_id, media_object, True)
+
+    @override_config({"limit_profile_requests_to_users_who_share_rooms": True})
+    def test_global_profile_is_not_visible_when_not_sharing_a_room_setting_is_enabled(
+        self,
+    ) -> None:
+        """
+        Test that a profile avatar that is not from a membership event is not viewable
+        if limited by the setting "limit_profile_requests_to_users_who_share_rooms"
+        """
+        profile_viewing_user = self.register_user("profile_viewing_user", "password")
+        profile_viewing_user_id = UserID.from_string(profile_viewing_user)
+
+        # Just to simply a few spots below where the UserID object is needed
+        alice_user_id = UserID.from_string(self.alice_user_id)
+
+        mxc_uri = self.create_restricted_media()
+
+        # The profile handler function wants a Requester object specifically
+        alice_as_requester = create_requester(self.alice_user_id)
+        self.get_success(
+            self.profile_handler.set_avatar_url(
+                target_user=alice_user_id,
+                requester=alice_as_requester,
+                new_avatar_url=str(mxc_uri),
+            )
+        )
+
+        media_object = self.get_success(self.store.get_local_media(mxc_uri.media_id))
+        assert media_object is not None
+        self.assert_expected_result(alice_user_id, media_object, True)
+        self.assert_expected_result(profile_viewing_user_id, media_object, False)
+
+
+configs_2 = [
+    {"enable_restricted_media": True},
+    {"enable_restricted_media": False},
+]
+
+
+@parameterized_class(configs_2)
+class RestrictedMediaBackwardCompatTestCase(unittest.HomeserverTestCase):
+    """
+    Test that restricted media can be downloaded if MSC3911 is enabled/disabled
+    """
+
+    enable_restricted_media: bool
+
+    other_server_name = "remote-server.com"
+    servlets = [
+        media.register_servlets,
+        login.register_servlets,
+        admin.register_servlets,
+        room.register_servlets,
+    ]
+    use_isolated_media_paths = True
+
+    def make_homeserver(self, reactor: MemoryReactor, clock: Clock) -> HomeServer:
+        config = self.default_config()
+
+        self.clock = clock
+        config["enable_authenticated_media"] = True
+        config["experimental_features"] = {
+            "msc3911": {"enabled": self.enable_restricted_media}
+        }
+
+        provider_config = {
+            "module": "synapse.media.storage_provider.FileStorageProviderBackend",
+            "store_local": True,
+            "store_synchronous": False,
+            "store_remote": True,
+            "config": {"directory": self._media_storage_provider_path},
+        }
+
+        config["media_storage_providers"] = [provider_config]
+
+        return self.setup_test_homeserver(config=config)
+
+    def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
+        self.repo = hs.get_media_repository()
+        assert isinstance(self.repo, MediaRepository)
+        self.media_storage = self.repo.media_storage
+
+        self.client = hs.get_federation_http_client()
+        self.store = hs.get_datastores().main
+        self.user = self.register_user("user", "pass")
+        self.tok = self.login("user", "pass")
+
+        self.other_user = self.register_user("other_user", "password")
+        self.other_user_tok = self.login("other_user", "password")
+
+        self.room_id = self.helper.create_room_as(self.user, True, tok=self.tok)
+        assert self.room_id is not None
+        self.helper.join(self.room_id, self.other_user, tok=self.other_user_tok)
+
+    def create_resource_dict(self) -> dict:
+        resources = super().create_resource_dict()
+        resources["/_matrix/media"] = self.hs.get_media_repository_resource()
+        return resources
+
+    def upload_restricted_media(self) -> str:
+        """
+        Upload media to the MSC3911 /media/upload endpoint. This will ensure the
+        restricted flag is set. Used for the authenticated ETag test
+        """
+        # upload some local media with restrictions on
+        channel = self.make_request(
+            "POST",
+            "_matrix/client/unstable/org.matrix.msc3911/media/upload?filename=test_png_upload",
+            SMALL_PNG,
+            self.tok,
+            shorthand=False,
+            content_type=b"image/png",
+            custom_headers=[("Content-Length", str(67))],
+        )
+        self.assertEqual(channel.code, 200, channel.json_body)
+
+        res = channel.json_body.get("content_uri")
+        assert res is not None
+        _, restricted_uri = res.rsplit("/", maxsplit=1)
+
+        return restricted_uri
+
+    def upload_unrestricted_media(self) -> str:
+        """
+        Upload media to the existing /_matrix/media/.../upload endpoint. This will not
+        set the restricted flag. Used for the authenticated ETag test
+        """
+        # upload another using the old endpoint so it is not restricted
+        channel = self.make_request(
+            "POST",
+            "_matrix/media/v3/upload?filename=test_png_upload",
+            SMALL_PNG,
+            self.tok,
+            shorthand=False,
+            content_type=b"image/png",
+            custom_headers=[("Content-Length", str(67))],
+        )
+        self.assertEqual(channel.code, 200, channel.json_body)
+        res = channel.json_body.get("content_uri")
+        assert res is not None
+        _, unrestricted_uri = res.rsplit("/", maxsplit=1)
+
+        return unrestricted_uri
+
+    def inject_local_media_and_send_event(self, authed: bool, restricted: bool) -> str:
+        """
+        Inject the necessary database rows to ensure availability of a piece of local
+        media (optionally with restriction and authentication)
+
+        Then send a message event that attaches this media to an event in the room. This
+        should set the restriction correctly
+        """
+
+        media_id = random_string(24)
+        file_id = media_id
+        file_info = FileInfo(None, file_id=file_id)
+
+        ctx = self.media_storage.store_into_file(file_info)
+        (f, fname) = self.get_success(ctx.__aenter__())
+        f.write(SMALL_PNG)
+        self.get_success(ctx.__aexit__(None, None, None))
+
+        self.get_success(
+            self.store.db_pool.simple_insert(
+                "local_media_repository",
+                {
+                    "media_id": media_id,
+                    "media_type": "image/png",
+                    "created_ts": self.clock.time_msec(),
+                    "upload_name": "test_local",
+                    "media_length": 67,
+                    "user_id": self.other_user,
+                    "url_cache": None,
+                    "authenticated": authed,
+                    "restricted": restricted,
+                },
+                desc="store_local_media",
+            )
+        )
+
+        # ensure we have thumbnails for the non-dynamic code path
+        self.get_success(
+            self.repo._generate_thumbnails(None, media_id, file_id, "image/png")
+        )
+
+        mxc_uri_str = f"mxc://test/{media_id}"
+        maybe_attach_media = None
+        if restricted:
+            maybe_attach_media = mxc_uri_str
+        image = {
+            "body": "test_png_upload",
+            "info": {"h": 1, "mimetype": "image/png", "size": 67, "w": 1},
+            "msgtype": "m.image",
+            "url": mxc_uri_str,
+        }
+
+        self.helper.send_event(
+            self.room_id,
+            EventTypes.Message,
+            content=image,
+            tok=self.other_user_tok,
+            attach_media_mxc=maybe_attach_media,
+        )
+
+        # We know it's the local server, so the server name is "test"
+        return media_id
+
+    def inject_remote_media(self, restricted: bool) -> str:
+        """
+        Inject the necessary database rows to ensure availability of a piece of remote
+        media (optionally with restriction). Abuse the profile_user_id field instead of
+        simulating a room
+        """
+
+        media_id = random_string(24)
+        file_id = media_id
+        file_info = FileInfo(server_name=self.other_server_name, file_id=file_id)
+
+        ctx = self.media_storage.store_into_file(file_info)
+        (f, fname) = self.get_success(ctx.__aenter__())
+        f.write(SMALL_PNG)
+        self.get_success(ctx.__aexit__(None, None, None))
+
+        # we write the authenticated status when storing media, so this should pick up
+        # config and authenticate the media
+        self.get_success(
+            self.store.store_cached_remote_media(
+                origin=self.other_server_name,
+                media_id=media_id,
+                media_type="image/png",
+                media_length=1,
+                time_now_ms=self.clock.time_msec(),
+                upload_name="remote_test.png",
+                filesystem_id=file_id,
+                sha256=file_id,
+                restricted=restricted,
+            )
+        )
+        # add restrictions if appropriate, separate database call, use arg
+        if restricted:
+            # Since we are not going to generate a remote room and therefore have an
+            # event_id, just use the profile avatar(never mind that the user doesn't
+            # exist, the server doesn't care)
+            self.get_success(
+                self.store.set_media_restricted_to_user_profile(
+                    self.other_server_name,
+                    media_id,
+                    f"@wilson:{self.other_server_name}",
+                )
+            )
+
+        # ensure we have thumbnails for the non-dynamic code path
+        self.get_success(
+            self.repo._generate_thumbnails(
+                self.other_server_name, media_id, file_id, "image/png"
+            )
+        )
+        # The server is always going to be `self.other_server_name` so just need the media_id
+        return media_id
+
+    def test_authed_restricted_local_media(self) -> None:
+        """
+        Test that authenticated and restricted media is not available over the old
+        unauthenticated endpoints
+        """
+
+        restricted_media_id = self.inject_local_media_and_send_event(
+            authed=True, restricted=True
+        )
+        # request media over authenticated endpoint, should be found
+        channel1 = self.make_request(
+            "GET",
+            f"_matrix/client/v1/media/download/test/{restricted_media_id}",
+            access_token=self.tok,
+            shorthand=False,
+        )
+        self.assertEqual(channel1.code, 200, channel1)
+
+        # request same media over unauthenticated media, should raise 404 not found
+        channel2 = self.make_request(
+            "GET",
+            f"_matrix/media/v3/download/test/{restricted_media_id}",
+            shorthand=False,
+        )
+        self.assertEqual(channel2.code, 404, channel2)
+
+        # check thumbnails as well
+        params = "?width=32&height=32&method=crop"
+        channel3 = self.make_request(
+            "GET",
+            f"/_matrix/client/v1/media/thumbnail/test/{restricted_media_id}{params}",
+            shorthand=False,
+            access_token=self.tok,
+        )
+        self.assertEqual(channel3.code, 200, channel3)
+
+        params = "?width=32&height=32&method=crop"
+        channel4 = self.make_request(
+            "GET",
+            f"/_matrix/media/r0/thumbnail/test/{restricted_media_id}{params}",
+            shorthand=False,
+            access_token=self.tok,
+        )
+        self.assertEqual(channel4.code, 404, channel4)
+
+    def test_unauthed_restricted_local_media(self) -> None:
+        """
+        Test that unauthenticated but(somehow) restricted media is available over the old
+        unauthenticated endpoints
+        """
+        # First test round, restricted media
+        restricted_media_id = self.inject_local_media_and_send_event(
+            authed=False, restricted=True
+        )
+        # request media over authenticated endpoint, should be found
+        channel1 = self.make_request(
+            "GET",
+            f"_matrix/client/v1/media/download/test/{restricted_media_id}",
+            access_token=self.tok,
+            shorthand=False,
+        )
+        self.assertEqual(channel1.code, 200, channel1)
+
+        # request same media over unauthenticated media, should be found
+        channel2 = self.make_request(
+            "GET",
+            f"_matrix/media/v3/download/test/{restricted_media_id}",
+            shorthand=False,
+        )
+        self.assertEqual(channel2.code, 200, channel2)
+
+        # check thumbnails as well
+        params = "?width=32&height=32&method=crop"
+        channel3 = self.make_request(
+            "GET",
+            f"/_matrix/client/v1/media/thumbnail/test/{restricted_media_id}{params}",
+            shorthand=False,
+            access_token=self.tok,
+        )
+        self.assertEqual(channel3.code, 200, channel3)
+
+        params = "?width=32&height=32&method=crop"
+        channel4 = self.make_request(
+            "GET",
+            f"/_matrix/media/r0/thumbnail/test/{restricted_media_id}{params}",
+            shorthand=False,
+            access_token=self.tok,
+        )
+        self.assertEqual(channel4.code, 200, channel4)
+
+    def test_authed_unrestricted_local_media(self) -> None:
+        """
+        Test that authenticated and restricted media is not available over the old
+        unauthenticated endpoints
+        """
+
+        unrestricted_media_id = self.inject_local_media_and_send_event(
+            authed=True, restricted=False
+        )
+        # request media over authenticated endpoint, should be found
+        channel1 = self.make_request(
+            "GET",
+            f"_matrix/client/v1/media/download/test/{unrestricted_media_id}",
+            access_token=self.tok,
+            shorthand=False,
+        )
+        self.assertEqual(channel1.code, 200, channel1)
+
+        # request same media over unauthenticated media, should raise 404 not found
+        channel2 = self.make_request(
+            "GET",
+            f"_matrix/media/v3/download/test/{unrestricted_media_id}",
+            shorthand=False,
+        )
+        self.assertEqual(channel2.code, 404, channel2)
+
+        # check thumbnails as well
+        params = "?width=32&height=32&method=crop"
+        channel3 = self.make_request(
+            "GET",
+            f"/_matrix/client/v1/media/thumbnail/test/{unrestricted_media_id}{params}",
+            shorthand=False,
+            access_token=self.tok,
+        )
+        self.assertEqual(channel3.code, 200, channel3)
+
+        params = "?width=32&height=32&method=crop"
+        channel4 = self.make_request(
+            "GET",
+            f"/_matrix/media/r0/thumbnail/test/{unrestricted_media_id}{params}",
+            shorthand=False,
+            access_token=self.tok,
+        )
+        self.assertEqual(channel4.code, 404, channel4)
+
+    def test_unauthed_unrestricted_local_media(self) -> None:
+        """
+        Test that unauthenticated but(somehow) restricted media is available over the old
+        unauthenticated endpoints
+        """
+        # First test round, restricted media
+        unrestricted_media_id = self.inject_local_media_and_send_event(
+            authed=False, restricted=False
+        )
+        # request media over authenticated endpoint, should be found
+        channel1 = self.make_request(
+            "GET",
+            f"_matrix/client/v1/media/download/test/{unrestricted_media_id}",
+            access_token=self.tok,
+            shorthand=False,
+        )
+        self.assertEqual(channel1.code, 200, channel1)
+
+        # request same media over unauthenticated media, should be found
+        channel2 = self.make_request(
+            "GET",
+            f"_matrix/media/v3/download/test/{unrestricted_media_id}",
+            shorthand=False,
+        )
+        self.assertEqual(channel2.code, 200, channel2)
+
+        # check thumbnails as well
+        params = "?width=32&height=32&method=crop"
+        channel3 = self.make_request(
+            "GET",
+            f"/_matrix/client/v1/media/thumbnail/test/{unrestricted_media_id}{params}",
+            shorthand=False,
+            access_token=self.tok,
+        )
+        self.assertEqual(channel3.code, 200, channel3)
+
+        params = "?width=32&height=32&method=crop"
+        channel4 = self.make_request(
+            "GET",
+            f"/_matrix/media/r0/thumbnail/test/{unrestricted_media_id}{params}",
+            shorthand=False,
+            access_token=self.tok,
+        )
+        self.assertEqual(channel4.code, 200, channel4)
+
+    def test_restricted_remote_media(self) -> None:
+        restricted_media_id = self.inject_remote_media(restricted=True)
+        channel1 = self.make_request(
+            "GET",
+            f"_matrix/client/v1/media/download/{self.other_server_name}/{restricted_media_id}",
+            access_token=self.tok,
+            shorthand=False,
+        )
+        self.assertEqual(channel1.code, 200, channel1)
+
+        channel2 = self.make_request(
+            "GET",
+            f"_matrix/media/v3/download/{self.other_server_name}/{restricted_media_id}",
+            shorthand=False,
+        )
+        self.assertEqual(channel2.code, 404, channel2)
+
+        params = "?width=32&height=32&method=crop"
+        channel3 = self.make_request(
+            "GET",
+            f"/_matrix/client/v1/media/thumbnail/{self.other_server_name}/{restricted_media_id}{params}",
+            shorthand=False,
+            access_token=self.tok,
+        )
+        self.assertEqual(channel3.code, 200, channel3)
+
+        channel4 = self.make_request(
+            "GET",
+            f"/_matrix/media/r0/thumbnail/{self.other_server_name}/{restricted_media_id}{params}",
+            shorthand=False,
+            access_token=self.tok,
+        )
+        self.assertEqual(channel4.code, 404, channel4)
+
+    def test_authenticated_media_etag(self) -> None:
+        """
+        Test that ETag works correctly with authenticated media over client
+        APIs. This is largely copied from AuthenticatedMediaTestCase above, except to
+        adjust to MSC3911 endpoints and to use this TestCase's helpers
+        """
+        # upload some local media with authentication on
+        if self.enable_restricted_media:
+            media_id = self.upload_restricted_media()
+        else:
+            media_id = self.upload_unrestricted_media()
+
+        # Check standard media endpoint
+        self._check_caching(f"/download/test/{media_id}")
+
+        # check thumbnails as well
+        params = "?width=32&height=32&method=crop"
+        self._check_caching(f"/thumbnail/test/{media_id}{params}")
+
+        # Remote media too?
+        remote_media_id = self.inject_remote_media(restricted=True)
+        self._check_caching(f"/download/{self.other_server_name}/{remote_media_id}")
+
+        params = "?width=32&height=32&method=crop"
+        self._check_caching(
+            f"/thumbnail/{self.other_server_name}/{remote_media_id}{params}"
+        )
+
+    def _check_caching(self, path: str) -> None:
+        """
+        Checks that:
+          1. fetching the path returns an ETag header
+          2. refetching with the ETag returns a 304 without a body
+          3. refetching with the ETag but through unauthenticated endpoint
+             returns 404
+        """
+
+        # Request media over authenticated endpoint, should be found
+        channel1 = self.make_request(
+            "GET",
+            f"/_matrix/client/v1/media{path}",
+            access_token=self.tok,
+            shorthand=False,
+        )
+        self.assertEqual(channel1.code, 200)
+
+        # Should have a single ETag field
+        etags = channel1.headers.getRawHeaders("ETag")
+        self.assertIsNotNone(etags)
+        assert etags is not None  # For mypy
+        self.assertEqual(len(etags), 1)
+        etag = etags[0]
+
+        # Refetching with the etag should result in 304 and empty body.
+        channel2 = self.make_request(
+            "GET",
+            f"/_matrix/client/v1/media{path}",
+            access_token=self.tok,
+            shorthand=False,
+            custom_headers=[("If-None-Match", etag)],
+        )
+        self.assertEqual(channel2.code, 304)
+        self.assertEqual(channel2.is_finished(), True)
+        self.assertNotIn("body", channel2.result)
+
+        # Refetching with the etag but no access token should result in 404.
+        channel3 = self.make_request(
+            "GET",
+            f"/_matrix/media/r0{path}",
+            shorthand=False,
+            custom_headers=[("If-None-Match", etag)],
+        )
+        self.assertEqual(channel3.code, 404)
+
+
+class MediaStorageSha256PathCompatTestCase(unittest.HomeserverTestCase):
+    servlets = [
+        media.register_servlets,
+        login.register_servlets,
+        admin.register_servlets,
+    ]
+    use_isolated_media_paths = True
+
+    def default_config(self) -> JsonDict:
+        config = super().default_config()
+        config.setdefault("experimental_features", {})
+        config["experimental_features"].update({"msc3911": {"enabled": True}})
+        config["enable_local_media_storage_deduplication"] = True
+        return config
+
+    def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
+        super().prepare(reactor, clock, hs)
+        self.repo = hs.get_media_repository()
+        self.user = self.register_user("user", "pass")
+        self.tok = self.login("user", "pass")
+
+    def _create_local_media_with_sha256_path(self) -> str:
+        """Create local media with sha256 path."""
+        assert isinstance(self.repo, MediaRepository)
+        media_id = random_string(24)
+        # Curate a specialized FileInfo that includes sha256 data, then file will be
+        # forced to the new sha256 path
+        file_info = FileInfo(
+            server_name=None,
+            file_id=media_id,
+            sha256=SMALL_PNG_SHA256,
+        )
+
+        expected_path = self.repo.filepaths.filepath_sha(SMALL_PNG_SHA256)
+        ctx = self.repo.media_storage.store_into_file(file_info)
+        (f, fname) = self.get_success(ctx.__aenter__())
+        f.write(SMALL_PNG)
+        self.get_success(ctx.__aexit__(None, None, None))
+
+        # Insert the appropriate data into the database, so lookups work as expected
+        self.get_success(
+            self.repo.store.store_local_media(
+                media_id=media_id,
+                media_type="image/png",
+                time_now_ms=self.clock.time_msec(),
+                upload_name="original_media",
+                media_length=67,
+                user_id=UserID.from_string(self.user),
+                sha256=SMALL_PNG_SHA256,
+                quarantined_by=None,
+                restricted=False,
+            )
+        )
+        assert expected_path == fname
+        assert os.path.exists(fname), f"File does not exist: {fname}"
+        assert os.path.exists(expected_path), f"File does not exist: {expected_path}"
+
+        # Some tests expect thumbnails, remember to generate them
+        self.get_success(
+            self.repo._generate_thumbnails(
+                server_name=None,
+                media_id=media_id,
+                file_id=media_id,
+                media_type="image/png",
+                sha256=SMALL_PNG_SHA256,
+            )
+        )
+        return media_id
+
+    def _create_local_media_with_media_id_path(self) -> str:
+        """Create local media with media id path."""
+        assert isinstance(self.repo, MediaRepository)
+        media_id = random_string(24)
+        # Curate a specialized FileInfo that is lacking sha256 data, then file will be
+        # forced to the old media_id path
+        file_info = FileInfo(
+            server_name=None,
+            file_id=media_id,
+        )
+
+        expected_path = self.repo.filepaths.local_media_filepath(media_id)
+        ctx = self.repo.media_storage.store_into_file(file_info)
+        (f, fname) = self.get_success(ctx.__aenter__())
+        f.write(SMALL_PNG)
+        self.get_success(ctx.__aexit__(None, None, None))
+
+        # Insert the appropriate data into the database, so lookups work as expected
+        self.get_success(
+            self.repo.store.store_local_media(
+                media_id=media_id,
+                media_type="image/png",
+                time_now_ms=self.clock.time_msec(),
+                upload_name="original_media",
+                media_length=67,
+                user_id=UserID.from_string(self.user),
+                sha256=SMALL_PNG_SHA256,
+                quarantined_by=None,
+                restricted=False,
+            )
+        )
+        assert expected_path == fname
+        assert os.path.exists(fname), f"File does not exist: {fname}"
+        assert os.path.exists(expected_path), f"File does not exist: {expected_path}"
+
+        # Some tests expect thumbnails, remember to generate them
+        self.get_success(
+            self.repo._generate_thumbnails(
+                server_name=None,
+                media_id=media_id,
+                file_id=media_id,
+                media_type="image/png",
+                # We purposely do not use the sha256 here, as it directly causes the sha256
+                # path for thumbnails to be populated, and that is not what we are looking
+                # for.
+                sha256=None,
+            )
+        )
+        return media_id
+
+    async def _mock_federation_download_media(
+        self,
+        destination: str,
+        media_id: str,
+        output_stream: BinaryIO,
+        max_size: int,
+        max_timeout_ms: int,
+        download_ratelimiter: Ratelimiter,
+        ip_address: str,
+    ) -> tuple[int, dict[bytes, list[bytes]]]:
+        output_stream.write(SMALL_PNG)
+        output_stream.flush()
+        headers = {
+            b"Content-Type": [b"image/png"],
+            b"Content-Disposition": [b"attachment; filename=test.png"],
+            b"Content-Length": [b"67"],
+        }
+        return 67, headers
+
+    def test_download_remote_media_saves_file_in_sha256_path(self) -> None:
+        """Test downloading remote media using sha256 path via download endpoint."""
+        # Mock the federation download media
+        self.repo.client.federation_download_media = (  # type: ignore
+            self._mock_federation_download_media
+        )
+
+        # Download remote media with media_id path
+        remote_server = "remote.org"
+        media_id = random_string(24)
+        channel = self.make_request(
+            "GET",
+            f"/_matrix/client/v1/media/download/{remote_server}/{media_id}",
+            shorthand=False,
+            access_token=self.tok,
+        )
+        assert channel.code == 200
+        assert isinstance(self.repo, MediaRepository)
+        assert os.path.exists(self.repo.filepaths.filepath_sha(SMALL_PNG_SHA256))
+
+        # Check if the file is saved in the cached_remote_media table.
+        remote_media = self.get_success(
+            self.repo.store.get_cached_remote_media(remote_server, media_id)
+        )
+        assert remote_media is not None
+        # Make sure that the media_id path does not exist.
+        assert not os.path.exists(
+            self.repo.filepaths.remote_media_filepath(
+                remote_server, remote_media.filesystem_id
+            )
+        )
+
+    def test_download_local_media_with_media_id_path(
+        self,
+    ) -> None:
+        """Test that downloading local media with media_id path serves correct file.
+        Specifically, that a preexisting file on the media id path(legacy) can still be
+        served from its present location.
+        """
+        media_id = self._create_local_media_with_media_id_path()
+        channel = self.make_request(
+            "GET",
+            f"/_matrix/client/v1/media/download/{self.hs.hostname}/{media_id}",
+            shorthand=False,
+            access_token=self.tok,
+        )
+        assert channel.code == 200
+        assert channel.result["body"] == SMALL_PNG
+
+    def test_download_local_media_with_sha256_path(self) -> None:
+        """Test that downloading local media with sha256 path serves correct file."""
+        media_id = self._create_local_media_with_sha256_path()
+        channel = self.make_request(
+            "GET",
+            f"/_matrix/client/v1/media/download/{self.hs.hostname}/{media_id}",
+            shorthand=False,
+            access_token=self.tok,
+        )
+        assert channel.code == 200
+        assert channel.result["body"] == SMALL_PNG
+
+    def test_copy_remote_media_with_sha256_path(self) -> None:
+        """Test that copying remote media saves file in sha256 path."""
+        # Mock the federation download media
+        self.repo.client.federation_download_media = (  # type: ignore
+            self._mock_federation_download_media
+        )
+
+        # Copy remote media
+        remote_server = "remote.org"
+        media_id = random_string(24)
+        channel = self.make_request(
+            "POST",
+            f"/_matrix/client/unstable/org.matrix.msc3911/media/copy/{remote_server}/{media_id}",
+            shorthand=False,
+            access_token=self.tok,
+        )
+        assert channel.code == 200, channel.result
+        assert "content_uri" in channel.json_body
+        copied_media_mxc_uri = MXCUri.from_str(channel.json_body["content_uri"])
+        assert copied_media_mxc_uri.media_id != media_id
+
+        # Check if both original and copied media are stored in the media table.
+        remote_media = self.get_success(
+            self.repo.store.get_cached_remote_media(remote_server, media_id)
+        )
+        assert remote_media is not None
+        assert remote_media.sha256 == SMALL_PNG_SHA256
+
+        copied_media = self.get_success(
+            self.repo.store.get_local_media(copied_media_mxc_uri.media_id)
+        )
+        assert copied_media is not None
+        assert copied_media.sha256 == SMALL_PNG_SHA256
+
+        # Check if the file is saved in the sha256 path only.
+        assert isinstance(self.repo, MediaRepository)
+        assert os.path.exists(self.repo.filepaths.filepath_sha(SMALL_PNG_SHA256))
+        # It should NOT exist in either of the legacy paths
+        assert not os.path.exists(
+            self.repo.filepaths.remote_media_filepath(
+                remote_server, remote_media.filesystem_id
+            )
+        )
+        assert not os.path.exists(
+            self.repo.filepaths.local_media_filepath(copied_media_mxc_uri.media_id)
+        )
+
+    def test_copy_local_media_with_media_id(self) -> None:
+        """Test that copying media with media_id path works correctly, when sha256 path is enabled."""
+        # Create local media with media_id path.
+        media_id = self._create_local_media_with_media_id_path()
+
+        # Copy local media.
+        channel = self.make_request(
+            "POST",
+            f"/_matrix/client/unstable/org.matrix.msc3911/media/copy/{self.hs.hostname}/{media_id}",
+            shorthand=False,
+            access_token=self.tok,
+        )
+        assert channel.code == 200, channel.result
+        assert "content_uri" in channel.json_body
+        copied_media_mxc_uri = MXCUri.from_str(channel.json_body["content_uri"])
+        assert copied_media_mxc_uri.media_id != media_id
+
+        # Check if both original and copied media are stored in the media table.
+        original_media = self.get_success(self.repo.store.get_local_media(media_id))
+        assert original_media is not None
+        assert original_media.sha256 == SMALL_PNG_SHA256
+
+        copied_media = self.get_success(
+            self.repo.store.get_local_media(copied_media_mxc_uri.media_id)
+        )
+        assert copied_media is not None
+        assert copied_media.sha256 == SMALL_PNG_SHA256
+
+        # The copy should create a new media id, and recreate the file in the sha256 path.
+        assert isinstance(self.repo, MediaRepository)
+        assert os.path.exists(self.repo.filepaths.filepath_sha(SMALL_PNG_SHA256))
+        assert os.path.exists(self.repo.filepaths.local_media_filepath(media_id))
+        # Copy operation does not delete the original file with media_id path.
+        assert not os.path.exists(
+            self.repo.filepaths.local_media_filepath(copied_media_mxc_uri.media_id)
+        )
+
+    def test_copy_local_media_with_sha256_path(self) -> None:
+        """Test that copying media with sha256 path works correctly."""
+        # Create local media with sha256 path.
+        media_id = self._create_local_media_with_sha256_path()
+
+        # Copy local media.
+        channel = self.make_request(
+            "POST",
+            f"/_matrix/client/unstable/org.matrix.msc3911/media/copy/{self.hs.hostname}/{media_id}",
+            shorthand=False,
+            access_token=self.tok,
+        )
+        assert channel.code == 200, channel.result
+        assert "content_uri" in channel.json_body
+        copied_media_mxc_uri = MXCUri.from_str(channel.json_body["content_uri"])
+        assert copied_media_mxc_uri.media_id != media_id
+
+        # Check if both original and copied media are stored in the media table.
+        original_media = self.get_success(self.repo.store.get_local_media(media_id))
+        assert original_media is not None
+        assert original_media.sha256 == SMALL_PNG_SHA256
+
+        copied_media = self.get_success(
+            self.repo.store.get_local_media(copied_media_mxc_uri.media_id)
+        )
+        assert copied_media is not None
+        assert copied_media.sha256 == SMALL_PNG_SHA256
+
+        # The copy shouldn't create any new files, besides the one already in the sha256 path.
+        assert isinstance(self.repo, MediaRepository)
+        assert os.path.exists(self.repo.filepaths.filepath_sha(SMALL_PNG_SHA256))
+        assert not os.path.exists(self.repo.filepaths.local_media_filepath(media_id))
+        assert not os.path.exists(
+            self.repo.filepaths.local_media_filepath(copied_media_mxc_uri.media_id)
+        )
+
+    def test_upload_local_media_with_sha256_path(self) -> None:
+        """Test uploading local media with sha256 path."""
+        # Upload local media.
+        channel = self.make_request(
+            "POST",
+            "_matrix/client/unstable/org.matrix.msc3911/media/upload?filename=test_png_upload",
+            SMALL_PNG,
+            self.tok,
+            shorthand=False,
+            content_type=b"image/png",
+            custom_headers=[("Content-Length", str(67))],
+        )
+        self.assertEqual(channel.code, 200, channel.json_body)
+
+        res = channel.json_body.get("content_uri")
+        assert res is not None
+        _, media_id = res.rsplit("/", maxsplit=1)
+
+        # Check if the media is saved in the media table.
+        local_media_info = self.get_success(self.repo.store.get_local_media(media_id))
+        assert local_media_info is not None
+        assert local_media_info.sha256 == SMALL_PNG_SHA256
+
+        # Check if the file is saved in the sha256 path.
+        assert isinstance(self.repo, MediaRepository)
+        assert os.path.exists(self.repo.filepaths.filepath_sha(SMALL_PNG_SHA256))
+        # It should not be created on the legacy path
+        assert not os.path.exists(self.repo.filepaths.local_media_filepath(media_id))
+
+    def test_download_local_thumbnail_with_media_id(self) -> None:
+        """Test downloading thumbnail of local media with media_id path."""
+        # Create local media with media_id path.
+        media_id = self._create_local_media_with_media_id_path()
+
+        # Download thumbnail of the media.
+        channel = self.make_request(
+            "GET",
+            f"/_matrix/client/v1/media/thumbnail/{self.hs.hostname}/{media_id}?width=1&height=1&method=scale",
+            shorthand=False,
+            access_token=self.tok,
+        )
+        assert channel.code == 200, channel.result
+        assert channel.result["body"] is not None
+
+    def test_download_local_thumbnail_with_sha256_path(self) -> None:
+        """Test downloading thumbnail of local media with sha256 path."""
+        # Create local media with sha256 path.
+        media_id = self._create_local_media_with_sha256_path()
+
+        # Download thumbnail of the media.
+        channel = self.make_request(
+            "GET",
+            f"/_matrix/client/v1/media/thumbnail/{self.hs.hostname}/{media_id}?width=1&height=1&method=scale",
+            shorthand=False,
+            access_token=self.tok,
+        )
+        assert channel.code == 200, channel.result
+        assert channel.result["body"] is not None
+
+        # Check if the thumbnail is stored in the media table.
+        thumbnails = self.get_success(
+            self.repo.store.get_local_media_thumbnails(media_id)
+        )
+        assert thumbnails is not None
+        has_1x1_thumbnail = any(
+            thumb.width == 1 and thumb.height == 1 for thumb in thumbnails
+        )
+        assert has_1x1_thumbnail, "No 1x1 thumbnail found"
+
+        # Check if the thumbnail is saved in the sha256 path, not in the media_id path.
+        assert isinstance(self.repo, MediaRepository)
+        assert os.path.exists(
+            self.repo.filepaths.thumbnail_sha(
+                SMALL_PNG_SHA256, 1, 1, "image/png", "scale"
+            )
+        )
+        assert not os.path.exists(
+            self.repo.filepaths.local_media_thumbnail(
+                media_id, 1, 1, "image/png", "scale"
+            )
+        )
+
+    def test_download_remote_thumbnail_with_sha256_path(self) -> None:
+        """Test downloading thumbnail of remote media saves file in sha256 path."""
+        # Mock the federation download media
+        self.repo.client.federation_download_media = (  # type: ignore
+            self._mock_federation_download_media
+        )
+
+        # Download thumbnail of remote media.
+        remote_server = "remote.org"
+        media_id = random_string(24)
+        channel = self.make_request(
+            "GET",
+            f"/_matrix/client/v1/media/thumbnail/{remote_server}/{media_id}?width=1&height=1&method=scale",
+            shorthand=False,
+            access_token=self.tok,
+        )
+        assert channel.code == 200, channel.result
+        assert channel.result["body"] is not None
+
+        # Check if the thumbnail is saved in the sha256 path.
+        assert isinstance(self.repo, MediaRepository)
+        assert os.path.exists(
+            self.repo.filepaths.thumbnail_sha(
+                SMALL_PNG_SHA256, 1, 1, "image/png", "scale"
+            )
+        )
+        assert not os.path.exists(
+            self.repo.filepaths.remote_media_thumbnail(
+                remote_server, media_id, 1, 1, "image/png", "scale"
+            )
+        )
+
+        # Check if the thumbnail is stored in the media table.
+        thumbnail = self.get_success(
+            self.repo.store.get_remote_media_thumbnail(
+                remote_server, media_id, 1, 1, "image/png"
+            )
+        )
+        assert thumbnail is not None

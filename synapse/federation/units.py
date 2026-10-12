@@ -86,9 +86,7 @@ class Transaction:
         {
             "origin": "foo",
             "prev_ids": ["abc", "def"],
-            "pdus": [
-                ...
-            ],
+            "pdus": [...],
         }
 
     """

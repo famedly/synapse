@@ -30,7 +30,6 @@ from typing import (
     Awaitable,
     BinaryIO,
     Generator,
-    Optional,
 )
 
 import attr
@@ -306,6 +305,7 @@ async def respond_with_multipart_responder(
     media_type: str,
     media_length: int | None,
     upload_name: str | None,
+    json_response: dict | None = None,
 ) -> None:
     """
     Responds to requests originating from the federation media `/download` endpoint by
@@ -359,7 +359,9 @@ async def respond_with_multipart_responder(
             clock,
             request,
             media_type,
-            {},  # Note: if we change this we need to change the returned ETag.
+            json_response
+            if json_response
+            else {},  # Note: if we change this we need to change the returned ETag.
             disposition,
             media_length,
         )
@@ -534,6 +536,8 @@ class FileInfo:
     url_cache: bool = False
     # Whether the file is a thumbnail or not.
     thumbnail: ThumbnailInfo | None = None
+    # The sha256 of the media. When enable_local_media_storage_deduplication is True, this will be generating the filepath.
+    sha256: str | None = None
 
     # The below properties exist to maintain compatibility with third-party modules.
     @property
@@ -706,7 +710,7 @@ class ThreadedFileSender:
 
         self.file: BinaryIO | None = None
         self.deferred: "Deferred[None]" = Deferred()
-        self.consumer: Optional[IConsumer] = None
+        self.consumer: IConsumer | None = None
 
         # Signals if the thread should keep reading/sending data. Set means
         # continue, clear means pause.

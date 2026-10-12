@@ -50,6 +50,22 @@ class MSC3866Config:
     require_approval_for_new_accounts: bool = False
 
 
+@attr.s(auto_attribs=True, frozen=True, slots=True)
+class MSC3911Config:
+    """Configuration for MSC3911 (Linking Media to Events)"""
+
+    # MSC3911 is enabled
+    enabled: bool = False
+
+    # Disable the current media create and upload endpoints
+    block_unrestricted_media_upload: bool = False
+
+    # Delete pending media that is older than certain interval and not attached to any events.
+    purge_pending_unattached_media: bool = False
+    # This configures how often the cleanup loop run in milliseconds
+    pending_media_cleanup_interval_ms: int = 24 * 60 * 60 * 1000  # 1 day
+
+
 class ExperimentalConfig(Config):
     """Config section for enabling experimental features
 
@@ -318,3 +334,7 @@ class ExperimentalConfig(Config):
 
         # MSC4512: Delegating parts of the C-S and S-S API to application services
         self.msc4512_enabled: bool = experimental.get("msc4512_enabled", False)
+
+        # MSC3911: Linking Media to Events
+        raw_msc3911_config = experimental.get("msc3911", {})
+        self.msc3911 = MSC3911Config(**raw_msc3911_config)

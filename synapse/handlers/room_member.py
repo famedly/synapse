@@ -25,6 +25,8 @@ import random
 from http import HTTPStatus
 from typing import TYPE_CHECKING, Iterable
 
+from matrix_common.types.mxc_uri import MXCUri
+
 from synapse import types
 from synapse.api.constants import (
     AccountDataTypes,
@@ -54,6 +56,7 @@ from synapse.logging import opentracing
 from synapse.logging.opentracing import SynapseTags, set_tag, tag_args, trace
 from synapse.metrics import SERVER_NAME_LABEL, event_processing_positions
 from synapse.replication.http.push import ReplicationCopyPusherRestServlet
+from synapse.storage.databases.main.media_repository import LocalMedia
 from synapse.storage.databases.main.state_deltas import StateDelta
 from synapse.storage.invite_rule import InviteRule
 from synapse.types import (
@@ -109,6 +112,7 @@ class RoomMemberHandler(metaclass=abc.ABCMeta):
         self.account_data_handler = hs.get_account_data_handler()
         self.event_auth_handler = hs.get_event_auth_handler()
         self._worker_lock_handler = hs.get_worker_locks_handler()
+        self.msc3911_config = hs.config.experimental.msc3911
 
         self._membership_types_to_include_profile_data_in = {
             Membership.JOIN,
@@ -412,6 +416,7 @@ class RoomMemberHandler(metaclass=abc.ABCMeta):
         origin_server_ts: int | None = None,
         prev_state_events: list[str] | None = None,
         delay_id: str | None = None,
+        media_info_for_attachment: set[LocalMedia] | None = None,
     ) -> tuple[str, int]:
         """
         Internal membership update function to get an existing event or create
@@ -445,6 +450,8 @@ class RoomMemberHandler(metaclass=abc.ABCMeta):
             origin_server_ts: The origin_server_ts to use if a new event is created. Uses
                 the current timestamp if set to None.
             delay_id: The delay ID of this event, if it was a delayed event.
+            media_info_for_attachment: An optional set of LocalMedia objects, for use in
+                restricting media.
 
         Returns:
             Tuple of event ID and stream ordering position
@@ -499,6 +506,13 @@ class RoomMemberHandler(metaclass=abc.ABCMeta):
                     outlier=outlier,
                     prev_state_events=prev_state_events,
                     delay_id=delay_id,
+                    mxc_restriction_list_for_event=[
+                        MXCUri(self._server_name, local_media.media_id)
+                        for local_media in media_info_for_attachment
+                        if local_media
+                    ]
+                    if media_info_for_attachment is not None
+                    else None,
                 )
                 context = await unpersisted_context.persist(event)
                 prev_state_ids = await context.get_prev_state_ids(
@@ -516,6 +530,7 @@ class RoomMemberHandler(metaclass=abc.ABCMeta):
                             events_and_context=[(event, context)],
                             extra_users=[target],
                             ratelimit=ratelimit,
+                            media_info_for_attachment=media_info_for_attachment,
                         )
                     )
 
@@ -536,6 +551,7 @@ class RoomMemberHandler(metaclass=abc.ABCMeta):
 
         # we know it was persisted, so should have a stream ordering
         assert result_event.internal_metadata.stream_ordering
+
         return result_event.event_id, result_event.internal_metadata.stream_ordering
 
     async def copy_room_tags_and_direct_to_room(
@@ -596,6 +612,7 @@ class RoomMemberHandler(metaclass=abc.ABCMeta):
         origin_server_ts: int | None = None,
         prev_state_events: list[str] | None = None,
         delay_id: str | None = None,
+        media_info_for_attachment: set[LocalMedia] | None = None,
     ) -> tuple[str, int]:
         """Update a user's membership in a room.
 
@@ -627,6 +644,8 @@ class RoomMemberHandler(metaclass=abc.ABCMeta):
             origin_server_ts: The origin_server_ts to use if a new event is created. Uses
                 the current timestamp if set to None.
             delay_id: The delay ID of this event, if it was a delayed event.
+            media_info_for_attachment: An optional set of LocalMedia objects, for use in
+                restricting media.
 
         Returns:
             A tuple of the new event ID and stream ID.
@@ -691,6 +710,7 @@ class RoomMemberHandler(metaclass=abc.ABCMeta):
                             origin_server_ts=origin_server_ts,
                             prev_state_events=prev_state_events,
                             delay_id=delay_id,
+                            media_info_for_attachment=media_info_for_attachment,
                         )
 
         return result
@@ -715,6 +735,7 @@ class RoomMemberHandler(metaclass=abc.ABCMeta):
         origin_server_ts: int | None = None,
         prev_state_events: list[str] | None = None,
         delay_id: str | None = None,
+        media_info_for_attachment: set[LocalMedia] | None = None,
     ) -> tuple[str, int]:
         """Helper for update_membership.
 
@@ -748,6 +769,8 @@ class RoomMemberHandler(metaclass=abc.ABCMeta):
             origin_server_ts: The origin_server_ts to use if a new event is created. Uses
                 the current timestamp if set to None.
             delay_id: The delay ID of this event, if it was a delayed event.
+            media_info_for_attachment: An optional set of LocalMedia objects, for use in
+                restricting media.
 
         Returns:
             A tuple of the new event ID and stream ID.
@@ -866,6 +889,85 @@ class RoomMemberHandler(metaclass=abc.ABCMeta):
             except Exception as e:
                 logger.info("Failed to get profile information for %r: %s", target, e)
 
+            if self.msc3911_config.enabled and not media_info_for_attachment:
+                # This code path should only be taken for memberships updating an
+                # avatar url
+                avatar_url = content.get(EventContentFields.MEMBERSHIP_AVATAR_URL)
+                if avatar_url:
+                    # Something about the MediaRepository does not like being part of
+                    # the initialization code of the RoomMemberHandler, so just import
+                    # it on the spot instead.
+                    media_repo = self.hs.get_media_repository()
+
+                    try:
+                        # Run a preflight that this media exists. The http replication
+                        # call should not be a thundering herd of guaranteed http fails.
+                        existing_mxc_uri = MXCUri.from_str(avatar_url)
+                        # The actual info is irrelevant at this stage, just ignore. This
+                        # will raise if the media does not exist
+                        _ = await media_repo.get_media_info(existing_mxc_uri)
+
+                        new_mxc_uri = await media_repo.copy_media(
+                            existing_mxc_uri, requester.user, 20_000
+                        )
+                    except SynapseError:
+                        # The only kind of media copying that should fail is from a
+                        # remote item that has not been seen and cached previously. This
+                        # should already be guarded from in the only circumstances we
+                        # could think of: setting a profile avatar.
+                        #
+                        # If legacy unrestricted media is allowed, this can still be
+                        # triggered. If this happens, ignore it. This allows the avatar
+                        # url to be faithfully set to the given url. All we can do is
+                        # hope that it is not restricted when it finally shows up.
+                        # Guard against other potentials escaping by raising if it
+                        # should occur when unrestricted media begins to be disallowed.
+                        if not self.msc3911_config.block_unrestricted_media_upload:
+                            logger.debug(
+                                "Ignoring media copy request; the media is unknown and "
+                                "will not be treated as restricted"
+                            )
+
+                        else:
+                            # Don't fail the new membership event just because the media
+                            # was not found. Specifically, for:
+                            # * Outgoing remote invites
+                            # * Joins in the context of a new room
+                            # Just remove it, and let the client deal with the lack of
+                            # hint
+                            if effective_membership_state == Membership.INVITE or (
+                                effective_membership_state == Membership.JOIN
+                                and new_room
+                            ):
+                                logger.warning(
+                                    "Unknown media (%s) can not be restricted to "
+                                    "membership event for '%s', dropping avatar from "
+                                    "event",
+                                    avatar_url,
+                                    target,
+                                )
+                                del content[EventContentFields.MEMBERSHIP_AVATAR_URL]
+
+                            else:
+                                # All other types of membership should raise. For
+                                # whatever reason, the media is missing so this should
+                                # not continue
+                                logger.warning(
+                                    "Unknown media (%s) can not be restricted to "
+                                    "membership event for '%s'",
+                                    avatar_url,
+                                    target,
+                                )
+                                raise
+
+                    else:
+                        media_object = await media_repo.get_media_info(new_mxc_uri)
+                        assert isinstance(media_object, LocalMedia)
+                        media_info_for_attachment = {media_object}
+                        content[EventContentFields.MEMBERSHIP_AVATAR_URL] = str(
+                            new_mxc_uri
+                        )
+
         # if this is a join with a 3pid signature, we may need to turn a 3pid
         # invite into a normal invite before we can handle the join.
         if third_party_signed is not None:
@@ -960,6 +1062,7 @@ class RoomMemberHandler(metaclass=abc.ABCMeta):
                 origin_server_ts=origin_server_ts,
                 prev_state_events=prev_state_events,
                 delay_id=delay_id,
+                media_info_for_attachment=media_info_for_attachment,
             )
 
         is_state_dags = False
@@ -1232,6 +1335,7 @@ class RoomMemberHandler(metaclass=abc.ABCMeta):
             origin_server_ts=origin_server_ts,
             prev_state_events=prev_state_events,
             delay_id=delay_id,
+            media_info_for_attachment=media_info_for_attachment,
         )
 
     async def check_for_any_membership_in_room(

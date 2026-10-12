@@ -53,6 +53,7 @@ class BaseUploadServlet(RestServlet):
         self._media_repository_callbacks = (
             hs.get_module_api_callbacks().media_repository
         )
+        self.msc3911_config = hs.config.experimental.msc3911
 
     async def _get_file_metadata(
         self, request: SynapseRequest, user_id: str
@@ -113,6 +114,13 @@ class UploadServlet(BaseUploadServlet):
     PATTERNS = [re.compile("/_matrix/media/(r0|v3|v1)/upload$")]
 
     async def on_POST(self, request: SynapseRequest) -> None:
+        if self.msc3911_config.block_unrestricted_media_upload:
+            raise SynapseError(
+                403,
+                "Unrestricted media upload is disabled",
+                errcode=Codes.FORBIDDEN,
+            )
+
         requester = await self.auth.get_user_by_req(request)
         content_length, upload_name, media_type = await self._get_file_metadata(
             request, requester.user.to_string()
@@ -130,6 +138,45 @@ class UploadServlet(BaseUploadServlet):
 
         logger.info("Uploaded content with URI '%s'", content_uri)
 
+        respond_with_json(
+            request, 200, {"content_uri": str(content_uri)}, send_cors=True
+        )
+
+
+class UploadRestrictedResource(BaseUploadServlet):
+    """
+    MSC3911: This is an unstable API endpoint for uploading "restricted" media. This is
+    equivalent to the existing upload endpoint `/_matrix/media/v3/upload$`, but media
+    is not initially viewable except to the user that uploaded it, until it is attached
+    to an event.
+    """
+
+    PATTERNS = [re.compile("/_matrix/client/unstable/org.matrix.msc3911/media/upload$")]
+
+    async def on_POST(self, request: SynapseRequest) -> None:
+        requester = await self.auth.get_user_by_req(request)
+        content_length, upload_name, media_type = await self._get_file_metadata(
+            request, requester.user.to_string()
+        )
+        try:
+            content: IO = request.content  # type: ignore
+            content_uri = await self.media_repo.create_or_update_content(
+                media_type,
+                upload_name,
+                content,
+                content_length,
+                requester.user,
+                restricted=True,  # Media is marked as restricted.
+            )
+        except SpamMediaException:
+            # For uploading of media we want to respond with a 400, instead of
+            # the default 404, as that would just be confusing.
+            raise SynapseError(400, "Bad content")
+        except Exception as e:
+            logger.error("Failed to upload media: %s", e)
+            raise SynapseError(500, "Failed to upload media")
+
+        logger.info("Uploaded content with URI '%s'", content_uri)
         respond_with_json(
             request, 200, {"content_uri": str(content_uri)}, send_cors=True
         )

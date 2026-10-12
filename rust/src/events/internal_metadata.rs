@@ -66,12 +66,17 @@ enum EventInternalMetadataData {
     TokenId(i64),
     DeviceId(Box<str>),
     CalculatedAuthEventIDs(Vec<String>), // MSC4242: State DAGs
+    MediaReferences(Vec<String>),
 }
 
 impl EventInternalMetadataData {
     /// Convert the field to its name and python object.
     fn to_python_pair<'a>(&self, py: Python<'a>) -> (&'a Bound<'a, PyString>, Bound<'a, PyAny>) {
         match self {
+            EventInternalMetadataData::MediaReferences(o) => (
+                pyo3::intern!(py, "media_references"),
+                o.into_pyobject(py).unwrap().into_any(),
+            ),
             EventInternalMetadataData::OutOfBandMembership(o) => (
                 pyo3::intern!(py, "out_of_band_membership"),
                 o.into_pyobject(py)
@@ -158,6 +163,11 @@ impl EventInternalMetadataData {
         let key_str: PyBackedStr = key.extract()?;
 
         let e = match &*key_str {
+            "media_references" => EventInternalMetadataData::MediaReferences(
+                value
+                    .extract()
+                    .with_context(|| format!("'{key_str}' has invalid type"))?,
+            ),
             "out_of_band_membership" => EventInternalMetadataData::OutOfBandMembership(
                 value
                     .extract()
@@ -473,6 +483,14 @@ impl EventInternalMetadataInner {
 
     pub fn set_calculated_auth_event_ids(&mut self, obj: Vec<String>) {
         set_property!(self, CalculatedAuthEventIDs, obj);
+    }
+
+    pub fn get_media_references(&self) -> Option<&Vec<String>> {
+        get_property_opt!(self, MediaReferences)
+    }
+
+    pub fn set_media_references(&mut self, obj: Vec<String>) {
+        set_property!(self, MediaReferences, obj);
     }
 }
 
@@ -828,6 +846,17 @@ impl EventInternalMetadata {
     #[setter]
     fn set_device_id(&self, obj: String) -> PyResult<()> {
         self.write_inner()?.set_device_id(obj);
+        Ok(())
+    }
+
+    /// The media references for the restrictions being set for this event, if any.
+    #[getter]
+    fn get_media_references(&self) -> PyResult<Option<Vec<String>>> {
+        Ok(self.read_inner()?.get_media_references().cloned())
+    }
+    #[setter]
+    fn set_media_references(&self, obj: Vec<String>) -> PyResult<()> {
+        self.write_inner()?.set_media_references(obj);
         Ok(())
     }
 }

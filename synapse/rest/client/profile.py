@@ -138,6 +138,7 @@ class ProfileFieldRestServlet(RestServlet):
                     r"^/_matrix/client/unstable/uk\.tcpip\.msc4133/profile/(?P<user_id>[^/]*)/(?P<field_name>[^/]*)$"
                 )
             )
+        self.msc3911_config = hs.config.experimental.msc3911
 
     async def on_GET(
         self, request: SynapseRequest, user_id: str, field_name: str

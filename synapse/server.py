@@ -145,7 +145,11 @@ from synapse.http.client import (
 )
 from synapse.http.matrixfederationclient import MatrixFederationHttpClient
 from synapse.logging.context import PreserveLoggingContext
-from synapse.media.media_repository import MediaRepository
+from synapse.media.media_repository import (
+    AbstractMediaRepository,
+    MediaRepository,
+    MediaRepositoryWorker,
+)
 from synapse.metrics import (
     SERVER_NAME_LABEL,
     all_later_gauges_to_clean_up_on_shutdown,
@@ -1012,8 +1016,10 @@ class HomeServer(metaclass=abc.ABCMeta):
         return MediaRepositoryResource(self)
 
     @cache_in_self
-    def get_media_repository(self) -> MediaRepository:
-        return MediaRepository(self)
+    def get_media_repository(self) -> AbstractMediaRepository:
+        if self.config.media.can_load_media_repo:
+            return MediaRepository(self)
+        return MediaRepositoryWorker(self)
 
     @cache_in_self
     def get_federation_transport_client(self) -> TransportLayerClient:

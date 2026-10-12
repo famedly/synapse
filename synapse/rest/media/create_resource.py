@@ -23,7 +23,7 @@ import logging
 import re
 from typing import TYPE_CHECKING
 
-from synapse.api.errors import LimitExceededError
+from synapse.api.errors import Codes, LimitExceededError, SynapseError
 from synapse.api.ratelimiting import Ratelimiter
 from synapse.http.server import respond_with_json
 from synapse.http.servlet import RestServlet
@@ -39,7 +39,9 @@ logger = logging.getLogger(__name__)
 class CreateResource(RestServlet):
     PATTERNS = [re.compile("/_matrix/media/v1/create$")]
 
-    def __init__(self, hs: "HomeServer", media_repo: "MediaRepository"):
+    def __init__(
+        self, hs: "HomeServer", media_repo: "MediaRepository", restricted: bool = False
+    ):
         super().__init__()
 
         self.media_repo = media_repo
@@ -54,8 +56,25 @@ class CreateResource(RestServlet):
             clock=self.clock,
             cfg=hs.config.ratelimiting.rc_media_create,
         )
+        # MSC3911: If this is enabled, this endpoint will not allow media creation,which is unrestricted.
+        self.msc3911_config = hs.config.experimental.msc3911
+        self.restricted = restricted
+
+        if self.restricted:
+            self.PATTERNS = [
+                re.compile("/_matrix/client/unstable/org.matrix.msc3911/media/create")
+            ]
+        else:
+            self.PATTERNS = [re.compile("/_matrix/media/v1/create")]
 
     async def on_POST(self, request: SynapseRequest) -> None:
+        if not self.restricted and self.msc3911_config.block_unrestricted_media_upload:
+            raise SynapseError(
+                403,
+                "Unrestricted media creation is disabled",
+                errcode=Codes.FORBIDDEN,
+            )
+
         requester = await self.auth.get_user_by_req(request)
 
         # If the create media requests for the user are over the limit, drop them.
@@ -78,7 +97,7 @@ class CreateResource(RestServlet):
                 )
 
         content_uri, unused_expires_at = await self.media_repo.create_media_id(
-            requester.user
+            requester.user, restricted=self.restricted
         )
 
         logger.info(

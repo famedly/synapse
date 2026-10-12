@@ -378,6 +378,7 @@ class RestHelper:
         expect_code: int = HTTPStatus.OK,
         custom_headers: Iterable[tuple[AnyStr, AnyStr]] | None = None,
         type: str = "m.room.message",
+        attach_media_mxc: str | None = None,
     ) -> JsonDict:
         if body is None:
             body = "body_text_here"
@@ -392,6 +393,7 @@ class RestHelper:
             tok,
             expect_code,
             custom_headers=custom_headers,
+            attach_media_mxc=attach_media_mxc,
         )
 
     def send_messages(
@@ -429,13 +431,20 @@ class RestHelper:
         tok: str | None = None,
         expect_code: int = HTTPStatus.OK,
         custom_headers: Iterable[tuple[AnyStr, AnyStr]] | None = None,
+        attach_media_mxc: str | None = None,
     ) -> JsonDict:
         if txn_id is None:
             txn_id = "m%s" % (str(time.time()))
 
         path = "/_matrix/client/r0/rooms/%s/send/%s/%s" % (room_id, type, txn_id)
+
+        query_params = {}
         if tok:
-            path = path + "?access_token=%s" % tok
+            query_params["access_token"] = tok
+        if attach_media_mxc:
+            query_params["org.matrix.msc3911.attach_media"] = attach_media_mxc
+        if query_params:
+            path += "?" + urlencode(query_params)
 
         channel = make_request(
             self.reactor,
@@ -538,6 +547,7 @@ class RestHelper:
         expect_code: int = HTTPStatus.OK,
         state_key: str = "",
         method: str = "GET",
+        attach_media_mxc: str | None = None,
     ) -> JsonDict:
         """Read or write some state from a given room
 
@@ -550,6 +560,8 @@ class RestHelper:
             expect_code: The HTTP code to expect in the response
             state_key:
             method: "GET" or "PUT" for reading or writing state, respectively
+            attach_media_mxc: The MXC to attach to the state event, per msc3911. Only makes
+                sense when "PUT"ting the state
 
         Returns:
             The response body from the server
@@ -562,8 +574,14 @@ class RestHelper:
             event_type,
             state_key,
         )
+
+        query_params = {}
         if tok:
-            path = path + "?access_token=%s" % tok
+            query_params["access_token"] = tok
+        if attach_media_mxc:
+            query_params["org.matrix.msc3911.attach_media"] = attach_media_mxc
+        if query_params:
+            path += "?" + urlencode(query_params)
 
         # Set request body if provided
         content = b""
@@ -615,6 +633,7 @@ class RestHelper:
         tok: str | None = None,
         expect_code: int = HTTPStatus.OK,
         state_key: str = "",
+        attach_media_mxc: str | None = None,
     ) -> JsonDict:
         """Set some state in a room
 
@@ -625,6 +644,7 @@ class RestHelper:
             tok: The access token to use
             expect_code: The HTTP code to expect in the response
             state_key:
+            attach_media_mxc: The media MXC uri to attach to this state event
 
         Returns:
             The response body from the server
@@ -633,7 +653,14 @@ class RestHelper:
             AssertionError: if expect_code doesn't match the HTTP code we received
         """
         return self._read_write_state(
-            room_id, event_type, body, tok, expect_code, state_key, method="PUT"
+            room_id,
+            event_type,
+            body,
+            tok,
+            expect_code,
+            state_key,
+            method="PUT",
+            attach_media_mxc=attach_media_mxc,
         )
 
     def upload_media(
@@ -658,6 +685,33 @@ class RestHelper:
             "POST",
             path,
             content=image_data,
+            access_token=tok,
+        )
+
+        assert channel.code == expect_code, "Expected: %d, got: %d, resp: %r" % (
+            expect_code,
+            channel.code,
+            channel.result["body"],
+        )
+
+        return channel.json_body
+
+    def create_media_id_v1(
+        self,
+        tok: str,
+        expect_code: int = HTTPStatus.OK,
+    ) -> JsonDict:
+        """Create the media ID that can be uploaded to later
+        Args:
+            tok: The user token to use during the upload
+            expect_code: The return code to expect from attempting to upload the media
+        """
+        path = "/_matrix/media/v1/create"
+        channel = make_request(
+            self.reactor,
+            self.site,
+            "POST",
+            path,
             access_token=tok,
         )
 

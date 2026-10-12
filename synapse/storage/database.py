@@ -1567,10 +1567,7 @@ class DatabasePool:
                     ("!room2:example.org", "@user2:example.org"),
                 ],
                 value_names=("wombat_count", "is_updated"),
-                value_values=[
-                    (42, True),
-                    (7, False)
-                ],
+                value_values=[(42, True), (7, False)],
             )
             ```
 
