@@ -47,6 +47,7 @@ from synapse.http.servlet import (
 )
 from synapse.http.site import SynapseRequest
 from synapse.media._base import DEFAULT_MAX_TIMEOUT_MS, MAXIMUM_ALLOWED_MAX_TIMEOUT_MS
+from synapse.media.media_repository import MediaRepository
 from synapse.media.thumbnailer import ANIMATED_THUMBNAIL_TYPE, ThumbnailProvider
 from synapse.types import JsonDict
 from synapse.util import SYNAPSE_VERSION
@@ -868,6 +869,7 @@ class FederationMediaThumbnailServlet(BaseFederationServerServlet):
         super().__init__(hs, authenticator, ratelimiter, server_name)
         self.media_repo = self.hs.get_media_repository()
         self.dynamic_thumbnails = hs.config.media.dynamic_thumbnails
+        assert isinstance(self.media_repo, MediaRepository)
         self.thumbnail_provider = ThumbnailProvider(
             hs, self.media_repo, self.media_repo.media_storage
         )
@@ -906,6 +908,7 @@ class FederationMediaThumbnailServlet(BaseFederationServerServlet):
             await self.thumbnail_provider.respond_local_thumbnail(
                 request, media_id, width, height, method, m_type, max_timeout_ms, True
             )
+        assert isinstance(self.media_repo, MediaRepository)
         self.media_repo.mark_recently_accessed(None, media_id)
 
 

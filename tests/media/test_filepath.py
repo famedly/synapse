@@ -25,6 +25,7 @@ from typing import Iterable
 from synapse.media.filepath import MediaFilePaths, _wrap_with_jail_check
 
 from tests import unittest
+from tests.test_utils import SMALL_PNG_SHA256, SMALL_PNG_SHA256_PATH
 
 
 class MediaFilePathsTestCase(unittest.TestCase):
@@ -600,3 +601,44 @@ class MediaFilePathsJailTestCase(unittest.TestCase):
         filepaths = MediaFilePaths(os.path.abspath(media_store_path))
         self._check_relative_path(filepaths, "url_cache/2020-01-02/GerZNDnDZVjsOtar")
         self._check_absolute_path(filepaths, "url_cache/2020-01-02/GerZNDnDZVjsOtar")
+
+
+class MediaSha256FilePathsTestCase(unittest.TestCase):
+    def setUp(self) -> None:
+        super().setUp()
+        self.filepaths = MediaFilePaths("/media_store")
+
+    def test_media_filepath(self) -> None:
+        """Test media paths with sha256."""
+        self.assertEqual(
+            self.filepaths.filepath_sha_rel(SMALL_PNG_SHA256),
+            SMALL_PNG_SHA256_PATH,
+        )
+        self.assertEqual(
+            self.filepaths.filepath_sha(SMALL_PNG_SHA256),
+            "/media_store/" + SMALL_PNG_SHA256_PATH,
+        )
+
+    def test_media_thumbnail_sha_path(self) -> None:
+        """Test sha256 path of thumbnails."""
+        self.assertEqual(
+            self.filepaths.thumbnail_sha_rel(
+                SMALL_PNG_SHA256, 800, 600, "image/jpeg", "scale"
+            ),
+            "thumbnails/" + SMALL_PNG_SHA256_PATH + "/800-600-image-jpeg-scale",
+        )
+        self.assertEqual(
+            self.filepaths.thumbnail_sha(
+                SMALL_PNG_SHA256, 800, 600, "image/jpeg", "scale"
+            ),
+            "/media_store/thumbnails/"
+            + SMALL_PNG_SHA256_PATH
+            + "/800-600-image-jpeg-scale",
+        )
+
+    def test_thumbnail_sha_dir(self) -> None:
+        """Test thumbnail directory paths with sha256."""
+        self.assertEqual(
+            self.filepaths.thumbnail_sha_dir(SMALL_PNG_SHA256),
+            "/media_store/thumbnails/" + SMALL_PNG_SHA256_PATH,
+        )

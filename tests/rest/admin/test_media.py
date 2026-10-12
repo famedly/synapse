@@ -30,6 +30,7 @@ import synapse.rest.admin
 from synapse.api.errors import Codes
 from synapse.media._base import FileInfo
 from synapse.media.filepath import MediaFilePaths
+from synapse.media.media_repository import MediaRepository
 from synapse.rest.client import login, media, profile, room
 from synapse.server import HomeServer
 from synapse.util.clock import Clock
@@ -68,8 +69,9 @@ class QueryMediaByIDTestCase(_AdminMediaTests):
 
     def _cache_remote_media(self, file_id: str) -> None:
         file_info = FileInfo(server_name="remote.com", file_id=file_id)
-
-        media_storage = self.hs.get_media_repository().media_storage
+        media_repo = self.hs.get_media_repository()
+        assert isinstance(media_repo, MediaRepository)
+        media_storage = media_repo.media_storage
 
         ctx = media_storage.store_into_file(file_info)
         (f, fname) = self.get_success(ctx.__aenter__())
@@ -215,6 +217,8 @@ class QueryMediaByIDTestCase(_AdminMediaTests):
 
 
 class DeleteMediaByIDTestCase(_AdminMediaTests):
+    use_isolated_media_paths = True
+
     def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
         self.server_name = hs.hostname
 
@@ -369,6 +373,7 @@ class DeleteMediaByDateSizeTestCase(_AdminMediaTests):
         profile.register_servlets,
         room.register_servlets,
     ]
+    use_isolated_media_paths = True
 
     def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
         self.media_repo = hs.get_media_repository_resource()

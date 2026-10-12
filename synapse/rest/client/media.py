@@ -23,8 +23,11 @@
 import logging
 import re
 
+from matrix_common.types.mxc_uri import MXCUri
+
 from synapse.api.errors import (
     Codes,
+    NotFoundError,
     SynapseError,
     UnrecognizedRequestError,
     cs_error,
@@ -40,6 +43,7 @@ from synapse.http.servlet import (
     RestServlet,
     parse_boolean,
     parse_integer,
+    parse_json_object_from_request,
     parse_string,
 )
 from synapse.http.site import SynapseRequest
@@ -51,7 +55,11 @@ from synapse.media._base import (
 from synapse.media.media_repository import MediaRepository
 from synapse.media.media_storage import MediaStorage
 from synapse.media.thumbnailer import ANIMATED_THUMBNAIL_TYPE, ThumbnailProvider
+from synapse.rest.media.create_resource import CreateResource
+from synapse.rest.media.upload_resource import UploadRestrictedResource
 from synapse.server import HomeServer
+from synapse.storage.databases.main.media_repository import LocalMedia, RemoteMedia
+from synapse.types import Requester
 from synapse.util.stringutils import parse_and_validate_server_name
 
 logger = logging.getLogger(__name__)
@@ -161,7 +169,7 @@ class ThumbnailResource(RestServlet):
     ) -> None:
         # Validate the server name, raising if invalid
         parse_and_validate_server_name(server_name)
-        await self.auth.get_user_by_req(request, allow_guest=True)
+        requester = await self.auth.get_user_by_req(request, allow_guest=True)
 
         set_cors_headers(request)
         set_corp_headers(request)
@@ -188,6 +196,7 @@ class ThumbnailResource(RestServlet):
                     max_timeout_ms,
                     False,
                     animated=animated,
+                    requester=requester,
                 )
             else:
                 await self.thumbnailer.respond_local_thumbnail(
@@ -199,6 +208,7 @@ class ThumbnailResource(RestServlet):
                     m_type,
                     max_timeout_ms,
                     False,
+                    requester,
                 )
             self.media_repo.mark_recently_accessed(None, media_id)
         else:
@@ -224,6 +234,7 @@ class ThumbnailResource(RestServlet):
                     ip_address,
                     True,
                     animated=animated,
+                    requester=requester,
                 )
             else:
                 await self.thumbnailer.respond_remote_thumbnail(
@@ -237,6 +248,7 @@ class ThumbnailResource(RestServlet):
                     max_timeout_ms,
                     ip_address,
                     True,
+                    requester=requester,
                 )
             self.media_repo.mark_recently_accessed(server_name, media_id)
 
@@ -264,7 +276,9 @@ class DownloadResource(RestServlet):
         # Validate the server name, raising if invalid
         parse_and_validate_server_name(server_name)
 
-        requester = await self.auth.get_user_by_req(request, allow_guest=True)
+        requester = requester = await self.auth.get_user_by_req(
+            request, allow_guest=True
+        )
         is_admin = await self.auth.is_server_admin(requester)
         bypass_quarantine = False
         if parse_string(request, "admin_unsafely_bypass_quarantine") == "true":
@@ -310,6 +324,7 @@ class DownloadResource(RestServlet):
                 file_name,
                 max_timeout_ms,
                 bypass_quarantine=bypass_quarantine,
+                requester=requester,
             )
         else:
             ip_address = request.getClientAddress().host
@@ -322,12 +337,123 @@ class DownloadResource(RestServlet):
                 ip_address,
                 True,
                 bypass_quarantine=bypass_quarantine,
+                requester=requester,
             )
+
+
+class CopyResource(RestServlet):
+    """
+    MSC3911: This is an unstable endpoint that is introduced in msc3911 scope. This
+    "copy" api is to be used by clients when forwarding events with media attachments.
+    Rather than just allowing clients to attach media to multiple events, this ensures
+    that the list of events attached to a media does not grow over time, so that servers
+    can reliably cache media and impose the correct access restrictions.
+    """
+
+    # Stable: /_matrix/client/v1/media/copy/{serverName}/{mediaId}
+    PATTERNS = [
+        re.compile(
+            "/_matrix/client/unstable/org.matrix.msc3911/media/copy/(?P<server_name>[^/]*)/(?P<media_id>[^/]*)"
+        )
+    ]
+
+    def __init__(self, hs: "HomeServer", media_repo: "MediaRepository"):
+        super().__init__()
+        self.store = hs.get_datastores().main
+        self.media_repo = media_repo
+        self.auth = hs.get_auth()
+        self._is_mine_server_name = hs.is_mine_server_name
+        self.limits_dict = {"m.upload.size": hs.config.media.max_upload_size}
+        self.media_repository_callbacks = hs.get_module_api_callbacks().media_repository
+        self.clock = hs.get_clock()
+
+    async def _validate_user_media_limit(
+        self, requester: Requester, media_info: LocalMedia | RemoteMedia | None
+    ) -> None:
+        """Check if the request exceeds the user's media limits."""
+        media_config = await self.media_repository_callbacks.get_media_config_for_user(
+            requester.user.to_string(),
+        )
+        if not media_config:
+            media_config = self.limits_dict
+
+        max_upload_size = media_config.get("m.upload.size")
+        if max_upload_size and media_info and media_info.media_length:
+            # We are not counting the amount of media the user uploaded in a previous time period
+            if media_info.media_length > max_upload_size:
+                raise SynapseError(400, Codes.RESOURCE_LIMIT_EXCEEDED)
+
+    async def on_POST(
+        self,
+        request: SynapseRequest,
+        server_name: str,
+        media_id: str,
+    ) -> None:
+        """
+        Handles copying a media item referenced by server_name and media_id.
+        Returns a new MXC URI for the copied media.
+        """
+        requester = await self.auth.get_user_by_req(request)
+
+        # Optionally parse request body, must be a JSON object, but no required params.
+        _ = parse_json_object_from_request(request, allow_empty_body=True)
+        max_timeout_ms = parse_integer(
+            request, "timeout_ms", default=DEFAULT_MAX_TIMEOUT_MS
+        )
+        max_timeout_ms = min(max_timeout_ms, MAXIMUM_ALLOWED_MAX_TIMEOUT_MS)
+
+        media_info: LocalMedia | RemoteMedia | None = None
+        if self._is_mine_server_name(server_name):
+            media_info = await self.media_repo.get_local_media_info(
+                request, media_id, max_timeout_ms
+            )
+        else:
+            media_info = await self.media_repo.get_remote_media_info(
+                server_name,
+                media_id,
+                max_timeout_ms,
+                request.getClientAddress().host,
+                use_federation=True,
+                allow_authenticated=True,
+                requester=requester,
+            )
+
+        if not media_info:
+            raise NotFoundError()
+        if media_info.quarantined_by:
+            raise NotFoundError()
+
+        await self._validate_user_media_limit(requester, media_info)
+
+        if media_info:
+            try:
+                mxc_uri = await self.media_repo.copy_media(
+                    MXCUri(server_name=server_name, media_id=media_id),
+                    requester.user,
+                    max_timeout_ms=max_timeout_ms,
+                )
+
+                respond_with_json(
+                    request,
+                    200,
+                    {"content_uri": str(mxc_uri)},
+                    send_cors=True,
+                )
+            except Exception as e:
+                logger.error("Failed to copy media: %s", e)
+                respond_with_json(request, 500, {"error": "Failed to copy media"})
 
 
 def register_servlets(hs: "HomeServer", http_server: HttpServer) -> None:
     media_repo = hs.get_media_repository()
+    # None of these endpoints should be mounted on something that isn't a proper media
+    # worker, so this is safe to make mypy hush
+    assert isinstance(media_repo, MediaRepository)
     PreviewURLServlet(hs, media_repo, media_repo.media_storage).register(http_server)
     MediaConfigResource(hs).register(http_server)
     ThumbnailResource(hs, media_repo, media_repo.media_storage).register(http_server)
     DownloadResource(hs, media_repo).register(http_server)
+    if hs.config.experimental.msc3911.enabled:
+        CreateResource(hs, media_repo, restricted=True).register(http_server)
+        UploadRestrictedResource(hs, media_repo).register(http_server)
+        CopyResource(hs, media_repo).register(http_server)

@@ -21,7 +21,10 @@
 import logging
 import random
 from bisect import bisect_right
+from http import HTTPStatus
 from typing import TYPE_CHECKING
+
+from matrix_common.types.mxc_uri import MXCUri
 
 from twisted.internet.defer import CancelledError
 
@@ -117,6 +120,8 @@ class ProfileHandler:
         )
         self._set_profile_field_client = ReplicationProfileSetField.make_client(self.hs)
         self._profile_updates_writer_instance = self.hs.config.worker.writers.events[0]
+
+        self.msc3911_config = hs.config.experimental.msc3911
 
     async def get_profile(self, user_id: str, ignore_backoff: bool = True) -> JsonDict:
         """
@@ -333,6 +338,95 @@ class ProfileHandler:
 
             return result.get("avatar_url")
 
+    async def validate_avatar_url(self, avatar_url: str, requester: Requester) -> bool:
+        """
+        Validate avatar_url to make sure the media is owned by the requester or media
+        is already attached to other event or profile.
+
+        Args:
+            avatar_url: The raw avatar_url arg of request
+            requester: The user making the request
+
+        Returns:
+            Whether the media still needs to be attached to the requester's profile.
+            False if it is already attached to it, so setting it again is a no-op.
+
+        Raises:
+            SynapseError: If any of the media is inappropriate or if the requester was not
+                allowed to attach the media
+        """
+        if not avatar_url.startswith("mxc://"):
+            avatar_url = f"mxc://{avatar_url}"
+        mxc_uri = MXCUri.from_str(avatar_url)
+
+        media_info: LocalMedia | RemoteMedia | None
+        if self._is_mine_server_name(mxc_uri.server_name):
+            media_info = await self.hs.get_datastores().main.get_local_media(
+                mxc_uri.media_id
+            )
+            if not media_info:
+                # Locally, if there is no data on this, it implies they are making up
+                # things. Or, maybe, that they forgot to do a `/copy` first. Let them
+                # known
+                raise SynapseError(
+                    HTTPStatus.BAD_REQUEST,
+                    f"The media attachment request is invalid as the media '{mxc_uri.media_id}' does not exist",
+                    Codes.INVALID_PARAM,
+                )
+
+            elif media_info.user_id != requester.user.to_string():
+                # Media doesn't belong to the requester. Nope
+                raise SynapseError(
+                    HTTPStatus.BAD_REQUEST,
+                    f"The media attachment request is invalid as the media '{mxc_uri.media_id}' does not exist",
+                    Codes.INVALID_PARAM,
+                )
+        else:
+            media_info = await self.hs.get_datastores().main.get_cached_remote_media(
+                mxc_uri.server_name, mxc_uri.media_id
+            )
+            # When our local user has attempted to set a profile avatar to a remote
+            # piece of media, but the local server has not actually seen it, only
+            # complain if unrestricted media is disabled, otherwise just allow it. Later
+            # when/if the new profile data is propagated to each room's membership
+            # event, it will either be copied/passed along/dropped depending on the
+            # above circumstances
+            if not media_info:
+                if self.msc3911_config.block_unrestricted_media_upload:
+                    # The user should have done a COPY on this media previous to this
+                    # attempt to set
+                    raise SynapseError(
+                        HTTPStatus.NOT_FOUND,
+                        "Profile request to update avatar to remote media can not proceed, a /copy request should have happened first",
+                        errcode=Codes.NOT_FOUND,
+                    )
+                # For backwards compatible behavior, treat the media as unrestricted
+                return True
+
+        if (
+            self.msc3911_config.block_unrestricted_media_upload
+            and not media_info.restricted
+        ):
+            raise SynapseError(
+                HTTPStatus.BAD_REQUEST,
+                f"The media attachment request is invalid as the media '{mxc_uri.media_id}' is not restricted",
+                Codes.INVALID_PARAM,
+            )
+        if media_info.restricted and media_info.attachments:
+            attachments = media_info.attachments
+            if (
+                not attachments.event_id
+                and attachments.profile_user_id == requester.user
+            ):
+                return False
+            if attachments.event_id or attachments.profile_user_id:
+                raise SynapseError(
+                    HTTPStatus.BAD_REQUEST,
+                    f"The media attachment request is invalid as the media '{mxc_uri.media_id}' is already attached",
+                    Codes.INVALID_PARAM,
+                )
+        return True
+
     async def set_avatar_url(
         self,
         *,
@@ -401,6 +495,17 @@ class ProfileHandler:
             requester = create_requester(
                 target_user, authenticated_entity=requester.authenticated_entity
             )
+
+        # msc3911: Update the media restrictions to include the profile user ID
+        if self.msc3911_config.enabled and avatar_url_to_set:
+            if await self.validate_avatar_url(avatar_url_to_set, requester):
+                await (
+                    self.hs.get_datastores().main.set_media_restricted_to_user_profile(
+                        self.hs.config.server.server_name,
+                        avatar_url_to_set,
+                        str(target_user),
+                    )
+                )
 
         stream_id = await self.store.set_profile_field(
             target_user,

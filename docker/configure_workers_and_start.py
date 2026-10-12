@@ -127,7 +127,7 @@ WORKERS_CONFIG: dict[str, dict[str, Any]] = {
             "^/_synapse/admin/v1/user/.*/media.*$",
             "^/_synapse/admin/v1/media/.*$",
             "^/_synapse/admin/v1/quarantine_media/.*$",
-            "^/_matrix/client/v1/media/.*$",
+            "^/_matrix/client/(v1|unstable/.*)/media/.*$",
             "^/_matrix/federation/v1/media/.*$",
         ],
         # The first configured media worker will run the media background jobs
@@ -528,6 +528,9 @@ def add_worker_roles_to_shared_config(
     if "federation_sender" in worker_types_set:
         shared_config.setdefault("federation_sender_instances", []).append(worker_name)
 
+    if "media_repository" in worker_types_set:
+        shared_config.setdefault("media_repo_instances", []).append(worker_name)
+
     # Update the list of stream writers. It's convenient that the name of the worker
     # type is the same as the stream to write. Iterate over the whole list in case there
     # is more than one.
@@ -539,6 +542,17 @@ def add_worker_roles_to_shared_config(
 
             # Map of stream writer instance names to host/ports combos
             # For now, all stream writers need http replication ports
+            if os.environ.get("SYNAPSE_USE_UNIX_SOCKET", False):
+                instance_map[worker_name] = {
+                    "path": f"/run/worker.{worker_port}",
+                }
+            else:
+                instance_map[worker_name] = {
+                    "host": "localhost",
+                    "port": worker_port,
+                }
+        if worker == "media_repository":
+            # Just like for stream_writers, media workers now need to be on the instance_map
             if os.environ.get("SYNAPSE_USE_UNIX_SOCKET", False):
                 instance_map[worker_name] = {
                     "path": f"/run/worker.{worker_port}",

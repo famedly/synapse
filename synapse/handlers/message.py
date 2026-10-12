@@ -25,6 +25,7 @@ from http import HTTPStatus
 from typing import TYPE_CHECKING, Any, Mapping, Optional, Sequence
 
 from canonicaljson import encode_canonical_json
+from matrix_common.types.mxc_uri import MXCUri
 
 from twisted.internet.interfaces import IDelayedCall
 
@@ -73,6 +74,10 @@ from synapse.logging import opentracing
 from synapse.logging.context import make_deferred_yieldable, run_in_background
 from synapse.replication.http.send_events import ReplicationSendEventsRestServlet
 from synapse.storage.databases.main.events_worker import EventRedactBehaviour
+from synapse.storage.databases.main.media_repository import (
+    LocalMedia,
+    MediaRestrictions,
+)
 from synapse.types import (
     JsonDict,
     PersistedEventPosition,
@@ -592,6 +597,7 @@ class EventCreationHandler:
         current_state_group: int | None = None,
         prev_state_events: StrCollection | None = None,
         delay_id: str | None = None,
+        mxc_restriction_list_for_event: list[MXCUri] | None = None,
     ) -> tuple[EventBase, UnpersistedEventContextBase]:
         """
         Given a dict from a client, create a new event. If bool for_batch is true, will
@@ -651,6 +657,9 @@ class EventCreationHandler:
                 Only applicable on room versions which use a state DAG (MSC4242).
 
             delay_id: The delay ID of this event, if it was a delayed event.
+
+            mxc_restriction_list_for_event: An optional List of MXCUri objects, to be
+                used for setting media restrictions
 
         Raises:
             ResourceLimitError if server is blocked to some resource being
@@ -744,6 +753,11 @@ class EventCreationHandler:
 
         if delay_id is not None:
             builder.internal_metadata.delay_id = delay_id
+
+        if mxc_restriction_list_for_event is not None:
+            builder.internal_metadata.media_references = [
+                str(mxc) for mxc in mxc_restriction_list_for_event
+            ]
 
         builder.internal_metadata.outlier = outlier
 
@@ -988,6 +1002,7 @@ class EventCreationHandler:
         depth: int | None = None,
         prev_state_events: StrCollection | None = None,
         delay_id: str | None = None,
+        media_info_for_attachment: set[LocalMedia] | None = None,
     ) -> tuple[EventBase, int]:
         """
         Creates an event, then sends it.
@@ -1020,6 +1035,8 @@ class EventCreationHandler:
                 The state event IDs which represent the current forward extremities of the state DAG.
                 Only applicable on room versions which use a state DAG (MSC4242).
             delay_id: The delay ID of this event, if it was a delayed event.
+            media_info_for_attachment: An optional set of LocalMedia objects, for use in
+                restricting media.
 
         Returns:
             The event, and its stream ordering (if deduplication happened,
@@ -1118,6 +1135,7 @@ class EventCreationHandler:
                 depth=depth,
                 prev_state_events=prev_state_events,
                 delay_id=delay_id,
+                media_info_for_attachment=media_info_for_attachment,
             )
 
     async def _create_and_send_nonmember_event_locked(
@@ -1133,6 +1151,7 @@ class EventCreationHandler:
         depth: int | None = None,
         prev_state_events: StrCollection | None = None,
         delay_id: str | None = None,
+        media_info_for_attachment: set[LocalMedia] | None = None,
     ) -> tuple[EventBase, int]:
         room_id = event_dict["room_id"]
 
@@ -1163,6 +1182,13 @@ class EventCreationHandler:
                     depth=depth,
                     prev_state_events=prev_state_events,
                     delay_id=delay_id,
+                    mxc_restriction_list_for_event=[
+                        MXCUri(self.server_name, local_media.media_id)
+                        for local_media in media_info_for_attachment
+                        if local_media
+                    ]
+                    if media_info_for_attachment is not None
+                    else None,
                 )
                 context = await unpersisted_context.persist(event)
 
@@ -1232,6 +1258,7 @@ class EventCreationHandler:
                     events_and_context=[(event, context)],
                     ratelimit=ratelimit,
                     ignore_shadow_ban=ignore_shadow_ban,
+                    media_info_for_attachment=media_info_for_attachment,
                 )
 
                 break
@@ -1533,6 +1560,7 @@ class EventCreationHandler:
         ratelimit: bool = True,
         extra_users: list[UserID] | None = None,
         ignore_shadow_ban: bool = False,
+        media_info_for_attachment: Optional[set[LocalMedia]] = None,
     ) -> EventBase:
         """Processes new events. Please note that if batch persisting events, an error in
         handling any one of these events will result in all of the events being dropped.
@@ -1552,6 +1580,9 @@ class EventCreationHandler:
             ignore_shadow_ban: True if shadow-banned users should be allowed to
                 send this event.
 
+            media_info_for_attachment: An optional set of LocalMedia objects, for use in
+                restricting media.
+
         Return:
             If the event was deduplicated, the previous, duplicate, event. Otherwise,
             `event`.
@@ -1562,6 +1593,16 @@ class EventCreationHandler:
                 a room that has been un-partial stated.
         """
         extra_users = extra_users or []
+        media_info_for_attachment = media_info_for_attachment or set()
+
+        # filter for the existing media attachments that were passed in based on the
+        # mxc. The 'attachments' key can be None, representing that an attachment has
+        # not been formed yet. If they are all None, will be an empty set
+        media_restrictions: set[MediaRestrictions] = {
+            local_media.attachments
+            for local_media in media_info_for_attachment
+            if local_media.attachments
+        }
 
         for event, context in events_and_context:
             # we don't apply shadow-banning to membership events here. Invites are blocked
@@ -1584,7 +1625,39 @@ class EventCreationHandler:
                         event.event_id,
                         prev_event.event_id,
                     )
+                    if media_restrictions:
+                        # Sort out what event_id's were part of the restrictions.
+                        existing_event_ids_from_media_restrictions = {
+                            res.event_id for res in media_restrictions
+                        }
+
+                        # If the de-duplicated event_id matches one of the existing
+                        # restrictions, then all is well. If it does not, then this
+                        # needs to be denied as invalid
+                        if (
+                            prev_event.event_id
+                            not in existing_event_ids_from_media_restrictions
+                        ):
+                            logger.warning(
+                                "De-duplicated state event '%s' was not already attached to this media",
+                                prev_event.event_id,
+                            )
+                            raise SynapseError(
+                                HTTPStatus.BAD_REQUEST,
+                                "De-duplicated state event was not already attached to this media",
+                                Codes.INVALID_PARAM,
+                            )
+
                     return prev_event
+
+            # Some media was trying to be attached to an event, but that media was
+            # already attached. Deny
+            if media_restrictions:
+                raise SynapseError(
+                    HTTPStatus.BAD_REQUEST,
+                    f"These media ids, '{media_info_for_attachment}' has already been attached to a reference: {media_restrictions}",
+                    Codes.INVALID_PARAM,
+                )
 
             if not event.is_state() and event.type in [
                 EventTypes.Message,
@@ -1667,6 +1740,7 @@ class EventCreationHandler:
         event_dicts: Sequence[JsonDict],
         ratelimit: bool = True,
         ignore_shadow_ban: bool = False,
+        media_info_for_attachment: Optional[set[LocalMedia]] = None,
     ) -> None:
         """Helper to create and send a batch of new client events.
 
@@ -1688,6 +1762,8 @@ class EventCreationHandler:
             ratelimit: Whether to rate limit this send.
             ignore_shadow_ban: True if shadow-banned users should be allowed to
                 send these events.
+            media_info_for_attachment: An optional set of LocalMedia objects, for use in
+                restricting media.
         """
 
         if not event_dicts:
@@ -1749,6 +1825,7 @@ class EventCreationHandler:
             events_and_context,
             ignore_shadow_ban=ignore_shadow_ban,
             ratelimit=ratelimit,
+            media_info_for_attachment=media_info_for_attachment,
         )
 
     async def _persist_events(

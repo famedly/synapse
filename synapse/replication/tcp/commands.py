@@ -467,7 +467,7 @@ class LockReleasedCommand(Command):
 
     Format::
 
-        LOCK_RELEASED ["<instance_name>", "<lock_name>", "<lock_key>"]
+        LOCK_RELEASED["<instance_name>", "<lock_name>", "<lock_key>"]
     """
 
     __slots__ = ["instance_name", "lock_name", "lock_key"]

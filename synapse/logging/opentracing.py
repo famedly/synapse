@@ -84,6 +84,7 @@ the function becomes the operation name for the span.
 
    from synapse.logging.opentracing import trace
 
+
    # Start a span using 'interesting_function' as the operation name
    @trace
    def interesting_function(*args, **kwargs):
@@ -96,6 +97,7 @@ Operation names can be explicitly set for a function by using ``trace_with_opnam
 .. code-block:: python
 
    from synapse.logging.opentracing import trace_with_opname
+
 
    @trace_with_opname("a_better_operation_name")
    def interesting_badly_named_function(*args, **kwargs):
@@ -121,9 +123,11 @@ tag names. It uses kwarg names as tag names without the prefix.
 
    from synapse.logging.opentracing import tag_args
 
+
    @tag_args
    def set_fates(clotho, lachesis, atropos, father="Zues", mother="Themis"):
        pass
+
 
    set_fates("the story", "the end", "the act")
    # This will have the following tags
@@ -948,7 +952,9 @@ def _custom_sync_async_decorator(
     # Decorator to time the function and log it out
     def duration(func: Callable[P, R]) -> Callable[P, R]:
         @contextlib.contextmanager
-        def _wrapping_logic(func: Callable[P, R], *args: P.args, **kwargs: P.kwargs) -> Generator[None, None, None]:
+        def _wrapping_logic(
+            func: Callable[P, R], *args: P.args, **kwargs: P.kwargs
+        ) -> Generator[None, None, None]:
             start_ts = time.time()
             try:
                 yield
@@ -956,6 +962,7 @@ def _custom_sync_async_decorator(
                 end_ts = time.time()
                 duration = end_ts - start_ts
                 logger.info("%s took %s seconds", func.__name__, duration)
+
         return _custom_sync_async_decorator(func, _wrapping_logic)
     ```
 

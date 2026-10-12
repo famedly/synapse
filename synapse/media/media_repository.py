@@ -23,16 +23,17 @@ import errno
 import logging
 import os
 import shutil
+from http import HTTPStatus
 from io import BytesIO
 from typing import IO, TYPE_CHECKING
 
 import attr
 from matrix_common.types.mxc_uri import MXCUri
 
-import twisted.internet.error
 import twisted.web.http
 from twisted.internet.defer import Deferred
 
+from synapse.api.constants import EventTypes, HistoryVisibility, Membership
 from synapse.api.errors import (
     Codes,
     FederationDeniedError,
@@ -40,6 +41,7 @@ from synapse.api.errors import (
     NotFoundError,
     RequestSendFailed,
     SynapseError,
+    UnauthorizedRequestAPICallError,
     UserLimitExceededError,
     cs_error,
 )
@@ -75,12 +77,26 @@ from synapse.media.thumbnailer import (
     ThumbnailError,
 )
 from synapse.media.url_previewer import UrlPreviewer
-from synapse.storage.databases.main.media_repository import LocalMedia, RemoteMedia
-from synapse.types import UserID
+from synapse.replication.http.media import ReplicationCopyMediaServlet
+from synapse.storage.databases.main.media_repository import (
+    LocalMedia,
+    MediaRestrictions,
+    RemoteMedia,
+)
+from synapse.types import JsonDict, Requester, UserID
+from synapse.types.state import StateFilter
 from synapse.util.async_helpers import Linearizer
 from synapse.util.duration import Duration
+from synapse.util.json import json_decoder
 from synapse.util.retryutils import NotRetryingDestination
 from synapse.util.stringutils import random_string
+from synapse.visibility import (
+    _HISTORY_VIS_KEY,
+    MEMBERSHIP_PRIORITY,
+    VISIBILITY_PRIORITY,
+    filter_and_transform_events_for_client,
+    get_effective_room_visibility_from_state,
+)
 
 if TYPE_CHECKING:
     from synapse.server import HomeServer
@@ -95,7 +111,7 @@ UPDATE_RECENTLY_ACCESSED_TS = Duration(minutes=1)
 MEDIA_RETENTION_CHECK_PERIOD = Duration(hours=1)
 
 
-class MediaRepository:
+class AbstractMediaRepository:
     def __init__(self, hs: "HomeServer"):
         self.hs = hs
         self.auth = hs.get_auth()
@@ -103,6 +119,483 @@ class MediaRepository:
         self.clock = hs.get_clock()
         self.server_name = hs.hostname
         self.store = hs.get_datastores().main
+        self._is_mine_server_name = hs.is_mine_server_name
+        self.msc3911_config = hs.config.experimental.msc3911
+
+    @trace
+    async def create_media_id_without_expiration(
+        self, auth_user: UserID, restricted: bool = False
+    ) -> MXCUri:
+        """Create and store a media ID for a local user and return the MXC URI and its
+        expiration.
+        Args:
+            auth_user: The user_id of the uploader
+            restricted: If this is to be considered restricted media
+        Returns:
+            A MXC URI of the stored content.
+        """
+        media_id = random_string(24)
+        now = self.clock.time_msec()
+        await self.store.store_local_media_id(
+            media_id=media_id,
+            time_now_ms=now,
+            user_id=auth_user,
+            restricted=restricted,
+        )
+        return MXCUri.from_str(f"mxc://{self.server_name}/{media_id}")
+
+    async def get_media_info(self, mxc_uri: MXCUri) -> LocalMedia | RemoteMedia:
+        """Get information about a media item.
+        Args:
+            mxc_uri: The MXC URI of the media item.
+        Returns:
+            The media information, or None if not found.
+        """
+        server_name = mxc_uri.server_name
+        media_id = mxc_uri.media_id
+        media_info: LocalMedia | RemoteMedia | None
+        if self._is_mine_server_name(server_name):
+            media_info = await self.store.get_local_media(media_id)
+        else:
+            media_info = await self.store.get_cached_remote_media(
+                mxc_uri.server_name, mxc_uri.media_id
+            )
+        if not media_info:
+            raise SynapseError(
+                HTTPStatus.NOT_FOUND, "Media not found", errcode=Codes.NOT_FOUND
+            )
+        if media_info.quarantined_by:
+            raise SynapseError(
+                HTTPStatus.NOT_FOUND, "Media not found", errcode=Codes.NOT_FOUND
+            )
+        return media_info
+
+    async def get_cached_remote_media_info(
+        self, origin: str, media_id: str
+    ) -> RemoteMedia | None:
+        """
+        Get cached remote media info for a given origin/media ID combo. If the requested
+        media is not found locally, it will not be requested over federation and the
+        call will return None.
+
+        Args:
+            origin: The origin of the remote media
+            media_id: The media ID of the requested content
+
+        Returns:
+            The info for the cached remote media or None if it was not found
+        """
+        return await self.store.get_cached_remote_media(origin, media_id)
+
+    async def create_or_update_content(
+        self,
+        media_type: str,
+        upload_name: str | None,
+        content: IO,
+        content_length: int,
+        auth_user: UserID,
+        media_id: str | None = None,
+        restricted: bool = False,
+    ) -> MXCUri:
+        raise NotImplementedError(
+            "Sorry Mario, your MediaRepository related function is in another castle"
+        )
+
+    async def copy_media(
+        self, existing_mxc: MXCUri, auth_user: UserID, max_timeout_ms: int
+    ) -> MXCUri:
+        raise NotImplementedError(
+            "Sorry Mario, your MediaRepository related function is in another castle"
+        )
+
+    async def reached_pending_media_limit(self, auth_user: UserID) -> tuple[bool, int]:
+        raise NotImplementedError(
+            "Sorry Mario, your MediaRepository related function is in another castle"
+        )
+
+    @trace
+    async def _generate_thumbnails(
+        self,
+        server_name: str | None,
+        media_id: str,
+        file_id: str,
+        media_type: str,
+        url_cache: bool = False,
+    ) -> dict | None:
+        raise NotImplementedError(
+            "Sorry Mario, your MediaRepository related function is in another castle"
+        )
+
+    async def create_media_id(
+        self, auth_user: UserID, restricted: bool = False
+    ) -> tuple[str, int]:
+        raise NotImplementedError(
+            "Sorry Mario, your MediaRepository related function is in another castle"
+        )
+
+    async def delete_old_remote_media(self, before_ts: int) -> dict[str, int]:
+        raise NotImplementedError(
+            "Sorry Mario, your MediaRepository related function is in another castle"
+        )
+
+    async def delete_local_media_ids(
+        self, media_ids: list[str]
+    ) -> tuple[list[str], int]:
+        raise NotImplementedError(
+            "Sorry Mario, your MediaRepository related function is in another castle"
+        )
+
+    async def delete_old_local_media(
+        self,
+        before_ts: int,
+        size_gt: int = 0,
+        keep_profiles: bool = True,
+        delete_quarantined_media: bool = False,
+        delete_protected_media: bool = False,
+    ) -> tuple[list[str], int]:
+        raise NotImplementedError(
+            "Sorry Mario, your MediaRepository related function is in another castle"
+        )
+
+    async def get_local_media(
+        self,
+        request: SynapseRequest,
+        media_id: str,
+        name: str | None,
+        max_timeout_ms: int,
+        requester: Requester | None = None,
+        allow_authenticated: bool = True,
+        federation: bool = False,
+    ) -> None:
+        raise NotImplementedError(
+            "Sorry Mario, your MediaRepository related function is in another castle"
+        )
+
+    async def _store_remote_media_with_cleanup(
+        self,
+        server_name: str,
+        media_id: str,
+        media_type: str,
+        time_now_ms: int,
+        upload_name: str | None,
+        media_length: int,
+        filesystem_id: str,
+        sha256: str,
+        fname: str,
+        restricted: bool = False,
+    ) -> None:
+        raise NotImplementedError(
+            "Sorry Mario, your MediaRepository related function is in another castle"
+        )
+
+    async def validate_media_restriction(
+        self,
+        request: SynapseRequest,
+        media_info: LocalMedia | None,
+        media_id: str | None,
+        is_federation: bool = False,
+    ) -> MediaRestrictions | None:
+        """
+        MSC3911: If media is restricted but restriction is empty, the media is in
+        pending state and only creator can see it until it is attached to an event. If
+        there is a restriction return MediaRestrictions after validation.
+
+        Args:
+            request: The incoming request.
+            media_info: Optional, the media information.
+            media_id: Optional, the media ID to validate.
+
+        Returns:
+            MediaRestrictions if there is one set, otherwise raise SynapseError.
+        """
+        if not media_info and media_id:
+            media_info = await self.store.get_local_media(media_id)
+        if not media_info:
+            return None
+        restricted = media_info.restricted
+        if not restricted:
+            return None
+        attachments: MediaRestrictions | None = media_info.attachments
+        # for both federation and client endpoints
+        if attachments:
+            # Only one of event_id or profile_user_id must be set, not both, not neither
+            if attachments.event_id is None and attachments.profile_user_id is None:
+                raise SynapseError(
+                    HTTPStatus.FORBIDDEN,
+                    "MediaRestrictions must have exactly one of event_id or profile_user_id set.",
+                    errcode=Codes.FORBIDDEN,
+                )
+            if bool(attachments.event_id) == bool(attachments.profile_user_id):
+                raise SynapseError(
+                    HTTPStatus.FORBIDDEN,
+                    "MediaRestrictions must have exactly one of event_id or profile_user_id set.",
+                    errcode=Codes.FORBIDDEN,
+                )
+
+        if not attachments and is_federation:
+            raise SynapseError(
+                HTTPStatus.NOT_FOUND,
+                "Not found '%s'" % (request.path.decode(),),
+                errcode=Codes.NOT_FOUND,
+            )
+
+        if not attachments and not is_federation:
+            if (
+                isinstance(request.requester, Requester)
+                and request.requester.user.to_string() != media_info.user_id
+            ):
+                raise SynapseError(
+                    HTTPStatus.NOT_FOUND,
+                    "Not found '%s'" % (request.path.decode(),),
+                    errcode=Codes.NOT_FOUND,
+                )
+            else:
+                return None
+        return attachments
+
+    async def is_media_visible(
+        self, requesting_user: UserID, media_info_object: LocalMedia | RemoteMedia
+    ) -> None:
+        """
+        Verify that media requested for download should be visible to the user making
+        the request
+        """
+
+        if not self.msc3911_config.enabled:
+            return
+
+        if not media_info_object.restricted:
+            return
+
+        if not media_info_object.attachments:
+            # When the media has not been attached yet, only the originating user can
+            # see it. But once attachments have been formed, standard other rules apply
+            if isinstance(media_info_object, LocalMedia) and (
+                requesting_user.to_string() == str(media_info_object.user_id)
+            ):
+                return
+
+            # It was restricted, but no attachments. Deny
+            logger.debug(
+                "Media ID ('%s') as requested by '%s' was restricted but had no "
+                "attachments",
+                media_info_object.media_id,
+                requesting_user.to_string(),
+            )
+            raise UnauthorizedRequestAPICallError(
+                f"Media requested ('{media_info_object.media_id}') is restricted"
+            )
+
+        attached_event_id = media_info_object.attachments.event_id
+        attached_profile_user_id = media_info_object.attachments.profile_user_id
+
+        if attached_event_id:
+            event_base = await self.store.get_event(attached_event_id)
+            if event_base.is_state():
+                # The standard event visibility utility, filter_and_transform_events_for_client(),
+                # does not seem to meet the needs of a good UX when restricting and
+                # allowing media. This is a very, very simple version to be used for
+                # state events.
+
+                # First we will collect the current membership of the user for the room
+                # the relevant event came from. Then we will collect the membership and
+                # m.room.history_visibility event at the time of the relevant event.
+
+                # Since it is hard to find a relevant place in which to search back in
+                # time to find out if a given room ever had anything other than a leave
+                # event, this is the simplest without having to do tablescans
+
+                # Need membership of NOW
+                (
+                    membership_now,
+                    _,
+                ) = await self.store.get_local_current_membership_for_user_in_room(
+                    requesting_user.to_string(), event_base.room_id
+                )
+
+                if not membership_now:
+                    membership_now = Membership.LEAVE
+
+                membership_state_key = (EventTypes.Member, requesting_user.to_string())
+                types = (_HISTORY_VIS_KEY, membership_state_key)
+
+                # and history visibility and membership of THEN
+                state_filter = StateFilter.from_types(types)
+                state_handler = self.hs.get_state_handler()
+
+                # State Map to Event IDs
+                state_map_to_e_id = await state_handler.compute_state_after_events(
+                    event_base.room_id, [attached_event_id], state_filter=state_filter
+                )
+                # Get the EventBases for those Event IDs
+                events = await self.store.get_events(
+                    state_map_to_e_id.values(),
+                )
+                # Sort into mapping of StateMap to EventBases
+                state_map = {
+                    k: events[v] for k, v in state_map_to_e_id.items() if v in events
+                }
+
+                # Don't need to make sure we have an actual StateMap. The defaults
+                # applied below handle those occasions. E.g. if it is early in a room
+                # at the point of the event we are trying to get visibility on, the
+                # state may not exist yet for these filtered events. Like for the
+                # membership event that follows room creation.
+
+                visibility = get_effective_room_visibility_from_state(state_map)
+
+                memb_then_evt = state_map.get(membership_state_key)
+                membership_then = Membership.LEAVE
+                if memb_then_evt:
+                    membership_then = memb_then_evt.content.get(
+                        "membership", Membership.LEAVE
+                    )
+
+                # Have a few numbers ready for comparison below. These resolve to int
+                # The index of the visibility present from the event
+                visibility_priority = VISIBILITY_PRIORITY.index(visibility)
+                membership_priority_now = MEMBERSHIP_PRIORITY.index(membership_now)
+                membership_priority_then = MEMBERSHIP_PRIORITY.index(membership_then)
+
+                # These are essentially constants, in that they should not change
+                world_readable_index = VISIBILITY_PRIORITY.index(
+                    HistoryVisibility.WORLD_READABLE
+                )
+                shared_visibility_index = VISIBILITY_PRIORITY.index(
+                    HistoryVisibility.SHARED
+                )
+                mem_leave_index = MEMBERSHIP_PRIORITY.index(Membership.LEAVE)
+
+                # I disagree with this. 'Shared' by spec implies that some sort of
+                # positive membership event took place, but the stock
+                # filter_and_transform_events_for_client() seems to treat SHARED like WORLD_READABLE,
+                # so at least this matches
+                if visibility_priority in [
+                    world_readable_index,
+                    shared_visibility_index,
+                ]:
+                    # world readable should always be seen
+                    return
+
+                # If the room is invite visible, and the user is invited, move on
+                if visibility_priority == VISIBILITY_PRIORITY.index(
+                    HistoryVisibility.INVITED
+                ) and membership_priority_now == MEMBERSHIP_PRIORITY.index(
+                    Membership.INVITE
+                ):
+                    return
+
+                # The visibility of the room is shared or greater, so requires at
+                # the minimum a 'knock' level. Make sure the membership of the user
+                # is better than leave
+                if (
+                    visibility_priority >= shared_visibility_index
+                    and membership_priority_now < mem_leave_index
+                ):
+                    return
+
+                # Cover the case that a user has left a room but still should see any
+                # media they were allowed to see prior
+                # The visibility of the room is shared or greater, so requires at
+                # the minimum a 'knock' level. Make sure the membership of the user
+                # is better than leave
+                if (
+                    visibility_priority >= shared_visibility_index
+                    and membership_priority_then < mem_leave_index
+                ):
+                    return
+
+            else:
+                storage_controllers = self.hs.get_storage_controllers()
+                filtered_events = await filter_and_transform_events_for_client(
+                    storage_controllers,
+                    requesting_user.to_string(),
+                    [event_base],
+                )
+                if len(filtered_events) > 0:
+                    return
+
+        elif attached_profile_user_id:
+            # Can this user see that profile?
+
+            # The error returns here may not be suitable, use the work around below
+            # If shared room restricted profile lookups, it will be restricted
+            # to users that share rooms
+            # await self.profile_handler.check_profile_query_allowed(
+            #     restrictions.profile_user_id, requester.user
+            # )
+            # return
+
+            if self.hs.config.server.limit_profile_requests_to_users_who_share_rooms:
+                # First take care of the case where the requesting user IS the creating
+                # user. The other function below does not handle this.
+                if requesting_user.to_string() == attached_profile_user_id.to_string():
+                    return
+
+                # This call returns a set() that contains which of the "other_user_ids"
+                # share a room. Since we give it only one, if bool(set()) is True, then they
+                # share some room or had at least one invite between them.
+                if not await self.store.do_users_share_a_room_joined_or_invited(
+                    requesting_user.to_string(),
+                    [attached_profile_user_id.to_string()],
+                ):
+                    logger.debug(
+                        "Media ID (%s) as requested by '%s' was restricted by "
+                        "profile, but was not allowed(is "
+                        "'limit_profile_requests_to_users_who_share_rooms' enabled?)",
+                        media_info_object.media_id,
+                        requesting_user.to_string(),
+                    )
+
+                    raise UnauthorizedRequestAPICallError(
+                        f"Media requested ('{media_info_object.media_id}') is restricted"
+                    )
+
+            # check these settings:
+            # * allow_profile_lookup_over_federation
+
+            # If 'limit_profile_requests_to_users_who_share_rooms' is not enabled, all
+            # bets are kinda off
+            return
+
+        # It was a third unknown restriction, or otherwise did not pass inspection
+        logger.debug(
+            "Media ID (%s) as requested by '%s' was restricted, but was not "
+            "allowed(media_attachments=%s)",
+            media_info_object.media_id,
+            requesting_user.to_string(),
+            media_info_object.attachments,
+        )
+        raise UnauthorizedRequestAPICallError(
+            f"Media requested ('{media_info_object.media_id}') is restricted"
+        )
+
+
+class MediaRepositoryWorker(AbstractMediaRepository):
+    def __init__(self, hs: "HomeServer"):
+        super().__init__(hs)
+        # initialize replication endpoint here
+        self.copy_media_client = ReplicationCopyMediaServlet.make_client(hs)
+
+    async def copy_media(
+        self, existing_mxc: MXCUri, auth_user: UserID, max_timeout_ms: int
+    ) -> MXCUri:
+        """
+        Call out to the worker responsible for handling media to copy this media object
+        """
+        result = await self.copy_media_client(
+            instance_name=self.hs.config.worker.workers_doing_media_duty[0],
+            server_name=existing_mxc.server_name,
+            media_id=existing_mxc.media_id,
+            user_id=auth_user.to_string(),
+            max_timeout_ms=max_timeout_ms,
+        )
+        return MXCUri.from_str(result["content_uri"])
+
+
+class MediaRepository(AbstractMediaRepository):
+    def __init__(self, hs: "HomeServer"):
+        super().__init__(hs)
         self.max_upload_size = hs.config.media.max_upload_size
         self.max_image_pixels = hs.config.media.max_image_pixels
         self.unused_expiration_time = hs.config.media.unused_expiration_time
@@ -179,6 +672,8 @@ class MediaRepository:
             hs.config.media.media_retention_remote_media_lifetime_ms
         )
 
+        self.use_sha256_path = hs.config.media.enable_local_media_storage_deduplication
+
         # Check whether local or remote media retention is configured
         if (
             hs.config.media.media_retention_local_media_lifetime_ms is not None
@@ -205,6 +700,20 @@ class MediaRepository:
             key=lambda limit: limit.time_period_ms, reverse=True
         )
 
+        if (
+            self.msc3911_config.purge_pending_unattached_media
+            and hs.config.media.media_instance_running_background_jobs
+            == hs.config.worker.worker_name
+        ):
+            self.clock.looping_call(
+                self._pending_media_cleanup,
+                Duration(
+                    milliseconds=float(
+                        self.msc3911_config.pending_media_cleanup_interval_ms
+                    )
+                ),
+            )
+
         self.media_repository_callbacks = hs.get_module_api_callbacks().media_repository
 
     def _start_update_recently_accessed(self) -> Deferred:
@@ -230,6 +739,13 @@ class MediaRepository:
             local_media, remote_media, self.clock.time_msec()
         )
 
+    async def _pending_media_cleanup(self) -> None:
+        pending_media_ids = await self.store.get_pending_media_ids(
+            self.msc3911_config.pending_media_cleanup_interval_ms
+        )
+        if pending_media_ids:
+            await self.delete_local_media_ids(pending_media_ids)
+
     def mark_recently_accessed(self, server_name: str | None, media_id: str) -> None:
         """Mark the given media as recently accessed.
 
@@ -243,12 +759,15 @@ class MediaRepository:
             self.recently_accessed_locals.add(media_id)
 
     @trace
-    async def create_media_id(self, auth_user: UserID) -> tuple[str, int]:
+    async def create_media_id(
+        self, auth_user: UserID, restricted: bool = False
+    ) -> tuple[str, int]:
         """Create and store a media ID for a local user and return the MXC URI and its
         expiration.
 
         Args:
             auth_user: The user_id of the uploader
+            restricted: If this is to be considered restricted media
 
         Returns:
             A tuple containing the MXC URI of the stored content and the timestamp at
@@ -260,6 +779,7 @@ class MediaRepository:
             media_id=media_id,
             time_now_ms=now,
             user_id=auth_user,
+            restricted=restricted,
         )
         return f"mxc://{self.server_name}/{media_id}", now + self.unused_expiration_time
 
@@ -325,6 +845,7 @@ class MediaRepository:
         content_length: int,
         auth_user: UserID,
         media_id: str | None = None,
+        restricted: bool = False,
     ) -> MXCUri:
         """Create or update the content of the given media ID.
 
@@ -336,6 +857,7 @@ class MediaRepository:
             auth_user: The user_id of the uploader
             media_id: The media ID to update if provided, otherwise creates
                 new media ID.
+            restricted: Boolean for if the media is restricted per msc3911
 
         Returns:
             The mxc url of the stored content
@@ -345,11 +867,14 @@ class MediaRepository:
         if media_id is None:
             media_id = random_string(24)
 
-        file_info = FileInfo(server_name=None, file_id=media_id)
         sha256reader = SHA256TransparentIOReader(content)
-        # This implements all of IO as it has a passthrough
-        fname = await self.media_storage.store_file(sha256reader.wrap(), file_info)
+        # Do a read() before a hexdigest(), or the hash will not be of the complete file
+        sha256reader.read()
         sha256 = sha256reader.hexdigest()
+        file_info = FileInfo(server_name=None, file_id=media_id, sha256=sha256)
+
+        # store_file() has an inner function that does a seek(0) on the IO
+        fname = await self.media_storage.store_file(sha256reader.wrap(), file_info)
         should_quarantine = await self.store.get_is_hash_quarantined(sha256)
 
         logger.info("Stored local media in file %r", fname)
@@ -427,6 +952,7 @@ class MediaRepository:
                 user_id=auth_user,
                 sha256=sha256,
                 quarantined_by="system" if should_quarantine else None,
+                restricted=restricted,
             )
         else:
             await self.store.update_local_media(
@@ -440,11 +966,68 @@ class MediaRepository:
             )
 
         try:
-            await self._generate_thumbnails(None, media_id, media_id, media_type)
+            await self._generate_thumbnails(
+                server_name=None,
+                media_id=media_id,
+                file_id=media_id,
+                media_type=media_type,
+                sha256=sha256,
+            )
         except Exception as e:
             logger.info("Failed to generate thumbnails: %s", e)
 
         return MXCUri(self.server_name, media_id)
+
+    async def copy_media(
+        self, existing_mxc: MXCUri, auth_user: UserID, max_timeout_ms: int
+    ) -> MXCUri:
+        """
+        Copy an existing piece of media into a new file with new LocalMedia
+
+        Args:
+            existing_mxc: The existing media information
+            auth_user: The UserID of the user making the request
+            max_timeout_ms: The millisecond timeout for retrieving existing media info
+        """
+
+        old_media_info = await self.get_media_info(existing_mxc)
+        if isinstance(old_media_info, RemoteMedia):
+            file_info = FileInfo(
+                server_name=old_media_info.media_origin,
+                file_id=old_media_info.filesystem_id,
+                sha256=old_media_info.sha256,
+            )
+        else:
+            file_info = FileInfo(
+                server_name=None,
+                file_id=old_media_info.media_id,
+                sha256=old_media_info.sha256,
+            )
+
+        # This will ensure that if there is another storage provider containing our old
+        # media, it will be in our local cache before the copy takes place.
+        # Conveniently, it also gives us the local path of where the file lives.
+
+        assert old_media_info.media_length is not None
+
+        async with self.media_storage.ensure_media_is_in_local_cache(
+            file_info
+        ) as local_path:
+            # It may end up being that this needs to be pushed down into the MediaStorage
+            # class. It needs abstraction badly, but that is beyond me at the moment.
+            with open(local_path, "rb") as io_object:
+                # Let existing methods handle creating the new file for us. By not passing a
+                # media id, one will be created.
+                new_mxc_uri = await self.create_or_update_content(
+                    media_type=old_media_info.media_type,
+                    upload_name=old_media_info.upload_name,
+                    content=io_object,
+                    content_length=old_media_info.media_length,
+                    auth_user=auth_user,
+                    restricted=True,
+                )
+
+        return new_mxc_uri
 
     def respond_not_yet_uploaded(self, request: SynapseRequest) -> None:
         respond_with_json(
@@ -453,23 +1036,6 @@ class MediaRepository:
             cs_error("Media has not been uploaded yet", code=Codes.NOT_YET_UPLOADED),
             send_cors=True,
         )
-
-    async def get_cached_remote_media_info(
-        self, origin: str, media_id: str
-    ) -> RemoteMedia | None:
-        """
-        Get cached remote media info for a given origin/media ID combo. If the requested
-        media is not found locally, it will not be requested over federation and the
-        call will return None.
-
-        Args:
-            origin: The origin of the remote media
-            media_id: The media ID of the requested content
-
-        Returns:
-            The info for the cached remote media or None if it was not found
-        """
-        return await self.store.get_cached_remote_media(origin, media_id)
 
     async def get_local_media_info(
         self,
@@ -511,6 +1077,8 @@ class MediaRepository:
 
             # The file has been uploaded, so stop looping
             if media_info.media_length is not None:
+                if isinstance(request.requester, Requester):
+                    await self.is_media_visible(request.requester.user, media_info)
                 return media_info
 
             # Check if the media ID has expired and still hasn't been uploaded to.
@@ -536,6 +1104,7 @@ class MediaRepository:
         media_id: str,
         name: str | None,
         max_timeout_ms: int,
+        requester: Requester | None = None,
         allow_authenticated: bool = True,
         federation: bool = False,
         bypass_quarantine: bool = False,
@@ -550,6 +1119,8 @@ class MediaRepository:
                 the filename in the Content-Disposition header of the response.
             max_timeout_ms: the maximum number of milliseconds to wait for the
                 media to be uploaded.
+            requester: The user making the request, to verify restricted media. Only
+                used for local users, not over federation
             allow_authenticated: whether media marked as authenticated may be served to this request
             federation: whether the local media being fetched is for a federation request
             bypass_quarantine: whether to bypass quarantine checks
@@ -567,6 +1138,19 @@ class MediaRepository:
             if media_info.authenticated:
                 raise NotFoundError()
 
+        restrictions = None
+        # if MSC3911 is enabled, check visibility of the media for the user and retrieve
+        # any restrictions
+        if self.msc3911_config.enabled:
+            if requester is not None:
+                # Only check media visibility if this is for a local request. This will
+                # raise directly back to the client if not visible
+                await self.is_media_visible(requester.user, media_info)
+            restrictions = await self.validate_media_restriction(
+                request, media_info, None, federation
+            )
+        restrictions_json = restrictions.to_dict() if restrictions else {}
+
         self.mark_recently_accessed(None, media_id)
 
         # Once we've checked auth we can return early if the media is cached on
@@ -581,12 +1165,23 @@ class MediaRepository:
         upload_name = name if name else media_info.upload_name
         url_cache = media_info.url_cache
 
-        file_info = FileInfo(None, media_id, url_cache=bool(url_cache))
+        file_info = FileInfo(
+            None,
+            media_id,
+            url_cache=bool(url_cache),
+            sha256=media_info.sha256,
+        )
 
         responder = await self.media_storage.fetch_media(file_info)
         if federation:
             await respond_with_multipart_responder(
-                self.clock, request, responder, media_type, media_length, upload_name
+                self.clock,
+                request,
+                responder,
+                media_type,
+                media_length,
+                upload_name,
+                restrictions_json,
             )
         else:
             await respond_with_responder(
@@ -602,6 +1197,7 @@ class MediaRepository:
         max_timeout_ms: int,
         ip_address: str,
         use_federation_endpoint: bool,
+        requester: Requester | None = None,
         allow_authenticated: bool = True,
         bypass_quarantine: bool = False,
     ) -> None:
@@ -618,6 +1214,8 @@ class MediaRepository:
             ip_address: the IP address of the requester
             use_federation_endpoint: whether to request the remote media over the new
                 federation `/download` endpoint
+            requester: The user making the request, to verify restricted media. Only
+                used for local users, not over federation
             allow_authenticated: whether media marked as authenticated may be served to this
                 request
             bypass_quarantine: whether to bypass quarantine checks
@@ -652,7 +1250,8 @@ class MediaRepository:
                 self.download_ratelimiter,
                 ip_address,
                 use_federation_endpoint,
-                allow_authenticated,
+                requester=requester,
+                allow_authenticated=allow_authenticated,
                 bypass_quarantine=bypass_quarantine,
             )
 
@@ -688,6 +1287,8 @@ class MediaRepository:
         ip_address: str,
         use_federation: bool,
         allow_authenticated: bool,
+        bypass_quarantine: bool = False,
+        requester: Requester | None = None,
     ) -> RemoteMedia:
         """Gets the media info associated with the remote file, downloading
         if necessary.
@@ -702,6 +1303,9 @@ class MediaRepository:
                 over the federation `/download` endpoint
             allow_authenticated: whether media marked as authenticated may be served to this
                 request
+            bypass_quarantine: whether to bypass quarantine checks
+            requester: The user making the request, to verify restricted media. Only
+                used for local users, not over federation
 
         Returns:
             The media info of the file
@@ -723,7 +1327,9 @@ class MediaRepository:
                 self.download_ratelimiter,
                 ip_address,
                 use_federation,
+                requester,
                 allow_authenticated,
+                bypass_quarantine,
             )
 
         # Ensure we actually use the responder so that it releases resources
@@ -741,7 +1347,8 @@ class MediaRepository:
         download_ratelimiter: Ratelimiter,
         ip_address: str,
         use_federation_endpoint: bool,
-        allow_authenticated: bool,
+        requester: Requester | None = None,
+        allow_authenticated: bool = True,
         bypass_quarantine: bool = False,
     ) -> tuple[Responder | None, RemoteMedia]:
         """Looks for media in local cache, if not there then attempt to
@@ -758,6 +1365,10 @@ class MediaRepository:
             ip_address: the IP address of the requester
             use_federation_endpoint: whether to request the remote media over the new federation
             /download endpoint
+            requester: The user making the request, to verify restricted media. Only
+                used for local users, not over federation
+            allow_authenticated: whether media marked as authenticated may be served to this
+                request
             bypass_quarantine: whether to bypass quarantine checks
 
         Returns:
@@ -770,14 +1381,21 @@ class MediaRepository:
             if not media_info or media_info.authenticated:
                 raise NotFoundError()
 
-        # file_id is the ID we use to track the file locally. If we've already
-        # seen the file then reuse the existing ID, otherwise generate a new
-        # one.
-
         # If we have an entry in the DB, try and look for it
         if media_info:
+            # if MSC3911 is enabled, check visibility of the media for the user. This
+            # check exists twice in this function, once up here for when it already
+            # exists in the local database and again further down for after it was
+            # retrieved from the remote.
+            if self.msc3911_config.enabled and requester is not None:
+                # This will raise directly back to the client if not visible
+                await self.is_media_visible(requester.user, media_info)
+
+            # file_id is the ID we use to track the file locally. If we've already
+            # seen the file then reuse the existing ID, otherwise generate a new
+            # one.
             file_id = media_info.filesystem_id
-            file_info = FileInfo(server_name, file_id)
+            file_info = FileInfo(server_name, file_id, sha256=media_info.sha256)
 
             if media_info.quarantined_by and not bypass_quarantine:
                 logger.info("Media is quarantined")
@@ -795,6 +1413,8 @@ class MediaRepository:
         # Failed to find the file anywhere, lets download it.
 
         try:
+            # Both of these retrieval functions will stage the file, so after they
+            # complete the migration function should be called below
             if not use_federation_endpoint:
                 media_info = await self._download_remote_file(
                     server_name,
@@ -829,10 +1449,26 @@ class MediaRepository:
             else:
                 raise e
 
+        # if MSC3911 is enabled, check visibility of the media for the user.
+        # Restricted media requires authentication to be enabled
+        if (
+            self.hs.config.media.enable_authenticated_media
+            and self.msc3911_config.enabled
+            and requester is not None
+        ):
+            # This will raise directly back to the client if not visible
+            await self.is_media_visible(requester.user, media_info)
+
         file_id = media_info.filesystem_id
         if not media_info.media_type:
             media_info = attr.evolve(media_info, media_type="application/octet-stream")
-        file_info = FileInfo(server_name, file_id)
+
+        # Now that the file has been retrieved, need to see if it needs to be migrated.
+        # Should probably do this before generating thumbnails
+        file_info = FileInfo(
+            server_name=server_name, file_id=file_id, sha256=media_info.sha256
+        )
+        await self.media_storage.maybe_move_media_file_from_id_to_sha256_path(file_info)
 
         # We generate thumbnails even if another process downloaded the media
         # as a) it's conceivable that the other download request dies before it
@@ -841,7 +1477,11 @@ class MediaRepository:
         # otherwise they'll request thumbnails and get a 404 if they're not
         # ready yet.
         await self._generate_thumbnails(
-            server_name, media_id, file_id, media_info.media_type
+            server_name=server_name,
+            media_id=media_id,
+            file_id=file_id,
+            media_type=media_info.media_type,
+            sha256=media_info.sha256,
         )
 
         responder = await self.media_storage.fetch_media(file_info)
@@ -858,6 +1498,7 @@ class MediaRepository:
         filesystem_id: str,
         sha256: str,
         fname: str,
+        restricted: bool = False,
     ) -> None:
         """Store remote media in database and clean up file on constraint violation."""
         try:
@@ -870,6 +1511,7 @@ class MediaRepository:
                 media_length=media_length,
                 filesystem_id=filesystem_id,
                 sha256=sha256,
+                restricted=restricted,
             )
         except self.store.database_engine.module.IntegrityError:
             # Another worker downloaded the media first. Clean up our file.
@@ -963,6 +1605,7 @@ class MediaRepository:
                 media_type = "application/octet-stream"
             upload_name = get_filename_from_headers(headers)
             time_now_ms = self.clock.time_msec()
+            sha256 = sha256writer.hexdigest()
 
         # Multiple remote media download requests can race (when using
         # multiple media repos), so this may throw a violation constraint
@@ -976,7 +1619,7 @@ class MediaRepository:
             upload_name=upload_name,
             media_length=length,
             filesystem_id=file_id,
-            sha256=sha256writer.hexdigest(),
+            sha256=sha256,
             fname=fname,
         )
 
@@ -998,7 +1641,11 @@ class MediaRepository:
             last_access_ts=time_now_ms,
             quarantined_by=None,
             authenticated=authenticated,
-            sha256=sha256writer.hexdigest(),
+            sha256=sha256,
+            # The "pre-msc3916" method for downloading over federation, restricted
+            # will always be false and attachments will always be None here
+            restricted=False,
+            attachments=None,
         )
 
     async def _federation_download_remote_file(
@@ -1047,10 +1694,16 @@ class MediaRepository:
                 )
                 # if we had to fall back to the _matrix/media endpoint it will only return
                 # the headers and length, check the length of the tuple before unpacking
+                attachment_dict: JsonDict
                 if len(res) == 3:
-                    length, headers, json = res
+                    length, headers, json_bytes = res
+                    if json_bytes:
+                        attachment_dict = json_decoder.decode(json_bytes.decode())
                 else:
                     length, headers = res
+                    # This is set to an empty {} just as it is responded when media is
+                    # not restricted, thus maintaining backwards compatibility
+                    attachment_dict = {}
             except RequestSendFailed as e:
                 logger.warning(
                     "Request failed fetching remote media %s/%s: %r",
@@ -1092,6 +1745,22 @@ class MediaRepository:
             upload_name = get_filename_from_headers(headers)
             time_now_ms = self.clock.time_msec()
 
+            sha256 = sha256writer.hexdigest()
+
+            # The unstable prefix on 'restrictions' will be here. Do not save that to
+            # the database, but filter it out. This is the companion to it's opposite in
+            # MediaRestrictions.to_dict() which adds it while unstable.
+            if "org.matrix.msc3911.restrictions" in attachment_dict:
+                restrictions_values = attachment_dict.pop(
+                    "org.matrix.msc3911.restrictions"
+                )
+                attachment_dict["restrictions"] = restrictions_values
+
+            # This can come in as 'falsey'(like '{}' or 'b""') so if this happens it has
+            # no restrictions. If it was restricted remotely, but had no attachments,
+            # then it should not have come across federation
+            restricted = True if "restrictions" in attachment_dict else False
+
         # Multiple remote media download requests can race (when using
         # multiple media repos), so this may throw a violation constraint
         # exception. If it does we'll delete the newly downloaded file from
@@ -1104,9 +1773,25 @@ class MediaRepository:
             upload_name=upload_name,
             media_length=length,
             filesystem_id=file_id,
-            sha256=sha256writer.hexdigest(),
+            sha256=sha256,
             fname=fname,
+            restricted=restricted,
         )
+
+        # TODO: Decide about raising here? It will delete the media from the
+        #  disk but will not remove the restricted flag from the remote media
+        #  entry that just got wrote. Is this important? According to the comment
+        #  blocks above the last statement, it could raise a constraint violation
+        #  which would block this from being called. But if it is racing, we may have
+        #  been here before. Should this be gracefully handled(and basically ignored)?
+        # To keep the 'media_attachments' table smaller, unrestricted media does not
+        # have a row, only the restricted column for both local and remote media
+        attachments: MediaRestrictions | None = None
+        if attachment_dict:
+            attachments = MediaRestrictions(**attachment_dict["restrictions"])
+            await self.store.set_media_restrictions(
+                server_name, media_id, attachment_dict
+            )
 
         logger.debug("Stored remote media in file %r", fname)
 
@@ -1126,7 +1811,9 @@ class MediaRepository:
             last_access_ts=time_now_ms,
             quarantined_by=None,
             authenticated=authenticated,
-            sha256=sha256writer.hexdigest(),
+            sha256=sha256,
+            restricted=restricted,
+            attachments=attachments,
         )
 
     def _get_thumbnail_requirements(
@@ -1180,9 +1867,15 @@ class MediaRepository:
         t_type: str,
         url_cache: bool,
         animated: bool = False,
+        sha256: str | None = None,
     ) -> tuple[str, FileInfo] | None:
         async with self.media_storage.ensure_media_is_in_local_cache(
-            FileInfo(None, media_id, url_cache=url_cache)
+            FileInfo(
+                None,
+                media_id,
+                url_cache=url_cache,
+                sha256=sha256,
+            )
         ) as input_path:
             try:
                 thumbnailer = Thumbnailer(input_path)
@@ -1221,6 +1914,7 @@ class MediaRepository:
                         type=t_type,
                         length=t_byte_source.getbuffer().nbytes,
                     ),
+                    sha256=sha256,
                 )
 
                 output_path = await self.media_storage.store_file(
@@ -1257,9 +1951,14 @@ class MediaRepository:
         t_method: str,
         t_type: str,
         animated: bool = False,
+        sha256: str | None = None,
     ) -> str | None:
         async with self.media_storage.ensure_media_is_in_local_cache(
-            FileInfo(server_name, file_id)
+            FileInfo(
+                server_name,
+                file_id,
+                sha256=sha256,
+            )
         ) as input_path:
             try:
                 thumbnailer = Thumbnailer(input_path)
@@ -1298,6 +1997,7 @@ class MediaRepository:
                         type=t_type,
                         length=t_byte_source.getbuffer().nbytes,
                     ),
+                    sha256=sha256,
                 )
 
                 output_path = await self.media_storage.store_file(
@@ -1334,6 +2034,7 @@ class MediaRepository:
         file_id: str,
         media_type: str,
         url_cache: bool = False,
+        sha256: str | None = None,
     ) -> dict | None:
         """Generate and store thumbnails for an image.
 
@@ -1341,10 +2042,11 @@ class MediaRepository:
             server_name: The server name if remote media, else None if local
             media_id: The media ID of the content. (This is the same as
                 the file_id for local content)
-            file_id: Local file ID
+            file_id: Local file ID.
             media_type: The content type of the file
             url_cache: If we are thumbnailing images downloaded for the URL cache,
                 used exclusively by the url previewer
+            sha256: The sha256 of the media. This will be used as the path, if sha256 path is enabled.
 
         Returns:
             Dict with "width" and "height" keys of original image or None if the
@@ -1355,7 +2057,7 @@ class MediaRepository:
             return None
 
         async with self.media_storage.ensure_media_is_in_local_cache(
-            FileInfo(server_name, file_id, url_cache=url_cache)
+            FileInfo(server_name, file_id, url_cache=url_cache, sha256=sha256)
         ) as input_path:
             try:
                 thumbnailer = Thumbnailer(input_path)
@@ -1454,6 +2156,7 @@ class MediaRepository:
                             t_method,
                             t_type,
                             t_byte_source,
+                            sha256,
                         )
 
                     if (
@@ -1497,6 +2200,7 @@ class MediaRepository:
         t_method: str,
         t_type: str,
         t_byte_source: BytesIO,
+        sha256: str | None = None,
     ) -> None:
         """Store a generated thumbnail to the configured storage and database."""
         file_info = FileInfo(
@@ -1510,6 +2214,7 @@ class MediaRepository:
                 type=t_type,
                 length=t_byte_source.getbuffer().nbytes,
             ),
+            sha256=sha256,
         )
 
         async with self.media_storage.store_into_file(file_info) as (f, fname):
@@ -1618,22 +2323,23 @@ class MediaRepository:
             logger.info("Deleting: %r", key)
 
             # TODO: Should we delete from the backup store
+            #  Jason: Probably, we literally don't delete from it anywhere else
 
             async with self.remote_media_linearizer.queue(key):
-                full_path = self.filepaths.remote_media_filepath(origin, file_id)
-                try:
-                    os.remove(full_path)
-                except OSError as e:
-                    logger.warning("Failed to remove file: %r", full_path)
-                    if e.errno == errno.ENOENT:
-                        pass
-                    else:
-                        continue
+                paths = [self.filepaths.remote_media_filepath(origin, file_id)]
+                thumbnail_paths = [
+                    self.filepaths.remote_media_thumbnail_dir(origin, file_id)
+                ]
 
-                thumbnail_dir = self.filepaths.remote_media_thumbnail_dir(
-                    origin, file_id
-                )
-                shutil.rmtree(thumbnail_dir, ignore_errors=True)
+                sha256 = await self.store.get_sha_for_remote_media_id(origin, media_id)
+                # In the interest of removing media that was de-duplicated, only purge
+                # the actual media object if there are no more references to it in the
+                # database.
+                if await self.store.get_media_reference_count_for_sha256(sha256) <= 1:
+                    paths.append(self.filepaths.filepath_sha(sha256))
+                    thumbnail_paths.append(self.filepaths.thumbnail_sha_dir(sha256))
+
+                _remove_media_files(paths, thumbnail_paths)
 
                 await self.store.delete_remote_media(origin, media_id)
                 deleted += 1
@@ -1647,7 +2353,7 @@ class MediaRepository:
         Delete the given local or remote media ID from this server
 
         Args:
-            media_id: The media ID to delete.
+            media_ids: The list of media IDs to delete.
         Returns:
             A tuple of (list of deleted media IDs, total deleted media IDs).
         """
@@ -1701,24 +2407,53 @@ class MediaRepository:
         removed_media = []
         for media_id in media_ids:
             logger.info("Deleting media with ID '%s'", media_id)
-            full_path = self.filepaths.local_media_filepath(media_id)
-            try:
-                os.remove(full_path)
-            except OSError as e:
-                logger.warning("Failed to remove file: %r: %s", full_path, e)
-                if e.errno == errno.ENOENT:
-                    pass
-                else:
-                    continue
+            paths = [
+                self.filepaths.local_media_filepath(media_id),
+            ]
+            thumbnail_paths = [self.filepaths.local_media_thumbnail_dir(media_id)]
 
-            thumbnail_dir = self.filepaths.local_media_thumbnail_dir(media_id)
-            shutil.rmtree(thumbnail_dir, ignore_errors=True)
+            sha256 = await self.store.get_sha_for_local_media_id(media_id)
+            # In the interest of removing media that was de-duplicated, only purge
+            # the actual media object if there are no more references to it in the
+            # database.
+            if await self.store.get_media_reference_count_for_sha256(sha256) <= 1:
+                paths.append(self.filepaths.filepath_sha(sha256))
+                thumbnail_paths.append(self.filepaths.thumbnail_sha_dir(sha256))
 
+            _remove_media_files(paths, thumbnail_paths)
+
+            # Poorly named, this deletes media *from this server* that is somehow
+            # considered "remote". Observe the server name argument below
             await self.store.delete_remote_media(self.server_name, media_id)
 
             await self.store.delete_url_cache((media_id,))
+            # Poorly named, but this is the one that cleans out local media metadata
             await self.store.delete_url_cache_media((media_id,))
 
             removed_media.append(media_id)
 
         return removed_media, len(removed_media)
+
+
+def _remove_media_files(paths: list[str], thumbnail_paths: list[str]) -> None:
+    """
+    Remove the select files from the filesystem. IO related errors, such as non-existent
+    files, will be ignored.
+
+    Args:
+        paths: The absolute path to a specific file to be removed
+        thumbnail_paths: The absolute path to a specific directory. The entire directory
+            will be removed.
+    """
+    for path in paths:
+        try:
+            os.remove(path)
+        except OSError as e:
+            logger.warning("Failed to remove file: %r: %s", path, e)
+            if e.errno == errno.ENOENT:
+                pass
+            else:
+                continue
+
+    for thumbnail_path in thumbnail_paths:
+        shutil.rmtree(thumbnail_path, ignore_errors=True)

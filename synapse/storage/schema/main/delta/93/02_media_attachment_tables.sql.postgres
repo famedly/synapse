@@ -1,0 +1,7 @@
+-- Postgres supports Generalized Inverted Indexes, which work well for JSON data.
+CREATE INDEX media_attachments_event_id_idx ON media_attachments USING GIN ((restrictions_json->'restrictions'->'event_id'));
+
+CREATE INDEX media_attachments_profile_user_id_idx ON media_attachments USING GIN ((restrictions_json->'restrictions'->'profile_user_id'));
+
+-- Unfortunately, SQLite does not support the same sort of index. The alternative would
+-- probably be an index on a generated column produced from the JSON at insertion time.

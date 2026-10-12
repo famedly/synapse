@@ -19,7 +19,7 @@
 #
 #
 
-SCHEMA_VERSION = 94  # remember to update the list below when updating
+SCHEMA_VERSION = 95  # remember to update the list below when updating
 """Represents the expectations made by the codebase about the database schema
 
 This should be incremented whenever the codebase changes its requirements on the
@@ -177,6 +177,12 @@ Changes in SCHEMA_VERSION = 94
     - MSC4242: Add state DAG tables.
     - MSC4429/MSC4262: Track updates to user profile fields via a new stream.
     - Add an `inserted_ts` column to the `state_groups_persisting` table.
+
+Changes in SCHEMA_VERSION = 95
+    - Introduced new column for `local_media_repository` and `remote_media_cache` to
+      flag media as 'restricted'. Defaults to False
+    - Introduced new table, `media_attachments`, to hold restriction data based on
+      `server_name` and `media_id`.
 """
 
 

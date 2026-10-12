@@ -1,0 +1,9 @@
+ALTER TABLE local_media_repository
+ADD COLUMN restricted INTEGER DEFAULT 0 CHECK (restricted IN (0, 1));
+
+ALTER TABLE remote_media_cache
+ADD COLUMN restricted INTEGER DEFAULT 0 CHECK (restricted IN (0, 1));
+
+ -- sqlite doesn't do booleans, integers is what you get
+ -- by using DEFAULT 0, the existing data should be backwards compatible
+ -- the CHECK enforces the data(equivalent of NOT NULL)

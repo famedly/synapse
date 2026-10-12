@@ -177,6 +177,7 @@ class MediaStorage:
             self.local_media_directory = local_provider.base_directory
         self._spam_checker_module_callbacks = hs.get_module_api_callbacks().spam_checker
         self.clock = hs.get_clock()
+        self.use_sha256_path = hs.config.media.enable_local_media_storage_deduplication
 
     @trace_with_opname("MediaStorage.store_file")
     async def store_file(self, source: IO, file_info: FileInfo) -> str:
@@ -224,8 +225,8 @@ class MediaStorage:
             async with media_storage.store_into_file(info) as (f, media_filepath,):
                 # .. write into f ...
         """
-
-        path = self._file_info_to_path(file_info)
+        # With `use_sha256_path` enabled, new files are stored with SHA256 paths.
+        path = self.resolve_path_to_media_file(file_info)
         is_temp_file = False
 
         if self.local_provider:
@@ -259,9 +260,12 @@ class MediaStorage:
                     # the spam-check API.
                     raise SpamMediaException(errcode=spam_check[0])
 
+                # Unlike the local cache, the storage providers are on their own for
+                # de-duplicating media. They get a relative path to work with
+                relative_legacy_path = self._file_info_to_path(file_info)
                 for provider in self.storage_providers:
                     with start_active_span(str(provider)):
-                        await provider.store_file(path, file_info)
+                        await provider.store_file(relative_legacy_path, file_info)
 
                 # If using a temp file, delete it after uploading to storage providers
                 if is_temp_file:
@@ -299,7 +303,7 @@ class MediaStorage:
                     return FileResponder(self.hs, open(local_path, "rb"))
             return None
 
-        paths = [self._file_info_to_path(file_info)]
+        paths = [self.resolve_path_to_media_file(file_info)]
 
         # fallback for remote thumbnails with no method in the filename
         if file_info.thumbnail and file_info.server_name:
@@ -322,6 +326,10 @@ class MediaStorage:
                     return res
                 logger.debug("%s not found on %s", path, self.local_provider)
 
+        # Unlike the local cache, the storage providers are on their own for
+        # de-duplicating media. They get a relative path to work with
+        relative_legacy_path = self._file_info_to_path(file_info)
+        paths = [relative_legacy_path]
         for provider in self.storage_providers:
             for path in paths:
                 res = await provider.fetch(path, file_info)
@@ -353,7 +361,9 @@ class MediaStorage:
             async with media_storage.ensure_media_is_in_local_cache(file_info) as path:
                 # use path to read the file
         """
-        path = self._file_info_to_path(file_info)
+        path = self.resolve_path_to_media_file(file_info)
+        # Storage providers do not de-duplicate, so always use the media ID path
+        provider_path = self._file_info_to_path(file_info)
         if self.local_provider:
             local_path = os.path.join(self.local_media_directory, path)  # type: ignore[arg-type]
             if os.path.exists(local_path):
@@ -381,7 +391,7 @@ class MediaStorage:
             os.makedirs(os.path.dirname(local_path), exist_ok=True)
 
             for provider in self.storage_providers:
-                remote_res: Any = await provider.fetch(path, file_info)
+                remote_res: Any = await provider.fetch(provider_path, file_info)
                 if remote_res:
                     with remote_res:
                         consumer = BackgroundFileConsumer(
@@ -395,8 +405,9 @@ class MediaStorage:
             raise NotFoundError()
         else:
             # No local provider, download to temp file and clean up after use
+
             for provider in self.storage_providers:
-                res: Any = await provider.fetch(path, file_info)
+                res: Any = await provider.fetch(provider_path, file_info)
                 if res:
                     temp_path = None
                     try:
@@ -423,10 +434,14 @@ class MediaStorage:
 
     @trace
     def _file_info_to_path(self, file_info: FileInfo) -> str:
-        """Converts file_info into a relative path.
+        """
+        Converts file_info to a relative path.
 
         The path is suitable for storing files under a directory, e.g. used to
         store files on local FS under the base media repository directory.
+
+        Args:
+            file_info: File information
         """
         if file_info.url_cache:
             if file_info.thumbnail:
@@ -462,6 +477,135 @@ class MediaStorage:
                 method=file_info.thumbnail.method,
             )
         return self.filepaths.local_media_filepath_rel(file_info.file_id)
+
+    def _file_info_to_sha256_path(self, file_info: FileInfo) -> str:
+        """
+        Resolve the path based on the sha256 hash. This does not work for the url cache.
+
+        Returns:
+            The relative path to where the file should be
+        """
+        # There should not be a case where a url preview should be cached in sha256
+        assert not file_info.url_cache, "Can not use sha256 paths with url caching"
+
+        assert file_info.sha256 is not None, (
+            "Can not resolve a path to a sha256 object without a hash"
+        )
+        if file_info.thumbnail:
+            return self.filepaths.thumbnail_sha_rel(
+                sha256=file_info.sha256,
+                width=file_info.thumbnail.width,
+                height=file_info.thumbnail.height,
+                content_type=file_info.thumbnail.type,
+                method=file_info.thumbnail.method,
+            )
+        return self.filepaths.filepath_sha_rel(file_info.sha256)
+
+    def resolve_path_to_media_file(self, file_info: FileInfo) -> str:
+        """
+        Fully resolve the filesystem path to the media object. Allow for backwards
+        compatibility with existing media_id-based file names.
+
+        Arguments:
+            file_info: The FileInfo object that contains the data for looking up the
+                file path
+        Returns:
+            The fully resolved, relative path to the file request.
+        """
+
+        media_id_path = self._file_info_to_path(file_info)
+
+        if not file_info.sha256 or file_info.url_cache:
+            return media_id_path
+        sha256_path = self._file_info_to_sha256_path(file_info)
+
+        media_id_file_exists = False
+        sha256_file_exists = False
+        if self.local_media_directory:
+            media_id_abs_path = os.path.join(self.local_media_directory, media_id_path)
+            media_id_file_exists = os.path.exists(media_id_abs_path)
+
+            sha256_abs_path = os.path.join(self.local_media_directory, sha256_path)
+            sha256_file_exists = os.path.exists(sha256_abs_path)
+
+            logger.debug(
+                "Verifying media file exists at path %s: %r",
+                media_id_abs_path,
+                media_id_file_exists,
+            )
+            logger.debug(
+                "Verifying media file exists at sha256 path %s: %r",
+                sha256_abs_path,
+                sha256_file_exists,
+            )
+
+        # When `use_sha256_path` is not enabled, but might have been in the past, use
+        # that file if it already exists. Perhaps the admin changed their mind?
+        if sha256_file_exists:
+            return sha256_path
+        if media_id_file_exists:
+            return media_id_path
+        return sha256_path if self.use_sha256_path else media_id_path
+
+    async def maybe_move_media_file_from_id_to_sha256_path(
+        self, file_info: FileInfo
+    ) -> None:
+        """
+        Move a media file from a legacy "media_id" based path to a "sha256" based path.
+        This is most appropriate after using `store_into_file()` for federation
+        downloaded media.
+        """
+        # Check the old media id path for the file, then check the sha256 path.
+        # If media exists on the old path, and use_sha256_path is enabled, move
+        # the file. Migration is one way
+
+        if not self.use_sha256_path:
+            logger.debug("Can not move media file if de-deduplication turned off")
+            return
+        if not file_info.sha256:
+            logger.warning(
+                "Sha256 data on media/file id '%s' is missing. Skipping file move",
+                file_info.file_id,
+            )
+            return
+
+        media_id_path = self._file_info_to_path(file_info)
+        if self.local_media_directory:
+            media_id_abs_path = os.path.join(self.local_media_directory, media_id_path)
+            media_id_file_exists = os.path.exists(media_id_abs_path)
+            logger.debug(
+                "Verifying media file exists at path %s: %r",
+                media_id_abs_path,
+                media_id_file_exists,
+            )
+
+        sha256_path = self._file_info_to_sha256_path(file_info)
+        if self.local_media_directory:
+            sha256_abs_path = os.path.join(self.local_media_directory, sha256_path)
+            sha256_file_exists = os.path.exists(sha256_abs_path)
+            logger.debug(
+                "Verifying media file exists at sha256 path %s: %r",
+                sha256_abs_path,
+                sha256_file_exists,
+            )
+
+        if media_id_file_exists and not sha256_file_exists:
+            os.makedirs(os.path.dirname(sha256_abs_path), exist_ok=True)
+            # os.rename() should be an atomic operation
+            os.rename(media_id_abs_path, sha256_abs_path)
+            logger.debug(
+                "Moved file from old media id path to new sha256 path: %s",
+                sha256_abs_path,
+            )
+
+        # Having `use_sha256_path` enabled is our signal that the server prefers using
+        # the newer path style
+        if media_id_file_exists and sha256_file_exists:
+            # Probably should clean up the old duplicate? Do we want a feature flag?
+            os.remove(media_id_abs_path)
+            logger.debug(
+                "Both paths existed, deleting old media id path: %s", media_id_abs_path
+            )
 
 
 @trace
