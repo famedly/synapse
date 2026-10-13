@@ -35,7 +35,7 @@ from synapse.server import HomeServer
 from synapse.util.clock import Clock
 
 from tests import unittest
-from tests.test_utils import SMALL_CMYK_JPEG, SMALL_PNG
+from tests.test_utils import SMALL_CMYK_JPEG, SMALL_PNG, SMALL_PNG_SHA256
 from tests.unittest import override_config
 
 VALID_TIMESTAMP = 1609459200000  # 2021-01-01 in milliseconds
@@ -85,7 +85,7 @@ class QueryMediaByIDTestCase(_AdminMediaTests):
                 time_now_ms=self.clock.time_msec(),
                 upload_name="test.png",
                 filesystem_id=file_id,
-                sha256=file_id,
+                sha256=SMALL_PNG_SHA256,
             )
         )
 
@@ -322,7 +322,7 @@ class DeleteMediaByIDTestCase(_AdminMediaTests):
         )
 
         # Test if the file exists
-        local_path = self.filepaths.local_media_filepath(media_id)
+        local_path = self.filepaths.local_media_filepath(SMALL_PNG_SHA256)
         self.assertTrue(os.path.exists(local_path))
 
         url = "/_synapse/admin/v1/media/%s/%s" % (self.server_name, media_id)
@@ -359,6 +359,28 @@ class DeleteMediaByIDTestCase(_AdminMediaTests):
 
         # Test if the file is deleted
         self.assertFalse(os.path.exists(local_path))
+
+    def test_delete_media_with_shared_sha256(self) -> None:
+        """
+        Tests that a file shared by media with the same content is only deleted
+        once no media references it
+        """
+        media_ids = [
+            self.helper.upload_media(
+                SMALL_PNG, tok=self.admin_user_tok, expect_code=200
+            )["content_uri"].split("/")[-1]
+            for _ in range(2)
+        ]
+        local_path = self.filepaths.local_media_filepath(SMALL_PNG_SHA256)
+
+        for i, media_id in enumerate(media_ids):
+            channel = self.make_request(
+                "DELETE",
+                f"/_synapse/admin/v1/media/{self.server_name}/{media_id}",
+                access_token=self.admin_user_tok,
+            )
+            self.assertEqual(200, channel.code, msg=channel.json_body)
+            self.assertEqual(i == 0, os.path.exists(local_path))
 
 
 class DeleteMediaByDateSizeTestCase(_AdminMediaTests):
@@ -513,7 +535,7 @@ class DeleteMediaByDateSizeTestCase(_AdminMediaTests):
 
         # test that the file exists
         media_id = server_and_media_id.split("/")[1]
-        local_path = self.filepaths.local_media_filepath(media_id)
+        local_path = self.filepaths.local_media_filepath(SMALL_PNG_SHA256)
         self.assertTrue(os.path.exists(local_path))
 
         # timestamp after upload/create
@@ -722,8 +744,7 @@ class DeleteMediaByDateSizeTestCase(_AdminMediaTests):
         """
         Try to access a media and check the result
         """
-        media_id = server_and_media_id.split("/")[1]
-        local_path = self.filepaths.local_media_filepath(media_id)
+        local_path = self.filepaths.local_media_filepath(SMALL_PNG_SHA256)
 
         channel = self.make_request(
             "GET",

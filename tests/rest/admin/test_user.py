@@ -64,7 +64,7 @@ from synapse.util.clock import CLOCK_SCHEDULE_EPSILON, Clock
 
 from tests import unittest
 from tests.replication._base import BaseMultiWorkerStreamTestCase
-from tests.test_utils import SMALL_PNG
+from tests.test_utils import SMALL_PNG, SMALL_PNG_SHA256
 from tests.test_utils.event_injection import inject_event
 from tests.unittest import override_config
 
@@ -4034,12 +4034,10 @@ class UserMediaRestTestCase(unittest.HomeserverTestCase):
         other_user_tok = self.login("user", "pass")
         media_ids = self._create_media_for_user(other_user_tok, number_media)
 
-        # Test if the file exists
-        local_paths = []
-        for media_id in media_ids:
-            local_path = self.filepaths.local_media_filepath(media_id)
-            self.assertTrue(os.path.exists(local_path))
-            local_paths.append(local_path)
+        # Test if the file exists. All the media share the same content, and so
+        # the same file.
+        local_path = self.filepaths.local_media_filepath(SMALL_PNG_SHA256)
+        self.assertTrue(os.path.exists(local_path))
 
         channel = self.make_request(
             "DELETE",
@@ -4053,8 +4051,7 @@ class UserMediaRestTestCase(unittest.HomeserverTestCase):
         self.assertCountEqual(channel.json_body["deleted_media"], media_ids)
 
         # Test if the file is deleted
-        for local_path in local_paths:
-            self.assertFalse(os.path.exists(local_path))
+        self.assertFalse(os.path.exists(local_path))
 
     def test_order_by(self) -> None:
         """

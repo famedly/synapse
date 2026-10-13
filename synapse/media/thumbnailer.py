@@ -451,6 +451,7 @@ class ThumbnailProvider:
             server_name=None,
             for_federation=for_federation,
             media_info=media_info,
+            sha256=media_info.sha256,
         )
 
     async def select_or_generate_local_thumbnail(
@@ -496,6 +497,7 @@ class ThumbnailProvider:
                     file_id=media_id,
                     url_cache=bool(media_info.url_cache),
                     thumbnail=info,
+                    sha256=media_info.sha256,
                 )
 
                 responder = await self.media_storage.fetch_media(file_info)
@@ -527,6 +529,7 @@ class ThumbnailProvider:
             desired_type,
             url_cache=bool(media_info.url_cache),
             animated=animated,
+            sha256=media_info.sha256,
         )
 
         if thumbnail_result:
@@ -604,6 +607,7 @@ class ThumbnailProvider:
                     server_name=server_name,
                     file_id=file_id,
                     thumbnail=info,
+                    sha256=media_info.sha256,
                 )
 
                 responder = await self.media_storage.fetch_media(file_info)
@@ -625,6 +629,7 @@ class ThumbnailProvider:
             desired_method,
             desired_type,
             animated=animated,
+            sha256=media_info.sha256,
         )
 
         if file_path:
@@ -686,6 +691,7 @@ class ThumbnailProvider:
             url_cache=False,
             server_name=server_name,
             for_federation=False,
+            sha256=media_info.sha256,
         )
 
     async def _select_and_respond_with_thumbnail(
@@ -702,6 +708,7 @@ class ThumbnailProvider:
         for_federation: bool,
         media_info: LocalMedia | None = None,
         server_name: str | None = None,
+        sha256: str | None = None,
     ) -> None:
         """
         Respond to a request with an appropriate thumbnail from the previously generated thumbnails.
@@ -718,6 +725,7 @@ class ThumbnailProvider:
             server_name: The server name, if this is a remote thumbnail.
             for_federation: whether the request is from the federation /thumbnail request
             media_info: metadata about the media being requested.
+            sha256: The SHA-256 of the media, if known.
         """
         logger.debug(
             "_select_and_respond_with_thumbnail: media_id=%s desired=%sx%s (%s) thumbnail_infos=%s",
@@ -742,6 +750,7 @@ class ThumbnailProvider:
                 file_id,
                 url_cache,
                 server_name,
+                sha256,
             )
             if not file_info:
                 logger.info("Couldn't find a thumbnail matching the desired inputs")
@@ -797,6 +806,7 @@ class ThumbnailProvider:
                     t_method=file_info.thumbnail.method,
                     t_type=file_info.thumbnail.type,
                     animated=regen_animated,
+                    sha256=sha256,
                 )
             else:
                 await self.media_repo.generate_local_exact_thumbnail(
@@ -807,6 +817,7 @@ class ThumbnailProvider:
                     t_type=file_info.thumbnail.type,
                     url_cache=url_cache,
                     animated=regen_animated,
+                    sha256=sha256,
                 )
 
             responder = await self.media_storage.fetch_media(file_info)
@@ -863,6 +874,7 @@ class ThumbnailProvider:
         file_id: str,
         url_cache: bool,
         server_name: str | None,
+        sha256: str | None = None,
     ) -> FileInfo | None:
         """
         Choose an appropriate thumbnail from the previously generated thumbnails.
@@ -876,6 +888,7 @@ class ThumbnailProvider:
             file_id: The ID of the media that a thumbnail is being requested for.
             url_cache: True if this is from a URL cache.
             server_name: The server name, if this is a remote thumbnail.
+            sha256: The SHA-256 of the media, if known.
 
         Returns:
              The thumbnail which best matches the desired parameters.
@@ -976,6 +989,7 @@ class ThumbnailProvider:
                 url_cache=url_cache,
                 server_name=server_name,
                 thumbnail=thumbnail_info,
+                sha256=sha256,
             )
 
         # No matching thumbnail was found.

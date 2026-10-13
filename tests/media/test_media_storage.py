@@ -47,7 +47,11 @@ from synapse.http.types import QueryParams
 from synapse.logging.context import make_deferred_yieldable
 from synapse.media._base import FileInfo, ThumbnailInfo
 from synapse.media.filepath import MediaFilePaths
-from synapse.media.media_storage import MediaStorage, ReadableFileWrapper
+from synapse.media.media_storage import (
+    MediaStorage,
+    ReadableFileWrapper,
+    SHA256TransparentIOWriter,
+)
 from synapse.media.storage_provider import (
     FileStorageProviderBackend,
     StorageProviderWrapper,
@@ -137,6 +141,62 @@ class MediaStorageTests(unittest.HomeserverTestCase):
         # This uses a real blocking threadpool so we have to wait for it to be
         # actually done :/
         self.get_success(test_ensure_media())
+
+    def test_store_file_uses_sha256_path(self) -> None:
+        """New media is stored under its SHA-256, not its media ID."""
+        self.get_success(
+            self.media_storage.store_file(BytesIO(SMALL_PNG), FileInfo(None, "abcdef"))
+        )
+
+        sha256_path = self.filepaths.local_media_filepath(SMALL_PNG_SHA256)
+        with open(sha256_path, "rb") as f:
+            self.assertEqual(f.read(), SMALL_PNG)
+        self.assertFalse(os.path.exists(self.filepaths.local_media_filepath("abcdef")))
+        # The temporary file was moved into place, not left behind.
+        self.assertEqual(os.listdir(self.primary_base_path), ["local_content"])
+
+        # Storage providers receive the SHA-256 path too.
+        rel_path = self.filepaths.local_media_filepath_rel(SMALL_PNG_SHA256)
+        self.assertTrue(
+            os.path.exists(os.path.join(self.secondary_base_path, rel_path))
+        )
+
+    def test_store_into_file_shares_sha256(self) -> None:
+        """Callers reuse the SHA-256 computed by `store_into_file`."""
+
+        async def store() -> str:
+            async with self.media_storage.store_into_file(FileInfo(None, "abcdef")) as (
+                f,
+                _,
+            ):
+                writer = SHA256TransparentIOWriter.get_or_wrap(f)
+                self.assertIs(writer, f)
+                writer.write(SMALL_PNG)
+            return writer.hexdigest()
+
+        self.assertEqual(self.get_success(store()), SMALL_PNG_SHA256)
+
+    def test_ensure_media_prefers_sha256_path(self) -> None:
+        """The SHA-256 path is used if it exists, else the media ID path."""
+        file_info = FileInfo(None, "abcdef", sha256=SMALL_PNG_SHA256)
+        legacy_path = self.filepaths.local_media_filepath("abcdef")
+        sha256_path = self.filepaths.local_media_filepath(SMALL_PNG_SHA256)
+
+        async def local_path() -> str:
+            async with self.media_storage.ensure_media_is_in_local_cache(
+                file_info
+            ) as path:
+                return path
+
+        os.makedirs(os.path.dirname(legacy_path))
+        with open(legacy_path, "wb") as f:
+            f.write(SMALL_PNG)
+        self.assertEqual(self.get_success(local_path()), legacy_path)
+
+        os.makedirs(os.path.dirname(sha256_path))
+        with open(sha256_path, "wb") as f:
+            f.write(SMALL_PNG)
+        self.assertEqual(self.get_success(local_path()), sha256_path)
 
 
 @attr.s(auto_attribs=True, slots=True, frozen=True)
