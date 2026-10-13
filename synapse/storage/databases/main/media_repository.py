@@ -988,6 +988,34 @@ class MediaRepositoryStore(MediaRepositoryBackgroundUpdateStore):
             "delete_url_cache_media", _delete_url_cache_media_txn
         )
 
+    async def is_media_sha256_in_use(
+        self, sha256: str, origin: str | None = None
+    ) -> bool:
+        """Whether any media is still stored under the given SHA-256 path.
+
+        Args:
+            sha256: The SHA-256 of the media.
+            origin: The origin to check remote media from, or None to check local
+                media. URL cache media is ignored, as it is not stored by SHA-256.
+        """
+        if origin is None:
+            sql = """
+                SELECT 1 FROM local_media_repository
+                WHERE sha256 = ? AND url_cache IS NULL
+                LIMIT 1
+            """
+            rows = await self.db_pool.execute("is_media_sha256_in_use", sql, sha256)
+        else:
+            sql = """
+                SELECT 1 FROM remote_media_cache
+                WHERE media_origin = ? AND sha256 = ?
+                LIMIT 1
+            """
+            rows = await self.db_pool.execute(
+                "is_media_sha256_in_use", sql, origin, sha256
+            )
+        return bool(rows)
+
     async def get_is_hash_quarantined(self, sha256: str) -> bool:
         """Get whether a specific sha256 hash digest matches any quarantined media.
 

@@ -20,6 +20,7 @@
 #
 import contextlib
 import hashlib
+import itertools
 import json
 import logging
 import os
@@ -78,6 +79,17 @@ class SHA256TransparentIOWriter:
     def __init__(self, source: BinaryIO):
         self._hash = hashlib.sha256()
         self._source = source
+
+    @classmethod
+    def get_or_wrap(cls, source: BinaryIO) -> "SHA256TransparentIOWriter":
+        """Returns `source` if it already computes a SHA-256 (e.g. the file
+        yielded by `MediaStorage.store_into_file` for new media), otherwise wraps it.
+
+        This avoids hashing the same bytes twice.
+        """
+        if isinstance(source, cls):
+            return source
+        return cls(source)
 
     def write(self, buffer: bytes | bytearray) -> int:
         """Wrapper for source.write()
@@ -216,6 +228,21 @@ class MediaStorage:
         media_filepath can be used to read the contents from after upload, e.g. to
         generate thumbnails.
 
+        Where the file is written:
+
+        * If the final path is known up front and there is a local media store,
+          the file is written there directly. This is the case for thumbnails
+          (stored under their parent media's SHA-256, or `media_id` for older media
+          without one), URL cache files (always under `media_id`), and original
+          media whose `file_info.sha256` is already set.
+        * Original media without a known `file_info.sha256` (i.e. new uploads and
+          remote downloads) is written to a temporary file while its SHA-256 is
+          computed. After the spam check, it is moved atomically to its SHA-256
+          path, which is then sent to the storage providers. In this case
+          media_filepath is only valid inside the context manager.
+        * Without a local media store, the file is written to a temporary file
+          that is removed once it has been sent to the storage providers.
+
         Args:
             file_info: Info about the file to store
 
@@ -225,22 +252,61 @@ class MediaStorage:
                 # .. write into f ...
         """
 
-        path = self._file_info_to_path(file_info)
-        is_temp_file = False
+        # The relative path to store the file at, or None if it depends on the
+        # SHA-256 of the content, which is only known once it has been written.
+        path: str | None = None
+        if file_info.sha256 or file_info.thumbnail or file_info.url_cache:
+            path = self._candidate_paths(file_info)[0]
 
-        if self.local_provider:
-            media_filepath = os.path.join(self.local_media_directory, path)  # type: ignore[arg-type]
-            os.makedirs(os.path.dirname(media_filepath), exist_ok=True)
+        is_temp_file = path is None or not self.local_provider
+        sha256_writer: SHA256TransparentIOWriter | None = None
+        media_filepath: str | None = None
 
-            with start_active_span("writing to main media repo"):
-                with open(media_filepath, "wb") as f:
-                    yield f, media_filepath
-        else:
-            # No local provider, write to temp file
-            is_temp_file = True
-            with tempfile.NamedTemporaryFile(delete=False) as f:
-                media_filepath = f.name
-                yield cast(BinaryIO, f), media_filepath
+        try:
+            if not is_temp_file:
+                # The path is known and there is a local media store: thumbnails,
+                # URL cache files, or media with a known SHA-256.
+                media_filepath = os.path.join(self.local_media_directory, path)  # type: ignore[arg-type]
+                f = await defer_to_thread(
+                    self.reactor, _open_for_writing, media_filepath
+                )
+
+                with start_active_span("writing to main media repo"):
+                    with f:
+                        yield f, media_filepath
+            else:
+                # Either the path depends on the SHA-256 of the content, or there
+                # is no local media store. Keep the temp file on the same filesystem
+                # as the media store so it can be moved into place atomically.
+                tmp = await defer_to_thread(
+                    self.reactor, _create_temp_file, self.local_media_directory
+                )
+                media_filepath = tmp.name
+                with tmp:
+                    if path is None:
+                        # Callers can reuse this hash with
+                        # `SHA256TransparentIOWriter.get_or_wrap`.
+                        sha256_writer = SHA256TransparentIOWriter(tmp)
+                        yield sha256_writer.wrap(), media_filepath
+                    else:
+                        yield tmp, media_filepath
+        except BaseException:
+            # The caller failed to write the file (e.g. a failed remote download),
+            # so don't leave a partial temp file behind. This must not await, as
+            # the generator may be being closed with `GeneratorExit`.
+            if is_temp_file and media_filepath is not None:
+                _remove_quietly(media_filepath)
+            raise
+
+        assert media_filepath is not None
+        if sha256_writer is not None:
+            file_info = attr.evolve(file_info, sha256=sha256_writer.hexdigest())
+            path = self._file_info_to_path(file_info, file_info.sha256)
+        assert path is not None
+
+        # Whether media_filepath may be removed on failure. A pre-existing SHA-256
+        # file can be shared with other media, so it must not be removed.
+        owns_media_filepath = True
 
         # Spam check and store to other providers (runs for both local and temp file cases)
         try:
@@ -259,22 +325,30 @@ class MediaStorage:
                     # the spam-check API.
                     raise SpamMediaException(errcode=spam_check[0])
 
+                # Only move the file once it has passed the spam check, so blocked
+                # media never appears at its SHA-256 path. Storage providers such
+                # as `FileStorageProviderBackend` copy from the final path, so this
+                # must happen before storing to them.
+                if is_temp_file and self.local_provider:
+                    final_filepath = os.path.join(self.local_media_directory, path)  # type: ignore[arg-type]
+                    existed = await defer_to_thread(
+                        self.reactor, _move_into_place, media_filepath, final_filepath
+                    )
+                    owns_media_filepath = not existed
+                    media_filepath = final_filepath
+                    is_temp_file = False
+
                 for provider in self.storage_providers:
                     with start_active_span(str(provider)):
                         await provider.store_file(path, file_info)
 
                 # If using a temp file, delete it after uploading to storage providers
                 if is_temp_file:
-                    try:
-                        os.remove(media_filepath)
-                    except Exception:
-                        pass
+                    await defer_to_thread(self.reactor, _remove_quietly, media_filepath)
 
         except Exception as e:
-            try:
-                os.remove(media_filepath)
-            except Exception:
-                pass
+            if owns_media_filepath:
+                await defer_to_thread(self.reactor, _remove_quietly, media_filepath)
 
             raise e from None
 
@@ -299,7 +373,7 @@ class MediaStorage:
                     return FileResponder(self.hs, open(local_path, "rb"))
             return None
 
-        paths = [self._file_info_to_path(file_info)]
+        paths = self._candidate_paths(file_info)
 
         # fallback for remote thumbnails with no method in the filename
         if file_info.thumbnail and file_info.server_name:
@@ -353,12 +427,14 @@ class MediaStorage:
             async with media_storage.ensure_media_is_in_local_cache(file_info) as path:
                 # use path to read the file
         """
-        path = self._file_info_to_path(file_info)
+        paths = self._candidate_paths(file_info)
+
         if self.local_provider:
-            local_path = os.path.join(self.local_media_directory, path)  # type: ignore[arg-type]
-            if os.path.exists(local_path):
-                yield local_path
-                return
+            for path in paths:
+                local_path = os.path.join(self.local_media_directory, path)  # type: ignore[arg-type]
+                if os.path.exists(local_path):
+                    yield local_path
+                    return
 
             # Fallback for paths without method names
             # Should be removed in the future
@@ -378,24 +454,25 @@ class MediaStorage:
                     yield legacy_local_path
                     return
 
-            os.makedirs(os.path.dirname(local_path), exist_ok=True)
-
             for provider in self.storage_providers:
-                remote_res: Any = await provider.fetch(path, file_info)
-                if remote_res:
-                    with remote_res:
-                        consumer = BackgroundFileConsumer(
-                            open(local_path, "wb"), self.reactor
-                        )
-                        await remote_res.write_to_consumer(consumer)
-                        await consumer.wait()
-                    yield local_path
-                    return
+                for path in paths:
+                    remote_res: Any = await provider.fetch(path, file_info)
+                    if remote_res:
+                        local_path = os.path.join(self.local_media_directory, path)  # type: ignore[arg-type]
+                        os.makedirs(os.path.dirname(local_path), exist_ok=True)
+                        with remote_res:
+                            consumer = BackgroundFileConsumer(
+                                open(local_path, "wb"), self.reactor
+                            )
+                            await remote_res.write_to_consumer(consumer)
+                            await consumer.wait()
+                        yield local_path
+                        return
 
             raise NotFoundError()
         else:
             # No local provider, download to temp file and clean up after use
-            for provider in self.storage_providers:
+            for provider, path in itertools.product(self.storage_providers, paths):
                 res: Any = await provider.fetch(path, file_info)
                 if res:
                     temp_path = None
@@ -422,46 +499,66 @@ class MediaStorage:
             raise NotFoundError()
 
     @trace
-    def _file_info_to_path(self, file_info: FileInfo) -> str:
+    def _file_info_to_path(
+        self, file_info: FileInfo, identifier: str | None = None
+    ) -> str:
         """Converts file_info into a relative path.
 
         The path is suitable for storing files under a directory, e.g. used to
         store files on local FS under the base media repository directory.
+
+        Args:
+            file_info: Info about the file.
+            identifier: The identifier to build the path from, e.g. the SHA-256.
+                Defaults to `file_info.file_id`.
         """
+        identifier = identifier or file_info.file_id
         if file_info.url_cache:
             if file_info.thumbnail:
                 return self.filepaths.url_cache_thumbnail_rel(
-                    media_id=file_info.file_id,
+                    media_id=identifier,
                     width=file_info.thumbnail.width,
                     height=file_info.thumbnail.height,
                     content_type=file_info.thumbnail.type,
                     method=file_info.thumbnail.method,
                 )
-            return self.filepaths.url_cache_filepath_rel(file_info.file_id)
+            return self.filepaths.url_cache_filepath_rel(identifier)
 
         if file_info.server_name:
             if file_info.thumbnail:
                 return self.filepaths.remote_media_thumbnail_rel(
                     server_name=file_info.server_name,
-                    file_id=file_info.file_id,
+                    file_id=identifier,
                     width=file_info.thumbnail.width,
                     height=file_info.thumbnail.height,
                     content_type=file_info.thumbnail.type,
                     method=file_info.thumbnail.method,
                 )
             return self.filepaths.remote_media_filepath_rel(
-                file_info.server_name, file_info.file_id
+                file_info.server_name, identifier
             )
 
         if file_info.thumbnail:
             return self.filepaths.local_media_thumbnail_rel(
-                media_id=file_info.file_id,
+                media_id=identifier,
                 width=file_info.thumbnail.width,
                 height=file_info.thumbnail.height,
                 content_type=file_info.thumbnail.type,
                 method=file_info.thumbnail.method,
             )
-        return self.filepaths.local_media_filepath_rel(file_info.file_id)
+        return self.filepaths.local_media_filepath_rel(identifier)
+
+    def _candidate_paths(self, file_info: FileInfo) -> list[str]:
+        """Returns the relative paths the file may be stored at, in lookup order:
+        the SHA-256 path if the hash is known, then the legacy `file_id` path.
+
+        URL cache files always use the `file_id` path, as they are expired by date.
+        """
+        paths = []
+        if file_info.sha256 and not file_info.url_cache:
+            paths.append(self._file_info_to_path(file_info, file_info.sha256))
+        paths.append(self._file_info_to_path(file_info))
+        return paths
 
 
 @trace
@@ -475,6 +572,42 @@ def _write_file_synchronously(source: IO, dest: IO) -> None:
     """
     source.seek(0)  # Ensure we read from the start of the file
     shutil.copyfileobj(source, dest)
+
+
+def _open_for_writing(path: str) -> BinaryIO:
+    """Opens `path` for writing, creating its parent directories. Should be
+    called from a thread."""
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    return open(path, "wb")
+
+
+def _create_temp_file(directory: str | None) -> BinaryIO:
+    """Creates a temporary file in `directory`, or the system temp directory if
+    None. The file is not deleted on close. Should be called from a thread."""
+    if directory:
+        os.makedirs(directory, exist_ok=True)
+    return cast(BinaryIO, tempfile.NamedTemporaryFile(dir=directory, delete=False))
+
+
+def _move_into_place(src: str, dest: str) -> bool:
+    """Atomically moves `src` to `dest`, creating its parent directories. Should
+    be called from a thread.
+
+    Returns:
+        Whether `dest` already existed.
+    """
+    os.makedirs(os.path.dirname(dest), exist_ok=True)
+    existed = os.path.exists(dest)
+    os.replace(src, dest)
+    return existed
+
+
+def _remove_quietly(path: str) -> None:
+    """Removes `path`, ignoring any errors."""
+    try:
+        os.remove(path)
+    except Exception:
+        pass
 
 
 class FileResponder(Responder):
