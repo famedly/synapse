@@ -211,10 +211,11 @@ class DeviceWorkerStore(RoomMemberWorkerStore, EndToEndKeyWorkerStore):
             self.clock.looping_call(
                 self._prune_old_outbound_device_pokes, Duration(hours=1)
             )
-            self.clock.looping_call(
-                self._prune_device_lists_changes_in_room,
-                Duration(hours=1),
-            )
+            # temporarily disable this job
+            # self.clock.looping_call(
+            #     self._prune_device_lists_changes_in_room,
+            #     Duration(hours=1),
+            # )
 
     def process_replication_rows(
         self, stream_name: str, instance_name: str, token: int, rows: Iterable[Any]
