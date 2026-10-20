@@ -948,6 +948,8 @@ class InconsistentStreamErrorFormatTest(TestCase):
         self.assertIn("True", result)
         self.assertIn("50", result)
         self.assertIn("55", result)
+
+
 class ShardedTokenHelpersPureTestCase(TestCase):
     """
     Non-database tests for the helpers for reading multi-writer streams.
