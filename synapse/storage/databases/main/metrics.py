@@ -31,6 +31,7 @@ from synapse.storage.database import (
     DatabasePool,
     LoggingDatabaseConnection,
     LoggingTransaction,
+    user_is_local_like_pattern,
 )
 from synapse.storage.databases.main.event_push_actions import (
     EventPushActionsWorkerStore,
@@ -134,9 +135,7 @@ class ServerMetricsStore(EventPushActionsWorkerStore, SQLBaseStore):
 
     async def count_daily_sent_e2ee_messages(self) -> int:
         def _count_messages(txn: LoggingTransaction) -> int:
-            # This is good enough as if you have silly characters in your own
-            # hostname then that's your own fault.
-            like_clause = "%:" + self.hs.hostname
+            like_clause = user_is_local_like_pattern(self.hs)
 
             sql = """
                 SELECT COUNT(*) FROM events
@@ -190,9 +189,7 @@ class ServerMetricsStore(EventPushActionsWorkerStore, SQLBaseStore):
 
     async def count_daily_sent_messages(self) -> int:
         def _count_messages(txn: LoggingTransaction) -> int:
-            # This is good enough as if you have silly characters in your own
-            # hostname then that's your own fault.
-            like_clause = "%:" + self.hs.hostname
+            like_clause = user_is_local_like_pattern(self.hs)
 
             sql = """
                 SELECT COUNT(*) FROM events
