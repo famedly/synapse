@@ -1,5 +1,9 @@
 # Synapse 1.163.0 (2026-10-14)
 
+## Famedly additions for v1.163.0_1
+
+- feat: restrict what branches can publish docs to the `gh-pages` branch (FrenchGithubUser)
+
 ## Bugfixes
 
 - Fix Synapse failing to start with Redis enabled when installed using pip (avoid incompatible breaking changes in `txredisapi@1.6.0`). ([\#20354](https://github.com/element-hq/synapse/issues/20354))
