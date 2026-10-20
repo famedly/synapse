@@ -2263,7 +2263,7 @@ files = [
     {file = "pycparser-3.0-py3-none-any.whl", hash = "sha256:b727414169a36b7d524c1c3e31839a521725078d7b2ff038656844266160a992"},
     {file = "pycparser-3.0.tar.gz", hash = "sha256:600f49d217304a5902ac3c37e1281c9fe94e4d0489de643a9504c5cdfdfc6b29"},
 ]
-markers = {main = "implementation_name != \"PyPy\"", dev = "implementation_name != \"PyPy\" and platform_python_implementation != \"PyPy\""}
+markers = {main = "implementation_name != \"PyPy\"", dev = "platform_python_implementation != \"PyPy\" and implementation_name != \"PyPy\""}
 
 [[package]]
 name = "pydantic"
@@ -3936,7 +3936,7 @@ docs = ["Sphinx", "repoze.sphinx.autointerface"]
 test = ["zope.i18nmessageid", "zope.testing", "zope.testrunner (>=6.4)"]
 
 [extras]
-all = ["authlib", "defusedxml", "hiredis", "jaeger-client", "lxml", "matrix-synapse-ldap3", "opentelemetry-api", "opentelemetry-exporter-otlp", "opentelemetry-opentracing-shim", "opentelemetry-sdk", "opentracing", "psycopg2", "psycopg2cffi", "psycopg2cffi-compat", "pympler", "pysaml2", "pytz", "sentry-sdk", "thrift", "tornado", "txredisapi"]
+all = ["authlib", "beautifulsoup4", "defusedxml", "hiredis", "jaeger-client", "lxml-stubs", "matrix-synapse-ldap3", "opentelemetry-api", "opentelemetry-exporter-otlp", "opentelemetry-opentracing-shim", "opentelemetry-sdk", "opentracing", "psycopg2", "psycopg2cffi", "psycopg2cffi-compat", "pympler", "pysaml2", "pytz", "sentry-sdk", "thrift", "tornado", "txredisapi"]
 cache-memory = ["pympler"]
 jwt = ["authlib"]
 matrix-synapse-ldap3 = ["matrix-synapse-ldap3"]
@@ -3954,4 +3954,4 @@ url-preview = ["beautifulsoup4"]
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.10.0,<4.0.0"
-content-hash = "6e8f0d223b61ab7c100236797f0ec1eed7f23b819c01c117fe445c6b1e91bbfc"
+content-hash = "f32d40b40ea13596e656dabb2d59e1b4bf48ad71ffe97203aec60e74103753fc"
