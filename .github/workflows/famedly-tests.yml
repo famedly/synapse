@@ -340,6 +340,9 @@ jobs:
       # `poetry` is used in `complement.sh`
       - uses: matrix-org/setup-python-poetry@v2
         with:
+          # Pinned: the default (`3.x`) resolves to Python 3.15, which PyO3 does not
+          # support yet.
+          python-version: "3.14"
           poetry-version: "2.2.1"
           # Matches the `path` where we checkout Synapse above
           working-directory: "synapse"
