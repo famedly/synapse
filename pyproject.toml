@@ -117,6 +117,10 @@ dependencies = [
     # for details of Synapse improvements that may be unlocked. Particularly around the use of `|`
     # syntax with zope interface types.
     "zope-interface>=5.2", # via twisted
+    # Many dependencies have made `requests` dependent. That needs `certifi` as a sub-dependency. One wild card is
+    # `sentry-sdk` which needs it raw and has no constraint at this time.
+    # 2026.10.19 covers the recent eMudhra intermediate CA certificates / emSign
+    "certifi>=2026.10.19",
 ]
 
 [project.optional-dependencies]
