@@ -86,6 +86,9 @@ jobs:
       - name: Setup Poetry
         uses: matrix-org/setup-python-poetry@v2
         with:
+          # Pinned: the default (`3.x`) resolves to Python 3.15, which some of our
+          # dependencies do not support yet.
+          python-version: "3.14"
           install-project: "false"
           groups: "docs"
           poetry-version: "2.4.1"
