@@ -16,6 +16,10 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+env:
+  # Keep in sync with `RUST_VERSION` in `tests.yml`.
+  RUST_VERSION: 1.87.0
+
 jobs:
   check-sampleconfig:
     runs-on: ubuntu-latest
@@ -336,6 +340,9 @@ jobs:
       # `poetry` is used in `complement.sh`
       - uses: matrix-org/setup-python-poetry@v2
         with:
+          # Pinned: the default (`3.x`) resolves to Python 3.15, which PyO3 does not
+          # support yet.
+          python-version: "3.14"
           poetry-version: "2.4.1"
           # Matches the `path` where we checkout Synapse above
           working-directory: "synapse"
@@ -379,6 +386,11 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9 # master
+        with:
+          toolchain: ${{ env.RUST_VERSION }}
 
       - uses: Swatinem/rust-cache@98c8021b550208e191a6a3145459bfc9fb29c4c0 # v2.8.0
 
