@@ -84,8 +84,11 @@ jobs:
       # Building the book requires running the `scripts-dev/schema_versions.py`
       # script first, which has some python dependencies.
       - name: Setup Poetry
-        uses: matrix-org/setup-python-poetry@5bbf6603c5c930615ec8a29f1b5d7d258d905aa4 # v2.0.0
+        uses: matrix-org/setup-python-poetry@v2
         with:
+          # Pinned: the default (`3.x`) resolves to Python 3.15, which some of our
+          # dependencies do not support yet.
+          python-version: "3.14"
           install-project: "false"
           groups: "docs"
           poetry-version: "2.4.1"
