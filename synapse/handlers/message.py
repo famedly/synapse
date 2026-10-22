@@ -83,6 +83,7 @@ from synapse.types import (
     StreamToken,
     UserID,
     create_requester,
+    get_domain_from_id,
 )
 from synapse.types.state import StateFilter
 from synapse.util import log_failure, unwrapFirstError
@@ -2213,7 +2214,39 @@ class EventCreationHandler:
 
         run_in_background(_notify)
 
+        # An event whose prev_events were chosen before a remote join was persisted, but
+        # which is itself persisted after the join, is a sibling of the join. The check
+        # in FederationServer.on_send_join_request ran before this event was persisted,
+        # and this event goes only to the servers in the room before it, so the joining
+        # server would not learn about it until another event references it. Tie them
+        # together with a dummy event, as on_send_join_request does.
+        for event in persisted_events:
+            if await self._is_unknown_to_a_concurrently_joined_server(event):
+                await self._send_dummy_event_after_room_join(event.room_id)
+                break
+
         return persisted_events[-1]
+
+    async def _is_unknown_to_a_concurrently_joined_server(
+        self, event: EventBase
+    ) -> bool:
+        """Whether `event` is a forward extremity beside another one sent by a server
+        that was not in the room before `event`, i.e. one that joined concurrently and
+        will not get `event` from us."""
+        if event.internal_metadata.is_outlier() or event.type == EventTypes.Dummy:
+            return False
+        extremities = await self.store.get_latest_event_ids_in_room(event.room_id)
+        if len(extremities) < 2 or event.event_id not in extremities:
+            return False
+        hosts = await self.state.get_hosts_in_room_at_events(
+            event.room_id, event_ids=event.prev_event_ids()
+        )
+        others = await self.store.get_events_as_list(extremities - {event.event_id})
+        return any(
+            get_domain_from_id(other.sender) not in hosts
+            and not self.hs.is_mine_id(other.sender)
+            for other in others
+        )
 
     async def is_admin_redaction(
         self, event_type: str, sender: str, redacts: str | None
