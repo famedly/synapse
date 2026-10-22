@@ -456,7 +456,8 @@ jobs:
 
       - name: Run invite-checker tests
         working-directory: synapse-invite-checker
-        run: hatch run pip install -r synapse-requirements.txt && hatch test -p -c
+        # At the time this release was published, the command to run tests was different.
+        run: hatch run pip install -r synapse-requirements.txt && hatch run cov
 
       - name: Display Hatch Environment Info
         if: always()
