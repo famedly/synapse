@@ -1,5 +1,12 @@
 # Synapse 1.163.0 (2026-10-14)
 
+## Famedly additions for v1.163.0_2
+
+- chore: bump rustls-webpki (FrenchGithubUser)
+- chore: pin certifi to 2026.10.19 (jason-famedly)
+- chore: bump setup-python-poetry workflow to allowed pin (jason-famedly)
+- chore: pin python version in docs ci (FrenchGithubUser)
+
 ## Famedly additions for v1.163.0_1
 
 - feat: restrict what branches can publish docs to the `gh-pages` branch (FrenchGithubUser)
