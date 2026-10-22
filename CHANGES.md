@@ -1,5 +1,11 @@
 # Synapse 1.160.0 (2026-09-02)
 
+## Famedly additions for v1.160.0_2
+
+- chore: bump rustls-webpki (FrenchGithubUser)
+- chore: pin certifi to 2026.10.19 (jason-famedly)
+- chore: pin python version in docs ci (FrenchGithubUser)
+
 No significant changes since 1.160.0rc2.
 
 
