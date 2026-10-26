@@ -24,7 +24,7 @@ import tempfile
 from binascii import unhexlify
 from io import BytesIO
 from typing import Any, BinaryIO, ClassVar, Literal
-from unittest.mock import MagicMock, Mock, patch
+from unittest.mock import AsyncMock, MagicMock, Mock, patch
 from urllib import parse
 
 import attr
@@ -47,7 +47,11 @@ from synapse.http.types import QueryParams
 from synapse.logging.context import make_deferred_yieldable
 from synapse.media._base import FileInfo, ThumbnailInfo
 from synapse.media.filepath import MediaFilePaths
-from synapse.media.media_storage import MediaStorage, ReadableFileWrapper
+from synapse.media.media_storage import (
+    MediaStorage,
+    ReadableFileWrapper,
+    SHA256TransparentIOWriter,
+)
 from synapse.media.storage_provider import (
     FileStorageProviderBackend,
     StorageProviderWrapper,
@@ -137,6 +141,127 @@ class MediaStorageTests(unittest.HomeserverTestCase):
         # This uses a real blocking threadpool so we have to wait for it to be
         # actually done :/
         self.get_success(test_ensure_media())
+
+    def test_store_file_uses_sha256_path(self) -> None:
+        """New media is stored under its SHA-256, not its media ID."""
+        self.get_success(
+            self.media_storage.store_file(BytesIO(SMALL_PNG), FileInfo(None, "abcdef"))
+        )
+
+        sha256_path = self.filepaths.local_media_filepath(SMALL_PNG_SHA256)
+        with open(sha256_path, "rb") as f:
+            self.assertEqual(f.read(), SMALL_PNG)
+        self.assertFalse(os.path.exists(self.filepaths.local_media_filepath("abcdef")))
+        # The temporary file was moved into place, not left behind.
+        self.assertEqual(os.listdir(self.primary_base_path), ["local_content"])
+
+        # Storage providers receive the SHA-256 path too.
+        rel_path = self.filepaths.local_media_filepath_rel(SMALL_PNG_SHA256)
+        self.assertTrue(
+            os.path.exists(os.path.join(self.secondary_base_path, rel_path))
+        )
+
+    def test_store_into_file_shares_sha256(self) -> None:
+        """Callers reuse the SHA-256 computed by `store_into_file`."""
+
+        async def store() -> str:
+            async with self.media_storage.store_into_file(FileInfo(None, "abcdef")) as (
+                f,
+                _,
+            ):
+                writer = SHA256TransparentIOWriter.get_or_wrap(f)
+                self.assertIs(writer, f)
+                writer.write(SMALL_PNG)
+            return writer.hexdigest()
+
+        self.assertEqual(self.get_success(store()), SMALL_PNG_SHA256)
+
+    def test_duplicate_sha256_is_not_replaced(self) -> None:
+        """A second upload of the same bytes keeps the existing file and backup."""
+        path = self.get_success(
+            self.media_storage.store_file(BytesIO(SMALL_PNG), FileInfo(None, "abcdef"))
+        )
+        local_inode = os.stat(path).st_ino
+        backup = os.path.join(
+            self.secondary_base_path,
+            self.filepaths.local_media_filepath_rel(SMALL_PNG_SHA256),
+        )
+        backup_inode = os.stat(backup).st_ino
+
+        self.get_success(
+            self.media_storage.store_file(BytesIO(SMALL_PNG), FileInfo(None, "ghijkl"))
+        )
+
+        self.assertEqual(os.stat(path).st_ino, local_inode)
+        self.assertEqual(os.stat(backup).st_ino, backup_inode)
+        with open(path, "rb") as f:
+            self.assertEqual(f.read(), SMALL_PNG)
+
+    def test_check_failure_before_publish_leaves_no_sha256_file(self) -> None:
+        """A failure before `store_into_file` exits deletes only the temp file."""
+
+        async def store() -> None:
+            async with self.media_storage.store_into_file(FileInfo(None, "abcdef")) as (
+                f,
+                _,
+            ):
+                f.write(SMALL_PNG)
+                raise RuntimeError("quota")
+
+        self.get_failure(store(), RuntimeError)
+        self.assertFalse(
+            os.path.exists(self.filepaths.local_media_filepath(SMALL_PNG_SHA256))
+        )
+        self.assertEqual(os.listdir(self.primary_base_path), [])
+
+    def test_failed_thumbnail_write_keeps_shared_file(self) -> None:
+        """A failed write to a shared SHA-256 thumbnail neither truncates nor deletes it."""
+        thumbnail = ThumbnailInfo(
+            width=32, height=32, method="scale", type="image/png", length=4
+        )
+        file_info = FileInfo(
+            None, "abcdef", thumbnail=thumbnail, sha256=SMALL_PNG_SHA256
+        )
+        path = self.get_success(
+            self.media_storage.store_file(BytesIO(b"good"), file_info)
+        )
+
+        with patch.object(
+            self.media_storage._spam_checker_module_callbacks,
+            "check_media_file_for_spam",
+            AsyncMock(return_value=(Codes.FORBIDDEN, {})),
+        ):
+            self.get_failure(
+                self.media_storage.store_file(
+                    BytesIO(b"other"), attr.evolve(file_info, file_id="ghijkl")
+                ),
+                Exception,
+            )
+
+        with open(path, "rb") as f:
+            self.assertEqual(f.read(), b"good")
+
+    def test_ensure_media_prefers_sha256_path(self) -> None:
+        """The SHA-256 path is used if it exists, else the media ID path."""
+        file_info = FileInfo(None, "abcdef", sha256=SMALL_PNG_SHA256)
+        legacy_path = self.filepaths.local_media_filepath("abcdef")
+        sha256_path = self.filepaths.local_media_filepath(SMALL_PNG_SHA256)
+
+        async def local_path() -> str:
+            async with self.media_storage.ensure_media_is_in_local_cache(
+                file_info
+            ) as path:
+                return path
+
+        os.makedirs(os.path.dirname(legacy_path))
+        with open(legacy_path, "wb") as f:
+            f.write(SMALL_PNG)
+        self.assertEqual(self.get_success(local_path()), legacy_path)
+
+        os.makedirs(os.path.dirname(sha256_path))
+        with open(sha256_path, "wb") as f:
+            f.write(SMALL_PNG)
+        self.assertEqual(self.get_success(local_path()), sha256_path)
 
 
 @attr.s(auto_attribs=True, slots=True, frozen=True)

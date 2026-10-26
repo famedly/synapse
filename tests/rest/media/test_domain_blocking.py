@@ -27,7 +27,7 @@ from synapse.server import HomeServer
 from synapse.util.clock import Clock
 
 from tests import unittest
-from tests.test_utils import SMALL_PNG
+from tests.test_utils import SMALL_PNG, SMALL_PNG_SHA256
 from tests.unittest import override_config
 
 
@@ -60,7 +60,7 @@ class MediaDomainBlockingTests(unittest.HomeserverTestCase):
                 time_now_ms=clock.time_msec(),
                 upload_name="test.png",
                 filesystem_id=file_id,
-                sha256=file_id,
+                sha256=SMALL_PNG_SHA256,
             )
         )
 
