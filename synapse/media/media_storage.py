@@ -206,7 +206,16 @@ class MediaStorage:
             # Write to the main media repository
             await self.write_to_file(source, f)
 
-        return fname
+        if not self.local_provider:
+            return fname
+
+        # `fname` may have been a temporary file. Return the path that was kept.
+        if isinstance(f, SHA256TransparentIOWriter):
+            file_info = attr.evolve(file_info, sha256=f.hexdigest())
+        return os.path.join(
+            self.local_media_directory,  # type: ignore[arg-type]
+            self._candidate_paths(file_info)[0],
+        )
 
     @trace_with_opname("MediaStorage.write_to_file")
     async def write_to_file(self, source: IO, output: IO) -> None:
@@ -230,15 +239,15 @@ class MediaStorage:
 
         Where the file is written:
 
-        * If the final path is known up front and there is a local media store,
-          the file is written there directly. This is the case for thumbnails
-          (stored under their parent media's SHA-256, or `media_id` for older media
-          without one), URL cache files (always under `media_id`), and original
-          media whose `file_info.sha256` is already set.
-        * Original media without a known `file_info.sha256` (i.e. new uploads and
-          remote downloads) is written to a temporary file while its SHA-256 is
-          computed. After the spam check, it is moved atomically to its SHA-256
-          path, which is then sent to the storage providers. In this case
+        * If the file is stored under a `media_id` path and there is a local media
+          store, it is written there directly. This is the case for URL cache files,
+          and thumbnails of older media without a SHA-256.
+        * Files stored under a SHA-256 path may be shared, so they are written to a
+          temporary file. After the spam check the temp file is linked into place
+          only when that path is absent; an existing file is kept and the temp file
+          is deleted. Storage providers receive the path only when it was created.
+          This covers new uploads, remote downloads, thumbnails of media with a
+          SHA-256, and media whose `file_info.sha256` is already set.
           media_filepath is only valid inside the context manager.
         * Without a local media store, the file is written to a temporary file
           that is removed once it has been sent to the storage providers.
@@ -258,14 +267,17 @@ class MediaStorage:
         if file_info.sha256 or file_info.thumbnail or file_info.url_cache:
             path = self._candidate_paths(file_info)[0]
 
-        is_temp_file = path is None or not self.local_provider
+        # SHA-256 paths are shared. Never open one with `wb`: that truncates a
+        # file other media IDs may be reading, and a later failure would delete it.
+        is_shared_path = bool(file_info.sha256) and not file_info.url_cache
+        is_temp_file = path is None or is_shared_path or not self.local_provider
         sha256_writer: SHA256TransparentIOWriter | None = None
         media_filepath: str | None = None
 
         try:
             if not is_temp_file:
-                # The path is known and there is a local media store: thumbnails,
-                # URL cache files, or media with a known SHA-256.
+                # The path is known, not shared, and there is a local media store:
+                # URL cache files, and thumbnails of media without a SHA-256.
                 media_filepath = os.path.join(self.local_media_directory, path)  # type: ignore[arg-type]
                 f = await defer_to_thread(
                     self.reactor, _open_for_writing, media_filepath
@@ -275,9 +287,9 @@ class MediaStorage:
                     with f:
                         yield f, media_filepath
             else:
-                # Either the path depends on the SHA-256 of the content, or there
-                # is no local media store. Keep the temp file on the same filesystem
-                # as the media store so it can be moved into place atomically.
+                # The path is a SHA-256 path (known or not yet), or there is no
+                # local media store. Keep the temp file on the same filesystem as
+                # the media store so it can be linked into place.
                 tmp = await defer_to_thread(
                     self.reactor, _create_temp_file, self.local_media_directory
                 )
@@ -325,22 +337,27 @@ class MediaStorage:
                     # the spam-check API.
                     raise SpamMediaException(errcode=spam_check[0])
 
-                # Only move the file once it has passed the spam check, so blocked
-                # media never appears at its SHA-256 path. Storage providers such
-                # as `FileStorageProviderBackend` copy from the final path, so this
-                # must happen before storing to them.
+                # Only publish once the spam check has passed. Providers such as
+                # `FileStorageProviderBackend` read the final local path, so a new
+                # hash path is linked into place first. An existing hash path is
+                # kept and is not uploaded again.
+                published = True
                 if is_temp_file and self.local_provider:
                     final_filepath = os.path.join(self.local_media_directory, path)  # type: ignore[arg-type]
-                    existed = await defer_to_thread(
-                        self.reactor, _move_into_place, media_filepath, final_filepath
+                    published = await defer_to_thread(
+                        self.reactor,
+                        _publish_if_absent,
+                        media_filepath,
+                        final_filepath,
                     )
-                    owns_media_filepath = not existed
+                    owns_media_filepath = published
                     media_filepath = final_filepath
                     is_temp_file = False
 
-                for provider in self.storage_providers:
-                    with start_active_span(str(provider)):
-                        await provider.store_file(path, file_info)
+                if published:
+                    for provider in self.storage_providers:
+                        with start_active_span(str(provider)):
+                            await provider.store_file(path, file_info)
 
                 # If using a temp file, delete it after uploading to storage providers
                 if is_temp_file:
@@ -498,6 +515,20 @@ class MediaStorage:
 
             raise NotFoundError()
 
+    async def delete_from_storage_providers(
+        self, path: str, file_info: FileInfo
+    ) -> None:
+        """Remove `path` from every configured storage provider."""
+        for provider in self.storage_providers:
+            await provider.delete_file(path, file_info)
+
+    async def delete_directory_from_storage_providers(
+        self, path: str, file_info: FileInfo
+    ) -> None:
+        """Remove a directory from every configured storage provider."""
+        for provider in self.storage_providers:
+            await provider.delete_directory(path, file_info)
+
     @trace
     def _file_info_to_path(
         self, file_info: FileInfo, identifier: str | None = None
@@ -589,17 +620,26 @@ def _create_temp_file(directory: str | None) -> BinaryIO:
     return cast(BinaryIO, tempfile.NamedTemporaryFile(dir=directory, delete=False))
 
 
-def _move_into_place(src: str, dest: str) -> bool:
-    """Atomically moves `src` to `dest`, creating its parent directories. Should
-    be called from a thread.
+def _publish_if_absent(src: str, dest: str) -> bool:
+    """Link `src` onto `dest` when `dest` is absent, then remove `src`.
+
+    Should be called from a thread. `src` and `dest` must be on the same
+    filesystem. The link is atomic, so a destination that appears during the
+    call is left untouched.
 
     Returns:
-        Whether `dest` already existed.
+        Whether this call created `dest`.
     """
     os.makedirs(os.path.dirname(dest), exist_ok=True)
-    existed = os.path.exists(dest)
-    os.replace(src, dest)
-    return existed
+    created = False
+    try:
+        os.link(src, dest)
+        created = True
+    except FileExistsError:
+        created = False
+    finally:
+        _remove_quietly(src)
+    return created
 
 
 def _remove_quietly(path: str) -> None:
