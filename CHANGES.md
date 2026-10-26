@@ -1,5 +1,9 @@
 # Synapse 1.160.0 (2026-09-02)
 
+## Famedly additions for v1.160.0_3
+
+- Cherry picked: Bump `pillow` to `13.0.0` to address [critical security vulnerabilties](https://pillow.readthedocs.io/en/stable/releasenotes/13.0.0.html#security). ([\#20398](https://github.com/element-hq/synapse/issues/20398))
+
 ## Famedly additions for v1.160.0_2
 
 - chore: bump rustls-webpki (FrenchGithubUser)
