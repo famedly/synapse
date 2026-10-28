@@ -24,6 +24,7 @@ import errno
 import logging
 import os
 import shutil
+from collections.abc import Awaitable, Callable
 from typing import TYPE_CHECKING
 
 from synapse.config._base import Config
@@ -165,17 +166,23 @@ class StorageProviderWrapper(StorageProvider):
             return False
         return True
 
-    @trace_with_opname("StorageProviderWrapper.delete_file")
-    async def delete_file(self, path: str, file_info: FileInfo) -> None:
+    async def _forward_delete(
+        self,
+        delete: Callable[[str, FileInfo], Awaitable[None]],
+        path: str,
+        file_info: FileInfo,
+    ) -> None:
         if not self._stores_file(file_info):
             return
-        await maybe_awaitable(self.backend.delete_file(path, file_info))  # type: ignore[arg-type]
+        await maybe_awaitable(delete(path, file_info))  # type: ignore[arg-type]
+
+    @trace_with_opname("StorageProviderWrapper.delete_file")
+    async def delete_file(self, path: str, file_info: FileInfo) -> None:
+        await self._forward_delete(self.backend.delete_file, path, file_info)
 
     @trace_with_opname("StorageProviderWrapper.delete_directory")
     async def delete_directory(self, path: str, file_info: FileInfo) -> None:
-        if not self._stores_file(file_info):
-            return
-        await maybe_awaitable(self.backend.delete_directory(path, file_info))  # type: ignore[arg-type]
+        await self._forward_delete(self.backend.delete_directory, path, file_info)
 
 
 class FileStorageProviderBackend(StorageProvider):
@@ -202,10 +209,23 @@ class FileStorageProviderBackend(StorageProvider):
         primary_fname = os.path.join(self.cache_directory, path)
         backup_fname = os.path.join(self.base_directory, path)
 
-        with start_active_span("copy if absent"):
+        with start_active_span("_copy_if_absent"):
             await defer_to_thread(
                 self.reactor, _copy_if_absent, primary_fname, backup_fname
             )
+
+    @trace_with_opname("FileStorageProviderBackend.fetch")
+    async def fetch(self, path: str, file_info: FileInfo) -> Responder | None:
+        """See StorageProvider.fetch"""
+
+        backup_fname = os.path.join(self.base_directory, path)
+        if os.path.isfile(backup_fname):
+            # Import here to avoid circular import
+            from .media_storage import FileResponder
+
+            return FileResponder(self.hs, open(backup_fname, "rb"))
+
+        return None
 
     @trace_with_opname("FileStorageProviderBackend.delete_file")
     async def delete_file(self, path: str, file_info: FileInfo) -> None:
@@ -220,19 +240,6 @@ class FileStorageProviderBackend(StorageProvider):
         await defer_to_thread(
             self.reactor, shutil.rmtree, backup_directory, ignore_errors=True
         )
-
-    @trace_with_opname("FileStorageProviderBackend.fetch")
-    async def fetch(self, path: str, file_info: FileInfo) -> Responder | None:
-        """See StorageProvider.fetch"""
-
-        backup_fname = os.path.join(self.base_directory, path)
-        if os.path.isfile(backup_fname):
-            # Import here to avoid circular import
-            from .media_storage import FileResponder
-
-            return FileResponder(self.hs, open(backup_fname, "rb"))
-
-        return None
 
     @staticmethod
     def parse_config(config: dict) -> str:

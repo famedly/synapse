@@ -80,17 +80,6 @@ class SHA256TransparentIOWriter:
         self._hash = hashlib.sha256()
         self._source = source
 
-    @classmethod
-    def get_or_wrap(cls, source: BinaryIO) -> "SHA256TransparentIOWriter":
-        """Returns `source` if it already computes a SHA-256 (e.g. the file
-        yielded by `MediaStorage.store_into_file` for new media), otherwise wraps it.
-
-        This avoids hashing the same bytes twice.
-        """
-        if isinstance(source, cls):
-            return source
-        return cls(source)
-
     def write(self, buffer: bytes | bytearray) -> int:
         """Wrapper for source.write()
 
@@ -120,46 +109,16 @@ class SHA256TransparentIOWriter:
     def __getattr__(self, attr_name: str) -> Any:
         return getattr(self._source, attr_name)
 
+    @classmethod
+    def get_or_wrap(cls, source: BinaryIO) -> "SHA256TransparentIOWriter":
+        """Returns `source` if it already computes a SHA-256 (e.g. the file
+        yielded by `MediaStorage.store_into_file` for new media), otherwise wraps it.
 
-class SHA256TransparentIOReader:
-    """Will generate a SHA256 hash from a source stream transparently.
-
-    Args:
-        source: Source IO stream.
-    """
-
-    def __init__(self, source: IO):
-        self._hash = hashlib.sha256()
-        self._source = source
-
-    def read(self, n: int = -1) -> bytes:
-        """Wrapper for source.read()
-
-        Args:
-            n
-
-        Returns:
-            the value of source.read()
+        This avoids hashing the same bytes twice.
         """
-        bytes = self._source.read(n)
-        self._hash.update(bytes)
-        return bytes
-
-    def hexdigest(self) -> str:
-        """The digest of the written or read value.
-
-        Returns:
-            The digest in hex formaat.
-        """
-        return self._hash.hexdigest()
-
-    def wrap(self) -> IO:
-        # This class implements a subset the IO interface and passes through everything else via __getattr__
-        return cast(IO, self)
-
-    # Passthrough any other calls
-    def __getattr__(self, attr_name: str) -> Any:
-        return getattr(self._source, attr_name)
+        if isinstance(source, cls):
+            return source
+        return cls(source)
 
 
 class MediaStorage:
@@ -214,7 +173,7 @@ class MediaStorage:
             file_info = attr.evolve(file_info, sha256=f.hexdigest())
         return os.path.join(
             self.local_media_directory,  # type: ignore[arg-type]
-            self._candidate_paths(file_info)[0],
+            self._file_info_to_path(file_info)[0],
         )
 
     @trace_with_opname("MediaStorage.write_to_file")
@@ -261,23 +220,40 @@ class MediaStorage:
                 # .. write into f ...
         """
 
-        # The relative path to store the file at, or None if it depends on the
-        # SHA-256 of the content, which is only known once it has been written.
+        # Relative destination, or None when it depends on a hash that is not
+        # known until the body has been written (a new upload or remote download).
+        # A known hash, a thumbnail, or a URL-cache file already has a destination:
+        # the SHA-256 path when `file_info.sha256` is set, otherwise the media-id path.
+        # URL-cache files always resolve to the media-id path.
         path: str | None = None
         if file_info.sha256 or file_info.thumbnail or file_info.url_cache:
-            path = self._candidate_paths(file_info)[0]
+            path = self._file_info_to_path(file_info)[0]
 
-        # SHA-256 paths are shared. Never open one with `wb`: that truncates a
-        # file other media IDs may be reading, and a later failure would delete it.
-        is_shared_path = bool(file_info.sha256) and not file_info.url_cache
-        is_temp_file = path is None or is_shared_path or not self.local_provider
+        # A SHA-256 path can belong to several media IDs. URL-cache files are
+        # excluded: they are stored and expired by media id.
+        is_sha256_path = bool(file_info.sha256) and not file_info.url_cache
+
+        # Write to a temporary file in any of these cases:
+        # * the destination depends on the hash and is not known yet;
+        # * the destination is a shared SHA-256 path, which must not be opened
+        #   with `wb` (that would truncate bytes another media ID is reading);
+        # * there is no local media store to write a final file into.
+        # The remaining case is a media-id path with a local store: URL cache,
+        # and thumbnails of media that has no SHA-256. Those are written in place.
+        is_temp_file = path is None or is_sha256_path or not self.local_provider
+
         sha256_writer: SHA256TransparentIOWriter | None = None
         media_filepath: str | None = None
 
+        # Code above `yield` runs on entering `async with`. The caller writes the
+        # body, then the code below `yield` runs on exiting it: spam check, then
+        # link the temporary file onto its final SHA-256 path.
+        # The SHA-256 lock is acquired by that caller before it exits, so linking
+        # the temporary file onto its final SHA-256 path runs while the lock is held.
+        # This function does not take the lock.
         try:
             if not is_temp_file:
-                # The path is known, not shared, and there is a local media store:
-                # URL cache files, and thumbnails of media without a SHA-256.
+                # Media-id path with a local store. The yielded path is the final file.
                 media_filepath = os.path.join(self.local_media_directory, path)  # type: ignore[arg-type]
                 f = await defer_to_thread(
                     self.reactor, _open_for_writing, media_filepath
@@ -287,40 +263,67 @@ class MediaStorage:
                     with f:
                         yield f, media_filepath
             else:
-                # The path is a SHA-256 path (known or not yet), or there is no
-                # local media store. Keep the temp file on the same filesystem as
-                # the media store so it can be linked into place.
+                # Temporary file on the media-store filesystem, so `os.link` can
+                # publish it onto the final path. The yielded path is this temp
+                # file and is only valid until the caller's block exits.
                 tmp = await defer_to_thread(
                     self.reactor, _create_temp_file, self.local_media_directory
                 )
                 media_filepath = tmp.name
                 with tmp:
                     if path is None:
-                        # Callers can reuse this hash with
+                        # Hash while writing. The caller reads the same digest via
                         # `SHA256TransparentIOWriter.get_or_wrap`.
                         sha256_writer = SHA256TransparentIOWriter(tmp)
                         yield sha256_writer.wrap(), media_filepath
                     else:
+                        # SHA-256 path already known, or no local store. The hash
+                        # does not need to be computed here.
                         yield tmp, media_filepath
         except BaseException:
-            # The caller failed to write the file (e.g. a failed remote download),
-            # so don't leave a partial temp file behind. This must not await, as
-            # the generator may be being closed with `GeneratorExit`.
+            # The caller failed inside its `async with` block (for example a
+            # failed download or a quota check). The exception is thrown back in
+            # at `yield`, before the spam check and linking to the final path below.
+            # Remove the partial temp file. This must not await: the generator may be
+            # closing with `GeneratorExit`. A media-id file written in place is
+            # left for the failure path below.
             if is_temp_file and media_filepath is not None:
                 _remove_quietly(media_filepath)
             raise
 
+        # The caller's block has finished and `with f` / `with tmp` has closed the file.
         assert media_filepath is not None
+        await self._spam_check_and_store(
+            file_info, path, media_filepath, is_temp_file, sha256_writer
+        )
+
+    async def _spam_check_and_store(
+        self,
+        file_info: FileInfo,
+        path: str | None,
+        media_filepath: str,
+        is_temp_file: bool,
+        sha256_writer: SHA256TransparentIOWriter | None,
+    ) -> None:
+        """Spam-check and commit a file written by `store_into_file`.
+
+        The caller of `store_into_file` has finished writing and the file is
+        closed before this method runs. In particular, callers which need it
+        hold their SHA-256 lock while this method links the temporary file onto
+        its final SHA-256 path.
+        """
         if sha256_writer is not None:
+            # The hash was not known on entry. It now selects the SHA-256 path.
             file_info = attr.evolve(file_info, sha256=sha256_writer.hexdigest())
-            path = self._file_info_to_path(file_info, file_info.sha256)
+            path = self._get_relative_path(file_info, file_info.sha256)
         assert path is not None
 
-        # Whether media_filepath may be removed on failure. A pre-existing SHA-256
-        # file can be shared with other media, so it must not be removed.
-        owns_media_filepath = True
+        # Whether a failure below may delete `media_filepath`. A SHA-256 path
+        # that already existed is shared, so a later failure must not remove it.
+        delete_filepath_on_failure = True
 
-        # Spam check and store to other providers (runs for both local and temp file cases)
+        # Spam check, then link to the final SHA-256 path. Runs for both the in-place
+        # and temp-file cases.
         try:
             with start_active_span("spam checking and writing to storage providers"):
                 spam_check = (
@@ -337,34 +340,39 @@ class MediaStorage:
                     # the spam-check API.
                     raise SpamMediaException(errcode=spam_check[0])
 
-                # Only publish once the spam check has passed. Providers such as
-                # `FileStorageProviderBackend` read the final local path, so a new
-                # hash path is linked into place first. An existing hash path is
-                # kept and is not uploaded again.
-                published = True
+                # `FileStorageProviderBackend` reads the final local path, so a
+                # temp file is linked into place before providers run. `os.link`
+                # creates that path only when it is absent; an existing file is
+                # kept and the temp file is removed. Providers are then skipped,
+                # because the bytes are already stored.
+                send_to_providers = True
                 if is_temp_file and self.local_provider:
                     final_filepath = os.path.join(self.local_media_directory, path)  # type: ignore[arg-type]
-                    published = await defer_to_thread(
+                    send_to_providers = await defer_to_thread(
                         self.reactor,
-                        _publish_if_absent,
+                        _link_if_not_exists,
                         media_filepath,
                         final_filepath,
                     )
-                    owns_media_filepath = published
+                    delete_filepath_on_failure = send_to_providers
                     media_filepath = final_filepath
                     is_temp_file = False
 
-                if published:
+                if send_to_providers:
                     for provider in self.storage_providers:
                         with start_active_span(str(provider)):
                             await provider.store_file(path, file_info)
 
-                # If using a temp file, delete it after uploading to storage providers
+                # No local store: the bytes now live only on the providers, so
+                # the temp file is removed. A SHA-256 pathed local file is kept.
                 if is_temp_file:
                     await defer_to_thread(self.reactor, _remove_quietly, media_filepath)
 
         except Exception as e:
-            if owns_media_filepath:
+            # Delete the local file only when this attempt created it. That is
+            # the in-place media-id file, or a SHA-256 path this call linked.
+            # A path that already existed stays.
+            if delete_filepath_on_failure:
                 await defer_to_thread(self.reactor, _remove_quietly, media_filepath)
 
             raise e from None
@@ -380,7 +388,7 @@ class MediaStorage:
         """
         # URL cache files are stored locally and should not go through storage providers
         if file_info.url_cache:
-            path = self._file_info_to_path(file_info)
+            path = self._get_relative_path(file_info)
             if self.local_provider:
                 local_path = os.path.join(self.local_media_directory, path)  # type: ignore[arg-type]
                 if os.path.isfile(local_path):
@@ -390,7 +398,7 @@ class MediaStorage:
                     return FileResponder(self.hs, open(local_path, "rb"))
             return None
 
-        paths = self._candidate_paths(file_info)
+        paths = self._file_info_to_path(file_info)
 
         # fallback for remote thumbnails with no method in the filename
         if file_info.thumbnail and file_info.server_name:
@@ -444,8 +452,7 @@ class MediaStorage:
             async with media_storage.ensure_media_is_in_local_cache(file_info) as path:
                 # use path to read the file
         """
-        paths = self._candidate_paths(file_info)
-
+        paths = self._file_info_to_path(file_info)
         if self.local_provider:
             for path in paths:
                 local_path = os.path.join(self.local_media_directory, path)  # type: ignore[arg-type]
@@ -530,7 +537,7 @@ class MediaStorage:
             await provider.delete_directory(path, file_info)
 
     @trace
-    def _file_info_to_path(
+    def _get_relative_path(
         self, file_info: FileInfo, identifier: str | None = None
     ) -> str:
         """Converts file_info into a relative path.
@@ -579,7 +586,7 @@ class MediaStorage:
             )
         return self.filepaths.local_media_filepath_rel(identifier)
 
-    def _candidate_paths(self, file_info: FileInfo) -> list[str]:
+    def _file_info_to_path(self, file_info: FileInfo) -> list[str]:
         """Returns the relative paths the file may be stored at, in lookup order:
         the SHA-256 path if the hash is known, then the legacy `file_id` path.
 
@@ -587,8 +594,8 @@ class MediaStorage:
         """
         paths = []
         if file_info.sha256 and not file_info.url_cache:
-            paths.append(self._file_info_to_path(file_info, file_info.sha256))
-        paths.append(self._file_info_to_path(file_info))
+            paths.append(self._get_relative_path(file_info, file_info.sha256))
+        paths.append(self._get_relative_path(file_info))
         return paths
 
 
@@ -620,7 +627,7 @@ def _create_temp_file(directory: str | None) -> BinaryIO:
     return cast(BinaryIO, tempfile.NamedTemporaryFile(dir=directory, delete=False))
 
 
-def _publish_if_absent(src: str, dest: str) -> bool:
+def _link_if_not_exists(src: str, dest: str) -> bool:
     """Link `src` onto `dest` when `dest` is absent, then remove `src`.
 
     Should be called from a thread. `src` and `dest` must be on the same

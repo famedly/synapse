@@ -24,8 +24,9 @@ import errno
 import logging
 import os
 import shutil
+from collections.abc import Awaitable, Callable
 from io import BytesIO
-from typing import IO, TYPE_CHECKING
+from typing import IO, TYPE_CHECKING, BinaryIO
 
 import attr
 from matrix_common.types.mxc_uri import MXCUri
@@ -319,6 +320,22 @@ class MediaRepository:
         if media.created_ts < expired_time_ms:
             raise NotFoundError("Media ID has expired")
 
+    def _lock_sha256_files(self, server_name: str | None, sha256: str) -> "WaitingLock":
+        """A cross-worker lock on the files stored under a SHA-256 path.
+
+        New media must hold this lock before linking its temporary file onto its
+        final SHA-256 path, until the DB row is inserted. Deletion must hold this lock
+        while checking references and removing files. Otherwise deletion could remove a
+        file whose DB row is about to be inserted.
+
+        Args:
+            server_name: The origin of remote media, or None for local media.
+            sha256: The SHA-256 of the media.
+        """
+        return self._worker_locks.acquire_lock(
+            _SHA256_FILES_LOCK_NAME, f"{server_name or ''}/{sha256}"
+        )
+
     @trace
     async def create_or_update_content(
         self,
@@ -349,10 +366,15 @@ class MediaRepository:
             media_id = random_string(24)
 
         file_info = FileInfo(server_name=None, file_id=media_id)
-        # Hold the SHA-256 lock from just before the file is published until the
-        # DB row is inserted. Quarantine and quota checks run before publish, so a
-        # failure deletes only the temporary file.
+
+        # Hold the lock before linking the temporary file onto its final SHA-256 path
+        # until the DB row is inserted. Quarantine and quota checks run before linking,
+        # so a failure deletes only the temporary file.
+        # The lock key includes the hash, so it cannot be opened before the file is
+        # written, and it has to stay held after store_into_file finishes.
         async with contextlib.AsyncExitStack() as sha256_lock:
+            # Creates a temporary file and yields it. For a new upload the path is not
+            # known yet, so the body receives a SHA256TransparentIOWriter
             async with self.media_storage.store_into_file(file_info) as (f, _):
                 sha256writer = SHA256TransparentIOWriter.get_or_wrap(f)
                 # This implements all of BinaryIO as it has a passthrough
@@ -365,12 +387,27 @@ class MediaRepository:
                         "Media has been automatically quarantined as it matched existing quarantined media"
                     )
 
+                # Check that the user has not exceeded any of the media upload limits.
+                # A failure here never acquires the lock. The exception is thrown back
+                # into `store_into_file` at the yield, which deletes the temporary file
+                # and does not link to the SHA-256 path.
                 await self._check_media_upload_limits(auth_user, content_length)
 
-                # The file is published when this block exits.
+                # The SHA-256 lock is acquired after the bytes are hashed and released
+                # only after the database row exists. Linking the temporary file onto
+                # the SHA-256 path happens in between, while the lock is held.
+                # This `enter_async_context` acquires the lock immediately and
+                # registers its release for when the outer stack exits. It waits until
+                # this worker holds it. Another worker deleting the same hash waits on
+                # the same lock.
                 await sha256_lock.enter_async_context(
                     self._lock_sha256_files(None, sha256)
                 )
+            # Within `store_into_file`, the temporary file is closed and the spam check
+            # is ran, and the temporary file onto the SHA-256 path is linked only when
+            # that path is absent. An existing file is kept. Storage providers are given
+            # the path only when this attempt created it. A spam failure deletes the
+            # temporary file and skips the link.
 
             logger.info("Stored local media %s with SHA-256 %s", media_id, sha256)
 
@@ -395,8 +432,12 @@ class MediaRepository:
                     sha256=sha256,
                     quarantined_by="system" if should_quarantine else None,
                 )
+            # The database insert or update runs with the lock still held, so a
+            # concurrent deletion can see this row before it decides the hash file is
+            # unused.
 
         try:
+            # Now the lock is released, thumbnail generation runs after.
             await self._generate_thumbnails(
                 None, media_id, media_id, media_type, sha256=sha256
             )
@@ -410,15 +451,17 @@ class MediaRepository:
     ) -> None:
         """Raise if this upload would exceed the user's media quota.
 
-        Runs before the temporary upload is published, so a failure leaves no
-        SHA-256 file behind.
+        Runs before the temporary upload is linked onto its final SHA-256 path, so a
+        failure leaves no SHA-256 file behind.
         """
+        # Use limits from module API if provided
         media_upload_limits = (
             await self.media_repository_callbacks.get_media_upload_limits_for_user(
                 auth_user.to_string()
             )
         )
 
+        # Otherwise use the default limits from config
         if media_upload_limits is None:
             # Note: the media upload limits are sorted so larger time periods are
             # first.
@@ -930,110 +973,21 @@ class MediaRepository:
             The media info of the file.
         """
 
-        file_id = random_string(24)
-
-        file_info = FileInfo(server_name=server_name, file_id=file_id)
-
-        async with contextlib.AsyncExitStack() as sha256_lock:
-            async with self.media_storage.store_into_file(file_info) as (f, fname):
-                sha256writer = SHA256TransparentIOWriter.get_or_wrap(f)
-                try:
-                    length, headers = await self.client.download_media(
-                        server_name,
-                        media_id,
-                        # This implements all of BinaryIO as it has a passthrough
-                        output_stream=sha256writer.wrap(),
-                        max_size=self.max_upload_size,
-                        max_timeout_ms=max_timeout_ms,
-                        download_ratelimiter=download_ratelimiter,
-                        ip_address=ip_address,
-                    )
-                except RequestSendFailed as e:
-                    logger.warning(
-                        "Request failed fetching remote media %s/%s: %r",
-                        server_name,
-                        media_id,
-                        e,
-                    )
-                    raise SynapseError(502, "Failed to fetch remote media")
-
-                except HttpResponseException as e:
-                    logger.warning(
-                        "HTTP error fetching remote media %s/%s: %s",
-                        server_name,
-                        media_id,
-                        e.response,
-                    )
-                    if e.code == twisted.web.http.NOT_FOUND:
-                        raise e.to_synapse_error()
-                    raise SynapseError(502, "Failed to fetch remote media")
-
-                except SynapseError:
-                    logger.warning(
-                        "Failed to fetch remote media %s/%s", server_name, media_id
-                    )
-                    raise
-                except NotRetryingDestination:
-                    logger.warning("Not retrying destination %r", server_name)
-                    raise SynapseError(502, "Failed to fetch remote media")
-                except Exception:
-                    logger.exception(
-                        "Failed to fetch remote media %s/%s", server_name, media_id
-                    )
-                    raise SynapseError(502, "Failed to fetch remote media")
-
-                if b"Content-Type" in headers:
-                    media_type = headers[b"Content-Type"][0].decode("ascii")
-                else:
-                    media_type = "application/octet-stream"
-                upload_name = get_filename_from_headers(headers)
-                time_now_ms = self.clock.time_msec()
-
-                # The file is published when this block exits.
-                await sha256_lock.enter_async_context(
-                    self._lock_sha256_files(server_name, sha256writer.hexdigest())
-                )
-
-            # Multiple remote media download requests can race (when using
-            # multiple media repos), so this may throw a violation constraint
-            # exception. If it does we'll delete the newly downloaded file from
-            # disk. This already holds the SHA-256 lock.
-            await self._store_remote_media_with_cleanup(
-                server_name=server_name,
-                media_id=media_id,
-                media_type=media_type,
-                time_now_ms=time_now_ms,
-                upload_name=upload_name,
-                media_length=length,
-                filesystem_id=file_id,
-                sha256=sha256writer.hexdigest(),
+        async def fetch(
+            output_stream: BinaryIO,
+        ) -> tuple[int, dict[bytes, list[bytes]]]:
+            return await self.client.download_media(
+                server_name,
+                media_id,
+                # This implements all of BinaryIO as it has a passthrough
+                output_stream=output_stream,
+                max_size=self.max_upload_size,
+                max_timeout_ms=max_timeout_ms,
+                download_ratelimiter=download_ratelimiter,
+                ip_address=ip_address,
             )
 
-        logger.info(
-            "Stored remote media %s/%s with SHA-256 %s",
-            server_name,
-            media_id,
-            sha256writer.hexdigest(),
-        )
-
-        if self.hs.config.media.enable_authenticated_media:
-            authenticated = True
-        else:
-            authenticated = False
-
-        return RemoteMedia(
-            media_origin=server_name,
-            media_id=media_id,
-            media_type=media_type,
-            media_length=length,
-            upload_name=upload_name,
-            created_ts=time_now_ms,
-            filesystem_id=file_id,
-            last_access_ts=time_now_ms,
-            quarantined_by=None,
-            authenticated=authenticated,
-            sha256=sha256writer.hexdigest(),
-        )
+        return await self._download(server_name, media_id, fetch)
 
     async def _federation_download_remote_file(
         self,
@@ -1062,30 +1016,50 @@ class MediaRepository:
             The media info of the file.
         """
 
+        async def fetch(
+            output_stream: BinaryIO,
+        ) -> tuple[int, dict[bytes, list[bytes]]]:
+            res = await self.client.federation_download_media(
+                server_name,
+                media_id,
+                # This implements all of BinaryIO as it has a passthrough
+                output_stream=output_stream,
+                max_size=self.max_upload_size,
+                max_timeout_ms=max_timeout_ms,
+                download_ratelimiter=download_ratelimiter,
+                ip_address=ip_address,
+            )
+            # A fallback to the _matrix/media endpoint returns only length and headers.
+            if len(res) == 3:
+                length, headers, _json = res
+            else:
+                length, headers = res
+            return length, headers
+
+        return await self._download(server_name, media_id, fetch)
+
+    async def _download(
+        self,
+        server_name: str,
+        media_id: str,
+        fetch: Callable[[BinaryIO], Awaitable[tuple[int, dict[bytes, list[bytes]]]]],
+    ) -> RemoteMedia:
+        """Download remote media into a new file and record it.
+
+        `fetch` writes the body to the given stream and returns its length and
+        headers. The SHA-256 lock is held from just before the temporary file is linked onto its
+        final SHA-256 path, until the database row is inserted.
+        """
+
         file_id = random_string(24)
 
         file_info = FileInfo(server_name=server_name, file_id=file_id)
 
         async with contextlib.AsyncExitStack() as sha256_lock:
-            async with self.media_storage.store_into_file(file_info) as (f, fname):
+            async with self.media_storage.store_into_file(file_info) as (f, _fname):
                 sha256writer = SHA256TransparentIOWriter.get_or_wrap(f)
                 try:
-                    res = await self.client.federation_download_media(
-                        server_name,
-                        media_id,
-                        # This implements all of BinaryIO as it has a passthrough
-                        output_stream=sha256writer.wrap(),
-                        max_size=self.max_upload_size,
-                        max_timeout_ms=max_timeout_ms,
-                        download_ratelimiter=download_ratelimiter,
-                        ip_address=ip_address,
-                    )
-                    # if we had to fall back to the _matrix/media endpoint it will only return
-                    # the headers and length, check the length of the tuple before unpacking
-                    if len(res) == 3:
-                        length, headers, json = res
-                    else:
-                        length, headers = res
+                    length, headers = await fetch(sha256writer.wrap())
                 except RequestSendFailed as e:
                     logger.warning(
                         "Request failed fetching remote media %s/%s: %r",
@@ -1126,10 +1100,11 @@ class MediaRepository:
                     media_type = "application/octet-stream"
                 upload_name = get_filename_from_headers(headers)
                 time_now_ms = self.clock.time_msec()
+                sha256 = sha256writer.hexdigest()
 
-                # The file is published when this block exits.
+                # The temporary file is linked onto its final SHA-256 path when this block exits.
                 await sha256_lock.enter_async_context(
-                    self._lock_sha256_files(server_name, sha256writer.hexdigest())
+                    self._lock_sha256_files(server_name, sha256)
                 )
 
             # Multiple remote media download requests can race (when using
@@ -1144,20 +1119,15 @@ class MediaRepository:
                 upload_name=upload_name,
                 media_length=length,
                 filesystem_id=file_id,
-                sha256=sha256writer.hexdigest(),
+                sha256=sha256,
             )
 
-        logger.debug(
+        logger.info(
             "Stored remote media %s/%s with SHA-256 %s",
             server_name,
             media_id,
-            sha256writer.hexdigest(),
+            sha256,
         )
-
-        if self.hs.config.media.enable_authenticated_media:
-            authenticated = True
-        else:
-            authenticated = False
 
         return RemoteMedia(
             media_origin=server_name,
@@ -1169,8 +1139,8 @@ class MediaRepository:
             filesystem_id=file_id,
             last_access_ts=time_now_ms,
             quarantined_by=None,
-            authenticated=authenticated,
-            sha256=sha256writer.hexdigest(),
+            authenticated=bool(self.hs.config.media.enable_authenticated_media),
+            sha256=sha256,
         )
 
     def _get_thumbnail_requirements(
@@ -1673,16 +1643,20 @@ class MediaRepository:
 
             async with self.remote_media_linearizer.queue(key):
                 media_info = await self.store.get_cached_remote_media(origin, media_id)
-                removed = await self._delete_media_id_files(
-                    FileInfo(server_name=origin, file_id=file_id),
-                    self.filepaths.remote_media_filepath(origin, file_id),
-                    self.filepaths.remote_media_filepath_rel(origin, file_id),
-                    self.filepaths.remote_media_thumbnail_dir(origin, file_id),
+                # Deletes the legacy path for file_id: the file on local disk, the same
+                # relative path on every storage provider, and the thumbnail directory
+                # in both places.
+                removed = await self._delete_stored_files(
+                    origin, file_id, abort_on_remove_error=True
                 )
                 if not removed:
                     continue
 
                 await self.store.delete_remote_media(origin, media_id)
+
+                # Delete the SHA-256 path for the media. The lock covers only the
+                # reference check and the possible hash deletion. The legacy deletion
+                # and the database deletion above are already finished.
                 if media_info and media_info.sha256:
                     async with self._lock_sha256_files(origin, media_info.sha256):
                         await self._remove_sha256_files_if_unused(
@@ -1754,11 +1728,8 @@ class MediaRepository:
         for media_id in media_ids:
             logger.info("Deleting media with ID '%s'", media_id)
             media_info = await self.store.get_local_media(media_id)
-            removed = await self._delete_media_id_files(
-                FileInfo(server_name=None, file_id=media_id),
-                self.filepaths.local_media_filepath(media_id),
-                self.filepaths.local_media_filepath_rel(media_id),
-                self.filepaths.local_media_thumbnail_dir(media_id),
+            removed = await self._delete_stored_files(
+                None, media_id, abort_on_remove_error=True
             )
             if not removed:
                 continue
@@ -1779,48 +1750,6 @@ class MediaRepository:
 
         return removed_media, len(removed_media)
 
-    def _lock_sha256_files(self, server_name: str | None, sha256: str) -> "WaitingLock":
-        """A cross-worker lock on the files stored under a SHA-256 path.
-
-        New media must hold it from before its file is published until its DB row
-        is inserted, and deletion must hold it while checking references and
-        removing files. Otherwise deletion could remove a file whose DB row is
-        about to be inserted.
-
-        Args:
-            server_name: The origin of remote media, or None for local media.
-            sha256: The SHA-256 of the media.
-        """
-        return self._worker_locks.acquire_lock(
-            _SHA256_FILES_LOCK_NAME, f"{server_name or ''}/{sha256}"
-        )
-
-    async def _delete_media_id_files(
-        self,
-        file_info: FileInfo,
-        full_path: str,
-        relative_path: str,
-        thumbnail_dir: str,
-    ) -> bool:
-        """Remove one media ID's own files from the local disk and every provider.
-
-        Returns:
-            False when the local file could not be removed. A missing file is success.
-        """
-        try:
-            os.remove(full_path)
-        except OSError as e:
-            logger.warning("Failed to remove file: %r: %s", full_path, e)
-            if e.errno != errno.ENOENT:
-                return False
-
-        await self.media_storage.delete_from_storage_providers(relative_path, file_info)
-        shutil.rmtree(thumbnail_dir, ignore_errors=True)
-        await self.media_storage.delete_directory_from_storage_providers(
-            os.path.relpath(thumbnail_dir, self.primary_base_path), file_info
-        )
-        return True
-
     async def _remove_sha256_files_if_unused(
         self, server_name: str | None, sha256: str
     ) -> None:
@@ -1835,32 +1764,90 @@ class MediaRepository:
         """
         if await self.store.is_media_sha256_in_use(sha256, server_name):
             logger.debug("SHA-256 %r is in use", sha256)
+            # If any of the rows referencing this hash remain, the function returns
+            # and the hash file stays.
             return
 
-        if server_name:
-            file_info = FileInfo(server_name=server_name, file_id=sha256)
-            full_path = self.filepaths.remote_media_filepath(server_name, sha256)
-            relative_path = self.filepaths.remote_media_filepath_rel(
-                server_name, sha256
-            )
-            thumbnail_dir = self.filepaths.remote_media_thumbnail_dir(
-                server_name, sha256
-            )
-        else:
-            file_info = FileInfo(server_name=None, file_id=sha256)
-            full_path = self.filepaths.local_media_filepath(sha256)
-            relative_path = self.filepaths.local_media_filepath_rel(sha256)
-            thumbnail_dir = self.filepaths.local_media_thumbnail_dir(sha256)
+        # If no row remains, _delete_stored_files is called again with the SHA-256
+        # as the path identifier, which removes the hash file and its thumbnail
+        # directory locally and from every provider.
+        await self._delete_stored_files(
+            server_name, sha256, abort_on_remove_error=False
+        )
 
-        try:
-            os.remove(full_path)
-        except FileNotFoundError:
-            pass
-        except OSError as e:
-            logger.warning("Failed to remove file: %r: %s", full_path, e)
+    def _stored_file_locations(
+        self, server_name: str | None, identifier: str
+    ) -> tuple[FileInfo, str, str, str]:
+        """Return the file info, absolute path, relative path, and thumbnail directory.
+
+        `identifier` is a media ID or filesystem ID for a legacy path, and a
+        SHA-256 for a content-addressed path. Remote paths include `server_name`.
+        """
+        if server_name:
+            return (
+                FileInfo(server_name=server_name, file_id=identifier),
+                self.filepaths.remote_media_filepath(server_name, identifier),
+                self.filepaths.remote_media_filepath_rel(server_name, identifier),
+                self.filepaths.remote_media_thumbnail_dir(server_name, identifier),
+            )
+        return (
+            FileInfo(server_name=None, file_id=identifier),
+            self.filepaths.local_media_filepath(identifier),
+            self.filepaths.local_media_filepath_rel(identifier),
+            self.filepaths.local_media_thumbnail_dir(identifier),
+        )
+
+    async def _delete_stored_files(
+        self,
+        server_name: str | None,
+        identifier: str,
+        *,
+        abort_on_remove_error: bool,
+    ) -> bool:
+        """Remove a file and its thumbnail directory locally and from every provider.
+
+        A missing file is success. When `abort_on_remove_error` is set, any other
+        local removal error is logged and the provider copies are left in place.
+        Otherwise a removal error is logged and deletion continues.
+
+        Returns:
+            False when local removal failed and `abort_on_remove_error` is set.
+        """
+        file_info, full_path, relative_path, thumbnail_dir = (
+            self._stored_file_locations(server_name, identifier)
+        )
+
+        # os.remove blocks until the filesystem returns, and this function runs
+        # on the Twisted reactor (single) thread. defer_to_thread moves that wait onto
+        # the reactor's thread pool so the worker can keep serving other requests.
+        remove_error = await defer_to_thread(
+            self.hs.get_reactor(), _remove_file, full_path
+        )
+        if isinstance(remove_error, FileNotFoundError):
+            if abort_on_remove_error:
+                logger.warning("Failed to remove file: %r: %s", full_path, remove_error)
+        elif remove_error is not None:
+            logger.warning("Failed to remove file: %r: %s", full_path, remove_error)
+            if abort_on_remove_error and remove_error.errno != errno.ENOENT:
+                return False
 
         await self.media_storage.delete_from_storage_providers(relative_path, file_info)
-        shutil.rmtree(thumbnail_dir, ignore_errors=True)
+        await defer_to_thread(
+            self.hs.get_reactor(),
+            shutil.rmtree,
+            thumbnail_dir,
+            ignore_errors=True,
+        )
         await self.media_storage.delete_directory_from_storage_providers(
             os.path.relpath(thumbnail_dir, self.primary_base_path), file_info
         )
+        return True
+
+
+def _remove_file(path: str) -> OSError | None:
+    """Remove `path` from a thread. Returns the OSError instead of raising it."""
+    try:
+        os.remove(path)
+    except OSError as e:
+        return e
+    return None
