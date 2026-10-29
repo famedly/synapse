@@ -4048,7 +4048,7 @@ docs = ["Sphinx", "repoze.sphinx.autointerface"]
 test = ["zope.i18nmessageid", "zope.testing", "zope.testrunner (>=6.4)"]
 
 [extras]
-all = ["authlib", "beautifulsoup4", "defusedxml", "hiredis", "jaeger-client", "lxml-stubs", "matrix-synapse-ldap3", "opentelemetry-api", "opentelemetry-exporter-otlp", "opentelemetry-opentracing-shim", "opentelemetry-sdk", "opentracing", "psycopg2", "psycopg2cffi", "psycopg2cffi-compat", "pympler", "pysaml2", "pytz", "sentry-sdk", "thrift", "tornado", "txredisapi"]
+all = ["authlib", "beautifulsoup4", "defusedxml", "hiredis", "jaeger-client", "matrix-synapse-ldap3", "opentelemetry-api", "opentelemetry-exporter-otlp", "opentelemetry-opentracing-shim", "opentelemetry-sdk", "opentracing", "psycopg2", "psycopg2cffi", "psycopg2cffi-compat", "pympler", "pysaml2", "pytz", "sentry-sdk", "thrift", "tornado", "txredisapi"]
 cache-memory = ["pympler"]
 jwt = ["authlib"]
 matrix-synapse-ldap3 = ["matrix-synapse-ldap3"]
@@ -4066,4 +4066,4 @@ url-preview = ["beautifulsoup4"]
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.10.0,<4.0.0"
-content-hash = "6a97c57517730e0d493d330c3c33df57bfe7f301fb950a88014cb4cb44e630b0"
+content-hash = "0b5a315d1e9c1e6b9ba6963494081f577e10ed4f00f10c6eaaef8ca53dea373a"
