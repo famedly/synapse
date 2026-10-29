@@ -254,7 +254,7 @@ class FederationHandler:
         """
         if (await self.store.get_room_version(room_id)).msc4242_state_dags:
             # TODO: we currently don't support backfilling in MSC4242 rooms.
-            return False
+            return None
 
         # Starting the processing time here so we can include the room backfill
         # linearizer lock queue in the timing
