@@ -927,7 +927,7 @@ class FederationServer(FederationBase):
 
         if supports_msc4242_state_dag(event):
             # FIXME: We don't yet support faster room joins in Synapse with MSC4242
-            caller_supports_partial_state = False
+            send_partial_state_response = False
 
         # Use the join event's own stream ordering as the upper bound when fetching
         # forward extremities (below), so we only consider extremities that existed at
