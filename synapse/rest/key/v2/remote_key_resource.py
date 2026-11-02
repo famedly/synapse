@@ -118,9 +118,7 @@ class RemoteKey(RestServlet):
         self.fetcher = ServerKeyFetcher(hs)
         self.store = hs.get_datastores().main
         self.clock = hs.get_clock()
-        self.federation_domain_whitelist = (
-            hs.config.federation.federation_domain_whitelist
-        )
+        self._federation_config = hs.config.federation
         self.config = hs.config
 
     def register(self, http_server: HttpServer) -> None:
@@ -271,9 +269,8 @@ class RemoteKey(RestServlet):
 
             if miss and query_remote_on_cache_miss:
                 # only bother attempting to fetch keys from servers on our whitelist
-                if (
-                    self.federation_domain_whitelist is None
-                    or server_name in self.federation_domain_whitelist
+                if self._federation_config.is_domain_allowed_according_to_federation_whitelist(
+                    server_name
                 ):
                     cache_misses.setdefault(server_name, {})[key_id] = 0
 

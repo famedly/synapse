@@ -66,9 +66,7 @@ class Authenticator:
         self.server_name = hs.hostname
         self._is_mine_server_name = hs.is_mine_server_name
         self.store = hs.get_datastores().main
-        self.federation_domain_whitelist = (
-            hs.config.federation.federation_domain_whitelist
-        )
+        self._federation_config = hs.config.federation
         self.notifier = hs.get_notifier()
 
         self.replication_client = None
@@ -116,9 +114,11 @@ class Authenticator:
                         f"Destination mismatch in auth header, received: {destination!r}",
                         Codes.UNAUTHORIZED,
                     )
-        if (
-            self.federation_domain_whitelist is not None
-            and origin not in self.federation_domain_whitelist
+        if self._federation_config.federation_domain_whitelist is not None and (
+            origin is None
+            or not self._federation_config.is_domain_allowed_according_to_federation_whitelist(
+                origin
+            )
         ):
             raise FederationDeniedError(origin)
 

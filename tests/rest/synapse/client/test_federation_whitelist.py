@@ -96,6 +96,31 @@ class FederationWhitelistTests(unittest.HomeserverTestCase):
     @unittest.override_config(
         {
             "federation_whitelist_endpoint_enabled": True,
+            "federation_domain_whitelist": ["example.com", "*.example.com"],
+        }
+    )
+    def test_whitelist_wildcard(self) -> None:
+        "Wildcard entries are returned verbatim"
+
+        self.register_user("user", "password")
+        tok = self.login("user", "password")
+
+        channel = self.make_request(
+            "GET",
+            "/_synapse/client/v1/config/federation_whitelist",
+            shorthand=False,
+            access_token=tok,
+        )
+
+        self.assertEqual(channel.code, 200)
+        self.assertEqual(
+            channel.json_body,
+            {"whitelist_enabled": True, "whitelist": ["example.com", "*.example.com"]},
+        )
+
+    @unittest.override_config(
+        {
+            "federation_whitelist_endpoint_enabled": True,
             "federation_domain_whitelist": ["example.com", "example.com"],
         }
     )
