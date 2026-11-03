@@ -20,11 +20,10 @@
 #
 
 import abc
-import errno
 import logging
 import os
 import shutil
-from collections.abc import Awaitable, Callable
+from collections.abc import Callable
 from typing import TYPE_CHECKING
 
 from synapse.config._base import Config
@@ -66,28 +65,6 @@ class StorageProvider(metaclass=abc.ABCMeta):
 
         Returns:
             Returns a Responder if the provider has the file, otherwise returns None.
-        """
-
-    @abc.abstractmethod
-    async def delete_file(self, path: str, file_info: FileInfo) -> None:
-        """Remove a previously stored file. Missing files are ignored.
-
-        Content-addressed paths are shared, so callers only invoke this when the
-        path has no remaining references. The default implementation does nothing
-        so existing third-party providers keep working.
-
-        Args:
-            path: Relative path of file in local cache
-            file_info: The metadata of the file.
-        """
-
-    @abc.abstractmethod
-    async def delete_directory(self, path: str, file_info: FileInfo) -> None:
-        """Remove a previously stored directory, such as a thumbnail directory.
-
-        Args:
-            path: Relative path of the directory in the local cache.
-            file_info: The metadata of the media the directory belongs to.
         """
 
 
@@ -157,33 +134,6 @@ class StorageProviderWrapper(StorageProvider):
         # against improper implementations.
         return await maybe_awaitable(self.backend.fetch(path, file_info))
 
-    def _stores_file(self, file_info: FileInfo) -> bool:
-        if file_info.url_cache:
-            return False
-        if not file_info.server_name and not self.store_local:
-            return False
-        if file_info.server_name and not self.store_remote:
-            return False
-        return True
-
-    async def _forward_delete(
-        self,
-        delete: Callable[[str, FileInfo], Awaitable[None]],
-        path: str,
-        file_info: FileInfo,
-    ) -> None:
-        if not self._stores_file(file_info):
-            return
-        await maybe_awaitable(delete(path, file_info))  # type: ignore[arg-type]
-
-    @trace_with_opname("StorageProviderWrapper.delete_file")
-    async def delete_file(self, path: str, file_info: FileInfo) -> None:
-        await self._forward_delete(self.backend.delete_file, path, file_info)
-
-    @trace_with_opname("StorageProviderWrapper.delete_directory")
-    async def delete_directory(self, path: str, file_info: FileInfo) -> None:
-        await self._forward_delete(self.backend.delete_directory, path, file_info)
-
 
 class FileStorageProviderBackend(StorageProvider):
     """A storage provider that stores files in a directory on a filesystem.
@@ -209,9 +159,22 @@ class FileStorageProviderBackend(StorageProvider):
         primary_fname = os.path.join(self.cache_directory, path)
         backup_fname = os.path.join(self.base_directory, path)
 
-        with start_active_span("_copy_if_absent"):
+        # A SHA-256 path is content-addressed, so an existing backup already
+        # contains these bytes and does not need to be copied again.
+        if file_info.sha256 and os.path.isfile(backup_fname):
+            return
+
+        dirname = os.path.dirname(backup_fname)
+        os.makedirs(dirname, exist_ok=True)
+
+        # mypy needs help inferring the type of the second parameter, which is generic
+        shutil_copyfile: Callable[[str, str], str] = shutil.copyfile
+        with start_active_span("shutil_copyfile"):
             await defer_to_thread(
-                self.reactor, _copy_if_absent, primary_fname, backup_fname
+                self.reactor,
+                shutil_copyfile,
+                primary_fname,
+                backup_fname,
             )
 
     @trace_with_opname("FileStorageProviderBackend.fetch")
@@ -227,20 +190,6 @@ class FileStorageProviderBackend(StorageProvider):
 
         return None
 
-    @trace_with_opname("FileStorageProviderBackend.delete_file")
-    async def delete_file(self, path: str, file_info: FileInfo) -> None:
-        """See StorageProvider.delete_file"""
-        backup_fname = os.path.join(self.base_directory, path)
-        await defer_to_thread(self.reactor, _remove_file, backup_fname)
-
-    @trace_with_opname("FileStorageProviderBackend.delete_directory")
-    async def delete_directory(self, path: str, file_info: FileInfo) -> None:
-        """See StorageProvider.delete_directory"""
-        backup_directory = os.path.join(self.base_directory, path)
-        await defer_to_thread(
-            self.reactor, shutil.rmtree, backup_directory, ignore_errors=True
-        )
-
     @staticmethod
     def parse_config(config: dict) -> str:
         """Called on startup to parse config supplied. This should parse
@@ -252,32 +201,3 @@ class FileStorageProviderBackend(StorageProvider):
         just pull that out.
         """
         return Config.ensure_directory(config["directory"])
-
-
-def _copy_if_absent(src: str, dest: str) -> None:
-    """Copy `src` to `dest` unless `dest` already exists.
-
-    A hard link is used when both paths are on the same filesystem, so the
-    destination appears with its final contents. An existing destination is
-    left unchanged.
-    """
-    os.makedirs(os.path.dirname(dest), exist_ok=True)
-    try:
-        os.link(src, dest)
-        return
-    except FileExistsError:
-        return
-    except OSError as e:
-        if e.errno != errno.EXDEV:
-            raise
-    if os.path.exists(dest):
-        return
-    shutil.copyfile(src, dest)
-
-
-def _remove_file(path: str) -> None:
-    """Remove `path`, ignoring a missing file."""
-    try:
-        os.remove(path)
-    except FileNotFoundError:
-        pass

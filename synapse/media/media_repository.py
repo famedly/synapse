@@ -62,6 +62,7 @@ from synapse.media._base import (
 )
 from synapse.media.filepath import MediaFilePaths
 from synapse.media.media_storage import (
+    SHA256_FILES_LOCK_NAME,
     MediaStorage,
     SHA256TransparentIOWriter,
 )
@@ -94,8 +95,7 @@ UPDATE_RECENTLY_ACCESSED_TS = Duration(minutes=1)
 # How often to run the background job to check for local and remote media
 # that should be purged according to the configured media retention settings.
 MEDIA_RETENTION_CHECK_PERIOD = Duration(hours=1)
-
-_SHA256_FILES_LOCK_NAME = "media_sha256_files"
+MEDIA_TEMP_FILE_CLEANUP_PERIOD = Duration(hours=1)
 
 
 class MediaRepository:
@@ -174,6 +174,11 @@ class MediaRepository:
         self.clock.looping_call(
             self._start_update_recently_accessed, UPDATE_RECENTLY_ACCESSED_TS
         )
+        if hs.config.worker.run_background_tasks:
+            self.clock.looping_call(
+                self._start_cleanup_stale_media_temporary_files,
+                MEDIA_TEMP_FILE_CLEANUP_PERIOD,
+            )
 
         # Media retention configuration options
         self._media_retention_local_media_lifetime_ms = (
@@ -215,6 +220,12 @@ class MediaRepository:
         return self.hs.run_as_background_process(
             "update_recently_accessed_media",
             self._update_recently_accessed,
+        )
+
+    def _start_cleanup_stale_media_temporary_files(self) -> Deferred:
+        return self.hs.run_as_background_process(
+            "cleanup_stale_media_temporary_files",
+            self.media_storage.cleanup_stale_temporary_files,
         )
 
     def _start_apply_media_retention_rules(self) -> Deferred:
@@ -333,7 +344,7 @@ class MediaRepository:
             sha256: The SHA-256 of the media.
         """
         return self._worker_locks.acquire_lock(
-            _SHA256_FILES_LOCK_NAME, f"{server_name or ''}/{sha256}"
+            SHA256_FILES_LOCK_NAME, f"{server_name or ''}/{sha256}"
         )
 
     @trace
@@ -367,8 +378,8 @@ class MediaRepository:
 
         file_info = FileInfo(server_name=None, file_id=media_id)
 
-        # Hold the lock before linking the temporary file onto its final SHA-256 path
-        # until the DB row is inserted. Quarantine and quota checks run before linking,
+        # Hold the lock before renaming the temporary file onto its final SHA-256 path
+        # until the DB row is inserted. Quarantine and quota checks run before renaming,
         # so a failure deletes only the temporary file.
         # The lock key includes the hash, so it cannot be opened before the file is
         # written, and it has to stay held after store_into_file finishes.
@@ -389,12 +400,11 @@ class MediaRepository:
 
                 # Check that the user has not exceeded any of the media upload limits.
                 # A failure here never acquires the lock. The exception is thrown back
-                # into `store_into_file` at the yield, which deletes the temporary file
-                # and does not link to the SHA-256 path.
+                # into `store_into_file` at the yield, which deletes the temporary file.
                 await self._check_media_upload_limits(auth_user, content_length)
 
                 # The SHA-256 lock is acquired after the bytes are hashed and released
-                # only after the database row exists. Linking the temporary file onto
+                # only after the database row exists. Renaming the temporary file onto
                 # the SHA-256 path happens in between, while the lock is held.
                 # This `enter_async_context` acquires the lock immediately and
                 # registers its release for when the outer stack exits. It waits until
@@ -404,10 +414,10 @@ class MediaRepository:
                     self._lock_sha256_files(None, sha256)
                 )
             # Within `store_into_file`, the temporary file is closed and the spam check
-            # is ran, and the temporary file onto the SHA-256 path is linked only when
+            # is ran, and the temporary file is renamed onto the SHA-256 path only when
             # that path is absent. An existing file is kept. Storage providers are given
             # the path only when this attempt created it. A spam failure deletes the
-            # temporary file and skips the link.
+            # temporary file.
 
             logger.info("Stored local media %s with SHA-256 %s", media_id, sha256)
 
@@ -1641,14 +1651,27 @@ class MediaRepository:
 
             logger.info("Deleting: %r", key)
 
+            # TODO: Should we delete from the backup store
+
+            # Storage providers are never asked to delete anything here: only the
+            # local disk is cleaned up. Both the `filesystem_id` path and the SHA-256
+            # path (`remote_content/{origin}/{sha[0:2]}/{sha[2:4]}/{sha[4:]}` and the
+            # matching `remote_thumbnail/` directory) stay in every provider.
+            #
+            # Operators who want to reclaim provider space must do it out of band,
+            # e.g. with a bucket lifecycle rule or a cleanup script:
+            # * A `filesystem_id` path can be removed once its row is gone from
+            #   `remote_media_cache`.
+            # * A SHA-256 path is shared per origin. Remove it only when no row in
+            #   `remote_media_cache` with the same `media_origin` and `sha256`
+            #   remains, otherwise other media from that origin can no longer be
+            #   served once the local copy is gone.
             async with self.remote_media_linearizer.queue(key):
                 media_info = await self.store.get_cached_remote_media(origin, media_id)
-                # Deletes the legacy path for file_id: the file on local disk, the same
-                # relative path on every storage provider, and the thumbnail directory
-                # in both places.
-                removed = await self._delete_stored_files(
-                    origin, file_id, abort_on_remove_error=True
-                )
+                # Remove the local cache only. Backup copies in storage providers are
+                # left in place: this purge is the local remote-media cache, not a
+                # deletion of the backup store.
+                removed = await self._delete_stored_files(origin, file_id)
                 if not removed:
                     continue
 
@@ -1656,7 +1679,8 @@ class MediaRepository:
 
                 # Delete the SHA-256 path for the media. The lock covers only the
                 # reference check and the possible hash deletion. The legacy deletion
-                # and the database deletion above are already finished.
+                # and the database deletion above are already finished. The backup
+                # copy is kept.
                 if media_info and media_info.sha256:
                     async with self._lock_sha256_files(origin, media_info.sha256):
                         await self._remove_sha256_files_if_unused(
@@ -1724,13 +1748,25 @@ class MediaRepository:
         Returns:
             A tuple of (list of deleted media IDs, total deleted media IDs).
         """
+        # Storage providers are never asked to delete anything here: only the
+        # local disk is cleaned up. Both the media-id path and the SHA-256 path
+        # (`local_content/{sha[0:2]}/{sha[2:4]}/{sha[4:]}` and the matching
+        # `local_thumbnails/` directory) stay in every provider.
+        #
+        # Operators who want to reclaim provider space must do it out of band,
+        # e.g. with a bucket lifecycle rule or a cleanup script:
+        # * A media-id path can be removed once its row is gone from
+        #   `local_media_repository`.
+        # * A SHA-256 path is shared. Remove it only when no row in
+        #   `local_media_repository` with the same `sha256` and `url_cache IS NULL`
+        #   remains. Otherwise other media with the same content can no longer be
+        #   served once the local copy is gone, and with
+        #   `enable_local_media_storage: false` the provider copy is the only copy.
         removed_media = []
         for media_id in media_ids:
             logger.info("Deleting media with ID '%s'", media_id)
             media_info = await self.store.get_local_media(media_id)
-            removed = await self._delete_stored_files(
-                None, media_id, abort_on_remove_error=True
-            )
+            removed = await self._delete_stored_files(None, media_id)
             if not removed:
                 continue
 
@@ -1770,76 +1806,47 @@ class MediaRepository:
 
         # If no row remains, _delete_stored_files is called again with the SHA-256
         # as the path identifier, which removes the hash file and its thumbnail
-        # directory locally and from every provider.
-        await self._delete_stored_files(
-            server_name, sha256, abort_on_remove_error=False
-        )
-
-    def _stored_file_locations(
-        self, server_name: str | None, identifier: str
-    ) -> tuple[FileInfo, str, str, str]:
-        """Return the file info, absolute path, relative path, and thumbnail directory.
-
-        `identifier` is a media ID or filesystem ID for a legacy path, and a
-        SHA-256 for a content-addressed path. Remote paths include `server_name`.
-        """
-        if server_name:
-            return (
-                FileInfo(server_name=server_name, file_id=identifier),
-                self.filepaths.remote_media_filepath(server_name, identifier),
-                self.filepaths.remote_media_filepath_rel(server_name, identifier),
-                self.filepaths.remote_media_thumbnail_dir(server_name, identifier),
-            )
-        return (
-            FileInfo(server_name=None, file_id=identifier),
-            self.filepaths.local_media_filepath(identifier),
-            self.filepaths.local_media_filepath_rel(identifier),
-            self.filepaths.local_media_thumbnail_dir(identifier),
-        )
+        # directory locally. Provider copies are not removed.
+        await self._delete_stored_files(server_name, sha256)
 
     async def _delete_stored_files(
-        self,
-        server_name: str | None,
-        identifier: str,
-        *,
-        abort_on_remove_error: bool,
+        self, server_name: str | None, identifier: str
     ) -> bool:
-        """Remove a file and its thumbnail directory locally and from every provider.
+        """Remove a local or remote media file and its thumbnail directory.
 
-        A missing file is success. When `abort_on_remove_error` is set, any other
-        local removal error is logged and the provider copies are left in place.
-        Otherwise a removal error is logged and deletion continues.
+        Storage providers are left unchanged. A file that is already gone is
+        success. Any other error removing the file is logged so the caller can
+        keep the database row.
+
+        Args:
+            server_name: The origin of remote media, or None for local media.
+            identifier: A media ID, filesystem ID, or SHA-256.
 
         Returns:
-            False when local removal failed and `abort_on_remove_error` is set.
+            False when the file could not be removed.
         """
-        file_info, full_path, relative_path, thumbnail_dir = (
-            self._stored_file_locations(server_name, identifier)
-        )
+
+        if server_name:
+            full_path = self.filepaths.remote_media_filepath(server_name, identifier)
+            thumbnail_dir = self.filepaths.remote_media_thumbnail_dir(
+                server_name, identifier
+            )
+        else:
+            full_path = self.filepaths.local_media_filepath(identifier)
+            thumbnail_dir = self.filepaths.local_media_thumbnail_dir(identifier)
 
         # os.remove blocks until the filesystem returns, and this function runs
-        # on the Twisted reactor (single) thread. defer_to_thread moves that wait onto
-        # the reactor's thread pool so the worker can keep serving other requests.
+        # on the Twisted reactor thread. defer_to_thread moves that wait onto the
+        # reactor's thread pool so the worker can keep serving other requests.
         remove_error = await defer_to_thread(
             self.hs.get_reactor(), _remove_file, full_path
         )
-        if isinstance(remove_error, FileNotFoundError):
-            if abort_on_remove_error:
-                logger.warning("Failed to remove file: %r: %s", full_path, remove_error)
-        elif remove_error is not None:
+        if remove_error is not None and remove_error.errno != errno.ENOENT:
             logger.warning("Failed to remove file: %r: %s", full_path, remove_error)
-            if abort_on_remove_error and remove_error.errno != errno.ENOENT:
-                return False
+            return False
 
-        await self.media_storage.delete_from_storage_providers(relative_path, file_info)
         await defer_to_thread(
-            self.hs.get_reactor(),
-            shutil.rmtree,
-            thumbnail_dir,
-            ignore_errors=True,
-        )
-        await self.media_storage.delete_directory_from_storage_providers(
-            os.path.relpath(thumbnail_dir, self.primary_base_path), file_info
+            self.hs.get_reactor(), shutil.rmtree, thumbnail_dir, ignore_errors=True
         )
         return True
 

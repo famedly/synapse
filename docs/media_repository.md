@@ -57,6 +57,52 @@ remote_thumbnail/matrix.org/aa/bb/cccccccccccccccccccc/128-96-image-jpeg
 
 Note that `remote_thumbnail/` does not have an `s`.
 
+## Content-addressed (SHA-256) Paths
+
+New local uploads and remote downloads are stored under the SHA-256 of their
+content instead of their media ID or `filesystem_id`. Media with identical
+content then share one file on disk. This is an internal storage detail: MXC
+URIs and media IDs are unchanged, and there is no configuration option for it.
+
+Local and remote media never share a file, and remote media is only shared
+between media from the same origin. URL preview resources are not
+content-addressed and keep the paths described under [URL Previews](#url-previews).
+
+### Paths
+For a SHA-256 of `ebf4f635a17...` (64 hex characters), the file and its `128x96`
+`image/jpeg` thumbnail, created by scaling, would be stored at:
+```
+local_content/eb/f4/f635...
+local_thumbnails/eb/f4/f635.../128-96-image-jpeg-scale
+
+remote_content/matrix.org/eb/f4/f635...
+remote_thumbnail/matrix.org/eb/f4/f635.../128-96-image-jpeg-scale
+```
+Storage providers are given the same relative paths.
+
+### Compatibility with media-ID paths
+Existing media stays at its media-ID paths. The store is not rewritten when
+upgrading.
+
+* **Reading:** if the SHA-256 of the media is known, its SHA-256 path is tried
+  first, then its media-ID path. Media without a recorded SHA-256 uses its
+  media-ID path only. The local media store is checked first, then each storage
+  provider, with the same relative paths in the same order.
+* **Writing:** the content is written to a temporary file in the media store and
+  hashed. If the SHA-256 path does not exist yet, the temporary file is moved
+  there. Otherwise the temporary file is deleted and the media references the
+  existing file. A failed spam check or media quota check only deletes the
+  temporary file.
+* **Deleting:** the media-ID path and its thumbnails are always removed from the
+  local media store. The SHA-256 path and its thumbnails are removed only when
+  no other media references the same SHA-256: for local media, ignoring URL
+  preview resources; for remote media, counting only media from the same origin.
+
+Deleting media never removes files from storage providers. Copies at both the
+media-ID and SHA-256 paths remain there and must be cleaned up out of band. A
+SHA-256 path in a storage provider must only be removed when no remaining media
+(from the same origin, for remote media) has that SHA-256.
+
 ## URL Previews
 
 When generating previews for URLs, Synapse may download and cache various

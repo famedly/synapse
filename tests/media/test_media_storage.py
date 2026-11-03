@@ -39,7 +39,7 @@ from twisted.web.http_headers import Headers
 from twisted.web.iweb import UNKNOWN_LENGTH, IResponse
 from twisted.web.resource import Resource
 
-from synapse.api.errors import Codes, HttpResponseException
+from synapse.api.errors import Codes, HttpResponseException, NotFoundError
 from synapse.api.ratelimiting import Ratelimiter
 from synapse.events import EventBase
 from synapse.http.client import ByteWriteable

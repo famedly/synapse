@@ -68,6 +68,10 @@ logger = logging.getLogger(__name__)
 
 CRLF = b"\r\n"
 
+SHA256_FILES_LOCK_NAME = "media_sha256_files"
+_MEDIA_TEMP_FILE_PREFIX = "synapse-media-"
+_MEDIA_TEMP_FILE_MAX_AGE = Duration(hours=24)
+
 
 class SHA256TransparentIOWriter:
     """Will generate a SHA256 hash from a source stream transparently.
@@ -202,7 +206,7 @@ class MediaStorage:
           store, it is written there directly. This is the case for URL cache files,
           and thumbnails of older media without a SHA-256.
         * Files stored under a SHA-256 path may be shared, so they are written to a
-          temporary file. After the spam check the temp file is linked into place
+          temporary file. After the spam check the temp file is renamed into place
           only when that path is absent; an existing file is kept and the temp file
           is deleted. Storage providers receive the path only when it was created.
           This covers new uploads, remote downloads, thumbnails of media with a
@@ -247,8 +251,8 @@ class MediaStorage:
 
         # Code above `yield` runs on entering `async with`. The caller writes the
         # body, then the code below `yield` runs on exiting it: spam check, then
-        # link the temporary file onto its final SHA-256 path.
-        # The SHA-256 lock is acquired by that caller before it exits, so linking
+        # rename the temporary file onto its final SHA-256 path.
+        # The SHA-256 lock is acquired by that caller before it exits, so renaming
         # the temporary file onto its final SHA-256 path runs while the lock is held.
         # This function does not take the lock.
         try:
@@ -263,9 +267,9 @@ class MediaStorage:
                     with f:
                         yield f, media_filepath
             else:
-                # Temporary file on the media-store filesystem, so `os.link` can
-                # publish it onto the final path. The yielded path is this temp
-                # file and is only valid until the caller's block exits.
+                # Temporary file on the media-store filesystem. It is renamed to
+                # the final path after the spam check, and is only valid until the
+                # caller's block exits.
                 tmp = await defer_to_thread(
                     self.reactor, _create_temp_file, self.local_media_directory
                 )
@@ -283,10 +287,10 @@ class MediaStorage:
         except BaseException:
             # The caller failed inside its `async with` block (for example a
             # failed download or a quota check). The exception is thrown back in
-            # at `yield`, before the spam check and linking to the final path below.
+            # at `yield`, before the spam check and renaming to the final path below.
             # Remove the partial temp file. This must not await: the generator may be
             # closing with `GeneratorExit`. A media-id file written in place is
-            # left for the failure path below.
+            # intentionally left behind, matching the legacy behaviour.
             if is_temp_file and media_filepath is not None:
                 _remove_quietly(media_filepath)
             raise
@@ -309,7 +313,7 @@ class MediaStorage:
 
         The caller of `store_into_file` has finished writing and the file is
         closed before this method runs. In particular, callers which need it
-        hold their SHA-256 lock while this method links the temporary file onto
+        hold their SHA-256 lock while this method renames the temporary file onto
         its final SHA-256 path.
         """
         if sha256_writer is not None:
@@ -322,7 +326,7 @@ class MediaStorage:
         # that already existed is shared, so a later failure must not remove it.
         delete_filepath_on_failure = True
 
-        # Spam check, then link to the final SHA-256 path. Runs for both the in-place
+        # Spam check, then rename to the final SHA-256 path. Runs for both the in-place
         # and temp-file cases.
         try:
             with start_active_span("spam checking and writing to storage providers"):
@@ -341,8 +345,8 @@ class MediaStorage:
                     raise SpamMediaException(errcode=spam_check[0])
 
                 # `FileStorageProviderBackend` reads the final local path, so a
-                # temp file is linked into place before providers run. `os.link`
-                # creates that path only when it is absent; an existing file is
+                # temp file is renamed into place before providers run. The destination
+                # is created only when it is absent; an existing file is
                 # kept and the temp file is removed. Providers are then skipped,
                 # because the bytes are already stored.
                 send_to_providers = True
@@ -350,7 +354,7 @@ class MediaStorage:
                     final_filepath = os.path.join(self.local_media_directory, path)  # type: ignore[arg-type]
                     send_to_providers = await defer_to_thread(
                         self.reactor,
-                        _link_if_not_exists,
+                        _rename_if_not_exists,
                         media_filepath,
                         final_filepath,
                     )
@@ -370,7 +374,7 @@ class MediaStorage:
 
         except Exception as e:
             # Delete the local file only when this attempt created it. That is
-            # the in-place media-id file, or a SHA-256 path this call linked.
+            # the in-place media-id file, or a SHA-256 path this call renamed.
             # A path that already existed stays.
             if delete_filepath_on_failure:
                 await defer_to_thread(self.reactor, _remove_quietly, media_filepath)
@@ -412,22 +416,18 @@ class MediaStorage:
                 )
             )
 
-        # Check local provider first, then other storage providers
+        # Check local provider first, then other storage providers. Each one is
+        # asked for every path, in order.
+        providers: list[StorageProvider] = list(self.storage_providers)
         if self.local_provider:
-            for path in paths:
-                res: Any = await self.local_provider.fetch(path, file_info)
-                if res:
-                    logger.debug("Streaming %s from %s", path, self.local_provider)
-                    return res
-                logger.debug("%s not found on %s", path, self.local_provider)
+            providers.insert(0, self.local_provider)
 
-        for provider in self.storage_providers:
-            for path in paths:
-                res = await provider.fetch(path, file_info)
-                if res:
-                    logger.debug("Streaming %s from %s", path, provider)
-                    return res
-                logger.debug("%s not found on %s", path, provider)
+        for provider, path in itertools.product(providers, paths):
+            res: Any = await provider.fetch(path, file_info)
+            if res:
+                logger.debug("Streaming %s from %s", path, provider)
+                return res
+            logger.debug("%s not found on %s", path, provider)
 
         return None
 
@@ -478,63 +478,96 @@ class MediaStorage:
                     yield legacy_local_path
                     return
 
-            for provider in self.storage_providers:
-                for path in paths:
-                    remote_res: Any = await provider.fetch(path, file_info)
-                    if remote_res:
-                        local_path = os.path.join(self.local_media_directory, path)  # type: ignore[arg-type]
-                        os.makedirs(os.path.dirname(local_path), exist_ok=True)
-                        with remote_res:
-                            consumer = BackgroundFileConsumer(
-                                open(local_path, "wb"), self.reactor
-                            )
-                            await remote_res.write_to_consumer(consumer)
-                            await consumer.wait()
-                        yield local_path
-                        return
+        # Not on local disk: ask each provider for the same paths, in order.
+        for provider, path in itertools.product(self.storage_providers, paths):
+            temp_path = await self._fetch_into_temp_file(provider, path, file_info)
+            if temp_path is None:
+                continue
 
-            raise NotFoundError()
-        else:
-            # No local provider, download to temp file and clean up after use
-            for provider, path in itertools.product(self.storage_providers, paths):
-                res: Any = await provider.fetch(path, file_info)
-                if res:
-                    temp_path = None
-                    try:
-                        with tempfile.NamedTemporaryFile(
-                            delete=False, suffix=os.path.splitext(path)[1]
-                        ) as tmp:
-                            temp_path = tmp.name
-                        with res:
-                            consumer = BackgroundFileConsumer(
-                                open(temp_path, "wb"), self.reactor
-                            )
-                            await res.write_to_consumer(consumer)
-                            await consumer.wait()
-                        yield temp_path
-                    finally:
-                        if temp_path:
-                            try:
-                                os.remove(temp_path)
-                            except Exception:
-                                pass
-                    return
+            if self.local_provider:
+                # The download went to a temporary file, so a shared SHA-256 path
+                # never holds a partial file. If another request cached the same
+                # path meanwhile, its bytes are identical: keep it and drop ours.
+                local_path = os.path.join(self.local_media_directory, path)  # type: ignore[arg-type]
+                await defer_to_thread(
+                    self.reactor, _rename_if_not_exists, temp_path, local_path
+                )
+                yield local_path
+            else:
+                # No local store: the temporary file in the system temp directory
+                # is only kept for the caller's block. Removed without awaiting,
+                # as the generator may be closing with `GeneratorExit`.
+                try:
+                    yield temp_path
+                finally:
+                    _remove_quietly(temp_path)
+            return
 
-            raise NotFoundError()
+        raise NotFoundError()
 
-    async def delete_from_storage_providers(
-        self, path: str, file_info: FileInfo
-    ) -> None:
-        """Remove `path` from every configured storage provider."""
-        for provider in self.storage_providers:
-            await provider.delete_file(path, file_info)
+    async def _fetch_into_temp_file(
+        self, provider: "StorageProvider", path: str, file_info: FileInfo
+    ) -> str | None:
+        """Download `path` from `provider` into a new temporary file in the local
+        media store, or in the system temp directory if there is no local store.
 
-    async def delete_directory_from_storage_providers(
-        self, path: str, file_info: FileInfo
-    ) -> None:
-        """Remove a directory from every configured storage provider."""
-        for provider in self.storage_providers:
-            await provider.delete_directory(path, file_info)
+        Args:
+            provider: The storage provider to fetch from.
+            path: The relative path to fetch.
+            file_info: Info about the file.
+
+        Returns:
+            The temporary file path, owned by the caller. None if the provider does
+            not have the file, or its bytes do not match `file_info.sha256`.
+        """
+        remote_res: Any = await provider.fetch(path, file_info)
+        if not remote_res:
+            return None
+
+        tmp = await defer_to_thread(
+            self.reactor, _create_temp_file, self.local_media_directory
+        )
+        try:
+            with remote_res:
+                # The consumer closes `tmp` once the transfer has finished.
+                consumer = BackgroundFileConsumer(tmp, self.reactor)
+                await remote_res.write_to_consumer(consumer)
+                await consumer.wait()
+
+            # A SHA-256 path is shared by every media ID with this content, so a
+            # corrupt provider copy must not be cached there.
+            if file_info.sha256:
+                sha256 = await defer_to_thread(self.reactor, _get_file_sha256, tmp.name)
+                if sha256 != file_info.sha256:
+                    logger.warning(
+                        "Ignoring corrupt media from %s at %s: "
+                        "expected SHA-256 %s, got %s",
+                        provider,
+                        path,
+                        file_info.sha256,
+                        sha256,
+                    )
+                    await defer_to_thread(self.reactor, _remove_quietly, tmp.name)
+                    return None
+        except BaseException:
+            # A failed transfer may not have reached the consumer's close.
+            tmp.close()
+            await defer_to_thread(self.reactor, _remove_quietly, tmp.name)
+            raise
+
+        return tmp.name
+
+    async def cleanup_stale_temporary_files(self) -> None:
+        """Remove abandoned temporary files from the local media-store root."""
+        if self.local_media_directory is None:
+            return
+
+        await defer_to_thread(
+            self.reactor,
+            _remove_stale_temporary_files,
+            self.local_media_directory,
+            self.clock.time_msec(),
+        )
 
     @trace
     def _get_relative_path(
@@ -599,6 +632,32 @@ class MediaStorage:
         return paths
 
 
+def _remove_stale_temporary_files(directory: str, now_ms: int) -> None:
+    """Remove old Synapse media temp files. Should be called from a thread.
+
+    ``tmp`` is included for temporary files created before the dedicated
+    ``synapse-media-`` prefix was introduced.
+    """
+    oldest_allowed_ms = now_ms - _MEDIA_TEMP_FILE_MAX_AGE.as_millis()
+    try:
+        entries = os.scandir(directory)
+    except FileNotFoundError:
+        return
+
+    with entries:
+        for entry in entries:
+            if (
+                not entry.name.startswith(
+                    (_MEDIA_TEMP_FILE_PREFIX, tempfile.gettempprefix())
+                )
+                or not entry.is_file(follow_symlinks=False)
+                or entry.stat(follow_symlinks=False).st_mtime_ns
+                > oldest_allowed_ms * 1_000_000
+            ):
+                continue
+            _remove_quietly(entry.path)
+
+
 @trace
 def _write_file_synchronously(source: IO, dest: IO) -> None:
     """Write `source` to the file like `dest` synchronously. Should be called
@@ -624,29 +683,44 @@ def _create_temp_file(directory: str | None) -> BinaryIO:
     None. The file is not deleted on close. Should be called from a thread."""
     if directory:
         os.makedirs(directory, exist_ok=True)
-    return cast(BinaryIO, tempfile.NamedTemporaryFile(dir=directory, delete=False))
+    return cast(
+        BinaryIO,
+        tempfile.NamedTemporaryFile(
+            dir=directory, prefix=_MEDIA_TEMP_FILE_PREFIX, delete=False
+        ),
+    )
 
 
-def _link_if_not_exists(src: str, dest: str) -> bool:
-    """Link `src` onto `dest` when `dest` is absent, then remove `src`.
+def _rename_if_not_exists(src: str, dest: str) -> bool:
+    """Move `src` to `dest` when `dest` is absent. Otherwise remove `src`.
 
-    Should be called from a thread. `src` and `dest` must be on the same
-    filesystem. The link is atomic, so a destination that appears during the
-    call is left untouched.
+    Should be called from a thread. New media holds the SHA-256 lock for `dest`
+    while calling this, so a concurrent delete cannot remove the file before its
+    DB row exists. `src` is created in the destination's filesystem, so this
+    renames rather than copying the bytes. An existing destination is left
+    unchanged.
 
     Returns:
         Whether this call created `dest`.
     """
     os.makedirs(os.path.dirname(dest), exist_ok=True)
-    created = False
-    try:
-        os.link(src, dest)
-        created = True
-    except FileExistsError:
-        created = False
-    finally:
+    if os.path.exists(dest):
         _remove_quietly(src)
-    return created
+        return False
+    # Synapse media paths are POSIX only (see `MediaFilePaths`). There,
+    # `os.rename` atomically replaces `dest` if it appeared since the check
+    # above. Every caller writes the same bytes to the same path, so that is safe.
+    os.rename(src, dest)
+    return True
+
+
+def _get_file_sha256(path: str) -> str:
+    """Return the SHA-256 digest of a file. Should be called from a thread."""
+    sha256 = hashlib.sha256()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(64 * 1024), b""):
+            sha256.update(chunk)
+    return sha256.hexdigest()
 
 
 def _remove_quietly(path: str) -> None:
