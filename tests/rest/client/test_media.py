@@ -145,6 +145,9 @@ class MediaDomainBlockingTests(unittest.HomeserverTestCase):
                 time_now_ms=clock.time_msec(),
                 upload_name="test.png",
                 filesystem_id=file_id,
+                # `store_into_file` above stored the file under its real SHA-256,
+                # and reads look the file up by this column. A dummy value would
+                # point at a path with no file.
                 sha256=SMALL_PNG_SHA256,
             )
         )
@@ -2737,6 +2740,9 @@ class AuthenticatedMediaTestCase(unittest.HomeserverTestCase):
                 time_now_ms=self.clock.time_msec(),
                 upload_name="remote_test.png",
                 filesystem_id=file_id,
+                # `store_into_file` above stored the file under its real SHA-256,
+                # and reads look the file up by this column. A dummy value would
+                # point at a path with no file.
                 sha256=SMALL_PNG_SHA256,
             )
         )
@@ -2749,6 +2755,8 @@ class AuthenticatedMediaTestCase(unittest.HomeserverTestCase):
                     "52",
                     file_id,
                     "image/png",
+                    # The original is stored under its SHA-256, so the thumbnailer
+                    # needs the hash to find it.
                     sha256=SMALL_PNG_SHA256,
                 )
             )
@@ -2804,6 +2812,8 @@ class AuthenticatedMediaTestCase(unittest.HomeserverTestCase):
                     "user_id": "someone",
                     "url_cache": None,
                     "authenticated": False,
+                    # `store_into_file` above stored the file under its real
+                    # SHA-256, and reads look the file up by this column.
                     "sha256": SMALL_PNG_SHA256,
                 },
                 desc="store_local_media",
@@ -2874,6 +2884,9 @@ class AuthenticatedMediaTestCase(unittest.HomeserverTestCase):
                 time_now_ms=self.clock.time_msec(),
                 upload_name="remote_test.png",
                 filesystem_id=file_id,
+                # `store_into_file` above stored the file under its real SHA-256,
+                # and reads look the file up by this column. A dummy value would
+                # point at a path with no file.
                 sha256=SMALL_PNG_SHA256,
             )
         )
@@ -2886,6 +2899,8 @@ class AuthenticatedMediaTestCase(unittest.HomeserverTestCase):
                     "52",
                     file_id,
                     "image/png",
+                    # The original is stored under its SHA-256, so the thumbnailer
+                    # needs the hash to find it.
                     sha256=SMALL_PNG_SHA256,
                 )
             )

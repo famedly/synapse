@@ -4034,8 +4034,9 @@ class UserMediaRestTestCase(unittest.HomeserverTestCase):
         other_user_tok = self.login("user", "pass")
         media_ids = self._create_media_for_user(other_user_tok, number_media)
 
-        # Test if the file exists. All the media share the same content, and so
-        # the same file.
+        # Test if the file exists. New media is stored under its SHA-256, not its
+        # media ID, and all these media have the same content, so they share one
+        # file.
         local_path = self.filepaths.local_media_filepath(SMALL_PNG_SHA256)
         self.assertTrue(os.path.exists(local_path))
 
@@ -4050,7 +4051,7 @@ class UserMediaRestTestCase(unittest.HomeserverTestCase):
         self.assertEqual(number_media, len(channel.json_body["deleted_media"]))
         self.assertCountEqual(channel.json_body["deleted_media"], media_ids)
 
-        # Test if the file is deleted
+        # Test if the file is deleted, once the last media referencing it is gone
         self.assertFalse(os.path.exists(local_path))
 
     def test_order_by(self) -> None:

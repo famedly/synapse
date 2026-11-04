@@ -85,6 +85,9 @@ class QueryMediaByIDTestCase(_AdminMediaTests):
                 time_now_ms=self.clock.time_msec(),
                 upload_name="test.png",
                 filesystem_id=file_id,
+                # `store_into_file` above stored the file under its real SHA-256,
+                # and reads look the file up by this column. A dummy value would
+                # point at a path with no file.
                 sha256=SMALL_PNG_SHA256,
             )
         )
@@ -321,7 +324,8 @@ class DeleteMediaByIDTestCase(_AdminMediaTests):
             ),
         )
 
-        # Test if the file exists
+        # Test if the file exists. New media is stored under its SHA-256, not its
+        # media ID.
         local_path = self.filepaths.local_media_filepath(SMALL_PNG_SHA256)
         self.assertTrue(os.path.exists(local_path))
 
@@ -533,7 +537,8 @@ class DeleteMediaByDateSizeTestCase(_AdminMediaTests):
         server_and_media_id = self._create_media()
         self.pump(1.0)
 
-        # test that the file exists
+        # test that the file exists. New media is stored under its SHA-256, not
+        # its media ID.
         media_id = server_and_media_id.split("/")[1]
         local_path = self.filepaths.local_media_filepath(SMALL_PNG_SHA256)
         self.assertTrue(os.path.exists(local_path))
@@ -744,6 +749,7 @@ class DeleteMediaByDateSizeTestCase(_AdminMediaTests):
         """
         Try to access a media and check the result
         """
+        # New media is stored under its SHA-256, not its media ID.
         local_path = self.filepaths.local_media_filepath(SMALL_PNG_SHA256)
 
         channel = self.make_request(

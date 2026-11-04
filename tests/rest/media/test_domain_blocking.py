@@ -60,6 +60,9 @@ class MediaDomainBlockingTests(unittest.HomeserverTestCase):
                 time_now_ms=clock.time_msec(),
                 upload_name="test.png",
                 filesystem_id=file_id,
+                # `store_into_file` above stored the file under its real SHA-256,
+                # and reads look the file up by this column. A dummy value would
+                # point at a path with no file.
                 sha256=SMALL_PNG_SHA256,
             )
         )

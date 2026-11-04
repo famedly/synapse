@@ -1016,6 +1016,35 @@ class MediaRepositoryStore(MediaRepositoryBackgroundUpdateStore):
             )
         return bool(rows)
 
+    async def get_media_ids_with_sha256(
+        self, sha256: str, origin: str | None = None
+    ) -> list[str]:
+        """Get the IDs that build the media-ID paths of media with this SHA-256.
+
+        Args:
+            sha256: The SHA-256 of the media.
+            origin: The origin to get remote media from, or None to get local
+                media. URL cache media is ignored, as it is not stored by SHA-256.
+
+        Returns:
+            Media IDs for local media, or filesystem IDs for remote media.
+        """
+        if origin is None:
+            sql = """
+                SELECT media_id FROM local_media_repository
+                WHERE sha256 = ? AND url_cache IS NULL
+            """
+            rows = await self.db_pool.execute("get_media_ids_with_sha256", sql, sha256)
+        else:
+            sql = """
+                SELECT filesystem_id FROM remote_media_cache
+                WHERE media_origin = ? AND sha256 = ?
+            """
+            rows = await self.db_pool.execute(
+                "get_media_ids_with_sha256", sql, origin, sha256
+            )
+        return [row[0] for row in rows]
+
     async def get_is_hash_quarantined(self, sha256: str) -> bool:
         """Get whether a specific sha256 hash digest matches any quarantined media.
 
