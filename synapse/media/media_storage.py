@@ -169,10 +169,17 @@ class MediaStorage:
             # Write to the main media repository
             await self.write_to_file(source, f)
 
+        # Without a local store there is no final local path: `fname` is the
+        # temporary file, already removed once the providers stored it. This keeps
+        # the behaviour from before deduplication, which also returned that path.
         if not self.local_provider:
             return fname
 
-        # `fname` may have been a temporary file. Return the path that was kept.
+        # With a local store, `fname` may have been a temporary file that was
+        # renamed (or dropped, if the SHA-256 path already existed). Return the
+        # path that was kept: the SHA-256 path if the hash is known now, otherwise
+        # the media-ID path. A new upload only learns its hash while writing, from
+        # the `SHA256TransparentIOWriter` yielded by `store_into_file`.
         if isinstance(f, SHA256TransparentIOWriter):
             file_info = attr.evolve(file_info, sha256=f.hexdigest())
         return os.path.join(
@@ -193,68 +200,41 @@ class MediaStorage:
         """Async Context manager used to get a file like object to write into, as
         described by file_info.
 
-        Actually yields a 2-tuple (file, media_filepath,), where file is a file
-        like object that can be written to and media_filepath is the absolute path
-        of the file on disk.
-
-        media_filepath can be used to read the contents from after upload, e.g. to
-        generate thumbnails.
-
-        Where the file is written:
-
-        * If the file is stored under a `media_id` path and there is a local media
-          store, it is written there directly. This is the case for URL cache files,
-          and thumbnails of older media without a SHA-256.
-        * Files stored under a SHA-256 path may be shared, so they are written to a
-          temporary file. After the spam check the temp file is renamed into place
-          only when that path is absent; an existing file is kept and the temp file
-          is deleted. Storage providers receive the path only when it was created.
-          This covers new uploads, remote downloads, thumbnails of media with a
-          SHA-256, and media whose `file_info.sha256` is already set.
-          media_filepath is only valid inside the context manager.
-        * Without a local media store, the file is written to a temporary file
-          that is removed once it has been sent to the storage providers.
-
         Args:
             file_info: Info about the file to store
+
+        Returns:
+            A 2-tuple (file, media_filepath,), where `file` is a file like object
+            that can be written to and `media_filepath` is the absolute path of
+            the file on disk. `media_filepath` can be used to read the contents
+            from after upload, e.g. to generate thumbnails.
 
         Example:
 
             async with media_storage.store_into_file(info) as (f, media_filepath,):
                 # .. write into f ...
         """
-
-        # Relative destination, or None when it depends on a hash that is not
-        # known until the body has been written (a new upload or remote download).
-        # A known hash, a thumbnail, or a URL-cache file already has a destination:
-        # the SHA-256 path when `file_info.sha256` is set, otherwise the media-id path.
-        # URL-cache files always resolve to the media-id path.
+        # The relative destination. None for a new upload or remote download: its
+        # SHA-256 path depends on a hash that is only known once the body has been
+        # written. Otherwise it is the SHA-256 path if `file_info.sha256` is set,
+        # else the media-ID path (always the media-ID path for URL cache files).
         path: str | None = None
         if file_info.sha256 or file_info.thumbnail or file_info.url_cache:
             path = self._file_info_to_path(file_info)[0]
 
-        # A SHA-256 path can belong to several media IDs. URL-cache files are
-        # excluded: they are stored and expired by media id.
+        # A SHA-256 path may be shared by several media IDs, so it is never opened
+        # with `wb`: that would truncate a file another media ID is served from.
         is_sha256_path = bool(file_info.sha256) and not file_info.url_cache
 
-        # Write to a temporary file in any of these cases:
-        # * the destination depends on the hash and is not known yet;
-        # * the destination is a shared SHA-256 path, which must not be opened
-        #   with `wb` (that would truncate bytes another media ID is reading);
-        # * there is no local media store to write a final file into.
-        # The remaining case is a media-id path with a local store: URL cache,
-        # and thumbnails of media that has no SHA-256. Those are written in place.
+        # Write to a temporary file when the destination is not known yet, when it
+        # is a shared SHA-256 path, or when there is no local store to hold a final
+        # file. Only a media-ID path with a local store is written in place: URL
+        # cache files, and thumbnails of media without a recorded SHA-256.
         is_temp_file = path is None or is_sha256_path or not self.local_provider
 
         sha256_writer: SHA256TransparentIOWriter | None = None
         media_filepath: str | None = None
 
-        # Code above `yield` runs on entering `async with`. The caller writes the
-        # body, then the code below `yield` runs on exiting it: spam check, then
-        # rename the temporary file onto its final SHA-256 path.
-        # The SHA-256 lock is acquired by that caller before it exits, so renaming
-        # the temporary file onto its final SHA-256 path runs while the lock is held.
-        # This function does not take the lock.
         try:
             if not is_temp_file:
                 # Media-id path with a local store. The yielded path is the final file.
@@ -267,9 +247,8 @@ class MediaStorage:
                     with f:
                         yield f, media_filepath
             else:
-                # Temporary file on the media-store filesystem. It is renamed to
-                # the final path after the spam check, and is only valid until the
-                # caller's block exits.
+                # Temporary file. It is renamed to the final SHA-256 path after
+                # the spam check, and is only valid until the caller's block exits.
                 tmp = await defer_to_thread(
                     self.reactor, _create_temp_file, self.local_media_directory
                 )
@@ -285,23 +264,23 @@ class MediaStorage:
                         # does not need to be computed here.
                         yield tmp, media_filepath
         except BaseException:
-            # The caller failed inside its `async with` block (for example a
-            # failed download or a quota check). The exception is thrown back in
-            # at `yield`, before the spam check and renaming to the final path below.
-            # Remove the partial temp file. This must not await: the generator may be
-            # closing with `GeneratorExit`. A media-id file written in place is
-            # intentionally left behind, matching the legacy behaviour.
+            # The caller failed inside its block (e.g. a failed download or quota
+            # check), so the spam check and rename below never run. Remove the
+            # partial temp file. This must not await, as the generator may be
+            # closing with `GeneratorExit`. A media-ID file written in place is left
+            # behind, as before deduplication.
             if is_temp_file and media_filepath is not None:
                 _remove_quietly(media_filepath)
             raise
 
-        # The caller's block has finished and `with f` / `with tmp` has closed the file.
+        # The caller's block has finished and the file is closed. Spam-check it and
+        # move it to its final path.
         assert media_filepath is not None
-        await self._spam_check_and_store(
+        await self._spam_check_and_store_to_provider(
             file_info, path, media_filepath, is_temp_file, sha256_writer
         )
 
-    async def _spam_check_and_store(
+    async def _spam_check_and_store_to_provider(
         self,
         file_info: FileInfo,
         path: str | None,
@@ -309,12 +288,20 @@ class MediaStorage:
         is_temp_file: bool,
         sha256_writer: SHA256TransparentIOWriter | None,
     ) -> None:
-        """Spam-check and commit a file written by `store_into_file`.
+        """Spam-check a file written by `store_into_file`, move it to its final
+        local path, and send it to the storage providers.
 
         The caller of `store_into_file` has finished writing and the file is
-        closed before this method runs. In particular, callers which need it
-        hold their SHA-256 lock while this method renames the temporary file onto
-        its final SHA-256 path.
+        closed before this method runs. Callers creating new media hold their
+        SHA-256 lock while this method renames the temporary file onto its final
+        SHA-256 path.
+
+        Args:
+            file_info: Info about the file.
+            path: The relative destination, or None if it depends on the hash.
+            media_filepath: The absolute path of the written file.
+            is_temp_file: Whether `media_filepath` is a temporary file.
+            sha256_writer: The writer that hashed the body, when `path` is None.
         """
         if sha256_writer is not None:
             # The hash was not known on entry. It now selects the SHA-256 path.
@@ -326,8 +313,9 @@ class MediaStorage:
         # that already existed is shared, so a later failure must not remove it.
         delete_filepath_on_failure = True
 
-        # Spam check, then rename to the final SHA-256 path. Runs for both the in-place
-        # and temp-file cases.
+        # Spam check, then move the temporary file to its final path, then send it
+        # to the providers. The spam check runs for both in-place and temporary
+        # files.
         try:
             with start_active_span("spam checking and writing to storage providers"):
                 spam_check = (
@@ -344,11 +332,12 @@ class MediaStorage:
                     # the spam-check API.
                     raise SpamMediaException(errcode=spam_check[0])
 
-                # `FileStorageProviderBackend` reads the final local path, so a
-                # temp file is renamed into place before providers run. The destination
-                # is created only when it is absent; an existing file is
-                # kept and the temp file is removed. Providers are then skipped,
-                # because the bytes are already stored.
+                # `FileStorageProviderBackend` copies from the final local path, so
+                # a temporary file is renamed into place before the providers run.
+                # The destination is only created when it is absent. If the SHA-256
+                # path already exists, the existing file is kept, the temporary
+                # file is removed, and the providers are skipped, because they
+                # already received these bytes when that file was created.
                 send_to_providers = True
                 if is_temp_file and self.local_provider:
                     final_filepath = os.path.join(self.local_media_directory, path)  # type: ignore[arg-type]
@@ -382,7 +371,8 @@ class MediaStorage:
             raise e from None
 
     async def fetch_media(self, file_info: FileInfo) -> Responder | None:
-        """Attempts to fetch media described by file_info from the configured storage providers.
+        """Attempts to fetch media described by file_info from the configured
+        storage providers.
 
         Args:
             file_info: Metadata about the media file
@@ -402,6 +392,15 @@ class MediaStorage:
                     return FileResponder(self.hs, open(local_path, "rb"))
             return None
 
+        # Gradual migration: move an old local copy at the media-ID path onto the
+        # SHA-256 path first, so it is served from there. Best-effort: if the move
+        # fails, the media-ID path is still tried below.
+        await self._migrate_media_id_path_to_sha256_path_if_possible(file_info)
+
+        # Candidate paths in lookup order: the SHA-256 path if the hash is known,
+        # then the media-ID path. The media-ID path is still needed for media
+        # without a recorded hash, old thumbnails, files in storage providers
+        # (never moved), and a failed migration.
         paths = self._file_info_to_path(file_info)
 
         # fallback for remote thumbnails with no method in the filename
@@ -452,8 +451,14 @@ class MediaStorage:
             async with media_storage.ensure_media_is_in_local_cache(file_info) as path:
                 # use path to read the file
         """
+        # Candidate paths in lookup order: the SHA-256 path if the hash is known,
+        # then the media-ID path.
         paths = self._file_info_to_path(file_info)
         if self.local_provider:
+            # Gradual migration: move an old local copy at the media-ID path onto
+            # the SHA-256 path first, so it is read from there. Best-effort: if the
+            # move fails, the media-ID path is still checked below.
+            await self._migrate_media_id_path_to_sha256_path_if_possible(file_info)
             for path in paths:
                 local_path = os.path.join(self.local_media_directory, path)  # type: ignore[arg-type]
                 if os.path.exists(local_path):
@@ -479,12 +484,16 @@ class MediaStorage:
                     return
 
         # Not on local disk: ask each provider for the same paths, in order.
+        # Provider files are never moved, as providers cannot rename or delete.
         for provider, path in itertools.product(self.storage_providers, paths):
             temp_path = await self._fetch_into_temp_file(provider, path, file_info)
             if temp_path is None:
                 continue
 
             if self.local_provider:
+                # Cache locally at the same path the provider has. A media-ID copy
+                # stays a media-ID copy here, and is moved onto the SHA-256 path by
+                # the gradual migration on a later read, like any other local file.
                 # The download went to a temporary file, so a shared SHA-256 path
                 # never holds a partial file. If another request cached the same
                 # path meanwhile, its bytes are identical: keep it and drop ours.
@@ -505,6 +514,62 @@ class MediaStorage:
 
         raise NotFoundError()
 
+    async def _migrate_media_id_path_to_sha256_path_if_possible(
+        self, file_info: FileInfo
+    ) -> None:
+        """Gradually migrate media stored before deduplication to its SHA-256 path.
+
+        Media stored before deduplication keeps its file at its media-ID path. If
+        `file_info.sha256` is known and that local file still exists, it is
+        renamed onto the SHA-256 path. If the SHA-256 path already exists, the
+        media-ID copy is a duplicate and is deleted. The DB row's SHA-256 is
+        trusted, so the bytes are not hashed again.
+
+        Only original files on local disk are moved. Thumbnails, URL cache files,
+        media without a recorded hash, and files in storage providers are not affected.
+        They are still found at their media-ID path.
+
+        No lock is needed. The row referencing this SHA-256 already exists, so a
+        concurrent delete of other media keeps the SHA-256 file. A delete of this
+        media removes the media-ID path before its own SHA-256 clean-up, so either
+        this rename fails because the file is gone, or the clean-up sees the moved
+        file.
+        """
+        if (
+            not self.local_provider
+            or not file_info.sha256
+            or file_info.url_cache
+            or file_info.thumbnail
+        ):
+            return
+
+        # `_file_info_to_path` returns exactly these two paths when the hash is
+        # known and the file is not a URL cache file.
+        sha256_path, media_id_path = self._file_info_to_path(file_info)
+
+        def _move_if_exists(src: str, dest: str) -> None:
+            if not os.path.exists(src):
+                return
+            try:
+                _rename_if_not_exists(src, dest)
+            except FileNotFoundError:
+                pass
+
+        try:
+            await defer_to_thread(
+                self.reactor,
+                _move_if_exists,
+                os.path.join(self.local_media_directory, media_id_path),  # type: ignore[arg-type]
+                os.path.join(self.local_media_directory, sha256_path),  # type: ignore[arg-type]
+            )
+        except OSError as e:
+            # Best-effort: a failed move (e.g. permissions or a full disk) must not
+            # fail the read. The file is still read from its media-ID path, and the
+            # move is retried on the next read.
+            logger.warning(
+                "Failed to move %s onto its SHA-256 path: %s", media_id_path, e
+            )
+
     async def _fetch_into_temp_file(
         self, provider: "StorageProvider", path: str, file_info: FileInfo
     ) -> str | None:
@@ -518,7 +583,7 @@ class MediaStorage:
 
         Returns:
             The temporary file path, owned by the caller. None if the provider does
-            not have the file, or its bytes do not match `file_info.sha256`.
+            not have the file. The bytes from provider are not veryfied.
         """
         remote_res: Any = await provider.fetch(path, file_info)
         if not remote_res:
@@ -533,22 +598,6 @@ class MediaStorage:
                 consumer = BackgroundFileConsumer(tmp, self.reactor)
                 await remote_res.write_to_consumer(consumer)
                 await consumer.wait()
-
-            # A SHA-256 path is shared by every media ID with this content, so a
-            # corrupt provider copy must not be cached there.
-            if file_info.sha256:
-                sha256 = await defer_to_thread(self.reactor, _get_file_sha256, tmp.name)
-                if sha256 != file_info.sha256:
-                    logger.warning(
-                        "Ignoring corrupt media from %s at %s: "
-                        "expected SHA-256 %s, got %s",
-                        provider,
-                        path,
-                        file_info.sha256,
-                        sha256,
-                    )
-                    await defer_to_thread(self.reactor, _remove_quietly, tmp.name)
-                    return None
         except BaseException:
             # A failed transfer may not have reached the consumer's close.
             tmp.close()
@@ -712,15 +761,6 @@ def _rename_if_not_exists(src: str, dest: str) -> bool:
     # above. Every caller writes the same bytes to the same path, so that is safe.
     os.rename(src, dest)
     return True
-
-
-def _get_file_sha256(path: str) -> str:
-    """Return the SHA-256 digest of a file. Should be called from a thread."""
-    sha256 = hashlib.sha256()
-    with open(path, "rb") as f:
-        for chunk in iter(lambda: f.read(64 * 1024), b""):
-            sha256.update(chunk)
-    return sha256.hexdigest()
 
 
 def _remove_quietly(path: str) -> None:

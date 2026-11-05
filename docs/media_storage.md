@@ -65,10 +65,10 @@ media-ID path, so the copied rows point at SHA-256 thumbnail files that do not
 exist yet. Each such thumbnail is generated on its first request, as for any
 thumbnail missing on disk.
 
-### Gradual migration of media-ID files on local stroage
+### Gradual migration of media-ID files on local storage
 
 After a new upload or remote download creates a SHA-256 file,
-`_remove_media_id_files_with_sha256` deletes the local
+`MediaRepository._remove_media_id_files_with_sha256` deletes the local
 media-ID copies of other media with that SHA-256 (same origin for remote media).
 It runs only when the SHA-256 file was newly created, which is checked under the
 SHA-256 lock. Once the file exists, no new media-ID copy with that hash can
@@ -78,7 +78,7 @@ appear, so later uploads skip it.
 
 When the media's SHA-256 is known and its original file is still at its media-ID path
 in the local media store, the file is renamed onto the SHA-256 path by
-`_move_media_id_file_to_sha256_path`. If the SHA-256 path already exists,
+`_migrate_media_id_path_to_sha256_path_if_possible`. If the SHA-256 path already exists,
 the media-ID copy is deleted as a duplicate. Over time this rewrites media stored
 before deduplication onto SHA-256 paths, without a bulk migration.
 
@@ -92,6 +92,10 @@ before deduplication onto SHA-256 paths, without a bulk migration.
   concurrent delete of other media keeps the SHA-256 file. A delete of the same
   media removes its media-ID path first, so the rename either finds no file or
   the delete's SHA-256 clean-up finds the moved file.
+* The move is best-effort. If it fails, for example because of permissions or a
+  full disk, a warning is logged and the read continues: the file is still read
+  from its media-ID path, and the move is retried on the next read. A failed
+  move never fails the request.
 
 ### `fetch_media(file_info)`
 
@@ -107,9 +111,7 @@ thumbnailing:
 1. With a local store, each path from `_file_info_to_path` (and the legacy
    remote thumbnail path) is checked on disk. The first that exists is yielded.
 2. Otherwise each storage provider is asked for each path, in order.
-   `_fetch_into_temp_file` downloads the file into a temporary file. If
-   `file_info.sha256` is set and the downloaded bytes do not match, the copy is
-   logged as corrupt, deleted, and the next provider or path is tried.
+   `_fetch_into_temp_file` downloads the file into a temporary file.
 3. With a local store, the temporary file is moved with `_rename_if_not_exists`
    onto the same path the provider had, and that path is yielded. A media-ID copy
    stays at the media-ID path, and is moved by the gradual migration on a later
@@ -117,15 +119,17 @@ thumbnailing:
    when the block exits.
 4. `NotFoundError` is raised if no provider has the file.
 
-No lock is taken here. The bytes have been checked against the SHA-256, so a
-concurrent writer to the same path can only produce an identical file.
+No lock is taken here. Files in storage providers are trusted, like the SHA-256
+in the database, and their bytes are not hashed again. A concurrent writer to the
+same path is therefore assumed to produce an identical file, and
+`_rename_if_not_exists` keeps whichever file is already there.
 
 ### Thumbnail lookup
 
 Thumbnails are looked up by the SHA-256 recorded in the database, not by where
 the original file is. For media with a recorded SHA-256, `_file_info_to_path`
 returns two candidate thumbnail paths, and `fetch_media` tries both, on local
-disk first and then in each storage provider:
+disk first and then in each storage provider.
 
 Remote thumbnails also try the older file name without the method. Media without
 a recorded SHA-256 only has the media-ID candidate. Existing thumbnails are never

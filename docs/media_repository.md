@@ -94,11 +94,11 @@ creating new media hold the cross-worker lock
 
 Existing media keeps working at its media-ID paths. There is no bulk migration.
 Instead, Synapse **gradually rewrites** existing media files in the local media
-store onto their SHA-256 paths, as described below. Non-local stores is not 
+store onto their SHA-256 paths, as described below. Storage providers are not
 included in the scope of gradual migration.
 
 * **Reading:** if the SHA-256 of the media is known, its SHA-256 path is tried
-  first, then its media-ID path. Media without a recorded SHA-256 stays its
+  first, then its media-ID path. Media without a recorded SHA-256 stays at its
   media-ID path. The local media store is checked first, then each storage
   provider, with the same relative paths in the same order.
 * **Gradual migration on read:** when media with a recorded SHA-256 is read and
@@ -106,7 +106,9 @@ included in the scope of gradual migration.
   file is moved onto its SHA-256 path.
   If the SHA-256 path already exists, the media-ID path is a duplicate and
   is deleted. A file fetched from a storage provider is cached locally at
-  the same path the provider has, and is moved by a later-read like any other local file.
+  the same path the provider has, and is moved by a later read like any other local file.
+  The move is best-effort: if it fails, a warning is logged, the file is still
+  read from its media-ID path, and the move is retried on the next read operation.
 
 * **Writing:** the content is written to a temporary file in the media store and
   hashed. If the SHA-256 path does not exist yet, the temporary file is moved
