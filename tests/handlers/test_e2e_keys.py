@@ -26,6 +26,7 @@ from unittest import mock
 from parameterized import parameterized
 from signedjson import key as key, sign as sign
 
+from twisted.internet import defer
 from twisted.internet.testing import MemoryReactor
 
 from synapse.api.constants import RoomEncryptionAlgorithms
@@ -1415,6 +1416,71 @@ class E2eKeysHandlerTestCase(unittest.HomeserverTestCase):
                 }
             },
         )
+
+    def test_query_devices_remote_concurrent_resync(self) -> None:
+        """Tests that two concurrent key queries for a remote user whose devices we
+        haven't fetched yet both return the devices. The second query waits for the
+        first resync and then finds the cache valid.
+        """
+
+        remote_user_id = "@test:other"
+        local_user_id = "@test:test"
+        remote_master_key = "85T7JXPFBAySB/jwby4S3lBPTqY3+Zg53nYuGmu1ggY"
+        device = {
+            "device_id": "DEVICE",
+            "keys": {
+                "user_id": remote_user_id,
+                "device_id": "DEVICE",
+                "algorithms": ["m.olm.v1.curve25519-aes-sha2"],
+                "keys": {"ed25519:DEVICE": "key"},
+                "signatures": {},
+            },
+        }
+        master_key = {
+            "user_id": remote_user_id,
+            "usage": ["master"],
+            "keys": {"ed25519:" + remote_master_key: remote_master_key},
+        }
+
+        self.store.get_rooms_for_user = mock.AsyncMock(return_value={"some_room_id"})
+
+        response: "defer.Deferred[JsonDict]" = defer.Deferred()
+        self.hs.get_federation_client().query_user_devices = mock.Mock(  # type: ignore[method-assign]
+            return_value=response
+        )
+        self.hs.get_federation_client().query_client_keys = mock.AsyncMock(  # type: ignore[method-assign]
+            return_value={"device_keys": {}}
+        )
+
+        e2e_handler = self.hs.get_e2e_keys_handler()
+
+        def query() -> "defer.Deferred[JsonDict]":
+            return defer.ensureDeferred(
+                e2e_handler.query_devices(
+                    {"device_keys": {remote_user_id: []}},
+                    timeout=10,
+                    from_user_id=local_user_id,
+                    from_device_id="some_device_id",
+                )
+            )
+
+        first = query()
+        second = query()
+        response.callback(
+            {
+                "user_id": remote_user_id,
+                "stream_id": 1,
+                "devices": [device],
+                "master_key": master_key,
+            }
+        )
+
+        for result in (self.get_success(first), self.get_success(second)):
+            self.assertEqual(result["failures"], {})
+            self.assertEqual(
+                result["device_keys"], {remote_user_id: {"DEVICE": device["keys"]}}
+            )
+            self.assertEqual(result["master_keys"], {remote_user_id: master_key})
 
     def test_query_devices_remote_down(self) -> None:
         """Tests that querying keys for a remote user on an unreachable server returns

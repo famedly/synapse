@@ -1,0 +1,1 @@
+Fix remote key queries failing with `{"status": 503, "message": "'devices'"}` when another query resynced the same user's device list concurrently.
