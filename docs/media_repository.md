@@ -124,6 +124,9 @@ included in the scope of gradual migration.
 * **Thumbnails:** the path of a thumbnail depends on the SHA-256 recorded in the
   database, not on where the original file is. Thumbnails at media-ID paths are
   left in place and are still found.
+  * New media reuses the thumbnail rows of other media with the same hash. If
+    those were generated before deduplication, the thumbnail is regenerated on
+    its first request.
   * Media with a recorded SHA-256 stores new thumbnails under its SHA-256 path,
     even if its original is still at its media-ID path, for example in a storage
     provider, where files are never moved.

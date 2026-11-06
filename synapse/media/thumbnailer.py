@@ -521,7 +521,9 @@ class ThumbnailProvider:
         logger.debug("We don't have a thumbnail of that size. Generating")
 
         # Okay, so we generate one.
-        thumbnail_result = await self.media_repo.generate_local_exact_thumbnail(
+        thumbnail_result = await self.media_repo.generate_exact_thumbnail(
+            None,
+            media_id,
             media_id,
             desired_width,
             desired_height,
@@ -620,7 +622,7 @@ class ThumbnailProvider:
         logger.debug("We don't have a thumbnail of that size. Generating")
 
         # Okay, so we generate one.
-        file_path = await self.media_repo.generate_remote_exact_thumbnail(
+        thumbnail_result = await self.media_repo.generate_exact_thumbnail(
             server_name,
             file_id,
             media_id,
@@ -632,7 +634,8 @@ class ThumbnailProvider:
             sha256=media_info.sha256,
         )
 
-        if file_path:
+        if thumbnail_result:
+            file_path, _ = thumbnail_result
             await respond_with_file(self.hs, request, desired_type, file_path)
         else:
             logger.warning("Failed to generate thumbnail")
@@ -796,29 +799,18 @@ class ThumbnailProvider:
             # A stored animated thumbnail is always of the animated type, so
             # regenerate it as animated.
             regen_animated = file_info.thumbnail.type == ANIMATED_THUMBNAIL_TYPE
-            if server_name:
-                await self.media_repo.generate_remote_exact_thumbnail(
-                    server_name,
-                    file_id=file_id,
-                    media_id=media_id,
-                    t_width=file_info.thumbnail.width,
-                    t_height=file_info.thumbnail.height,
-                    t_method=file_info.thumbnail.method,
-                    t_type=file_info.thumbnail.type,
-                    animated=regen_animated,
-                    sha256=sha256,
-                )
-            else:
-                await self.media_repo.generate_local_exact_thumbnail(
-                    media_id=media_id,
-                    t_width=file_info.thumbnail.width,
-                    t_height=file_info.thumbnail.height,
-                    t_method=file_info.thumbnail.method,
-                    t_type=file_info.thumbnail.type,
-                    url_cache=url_cache,
-                    animated=regen_animated,
-                    sha256=sha256,
-                )
+            await self.media_repo.generate_exact_thumbnail(
+                server_name,
+                file_id=file_id,
+                media_id=media_id,
+                t_width=file_info.thumbnail.width,
+                t_height=file_info.thumbnail.height,
+                t_method=file_info.thumbnail.method,
+                t_type=file_info.thumbnail.type,
+                url_cache=url_cache,
+                animated=regen_animated,
+                sha256=sha256,
+            )
 
             responder = await self.media_storage.fetch_media(file_info)
             if for_federation:
