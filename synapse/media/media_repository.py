@@ -345,10 +345,66 @@ class MediaRepository:
         if media_id is None:
             media_id = random_string(24)
 
-        # Check that the user has not exceeded any of the media upload limits.
-        # This is done before storing the file so that a rejected upload
+        # Check the limits before storing the file so that a rejected upload
         # doesn't leave an orphaned file behind.
+        await self._check_media_upload_limits(auth_user, content_length)
 
+        sha256 = await self._store_local_media_file(media_id, content)
+
+        # Media matching the hash of already-quarantined media is quarantined
+        # on upload.
+        quarantined_by: str | None = None
+        if await self.store.get_is_hash_quarantined(sha256):
+            logger.warning(
+                "Media has been automatically quarantined as it matched existing quarantined media"
+            )
+            quarantined_by = "system"
+
+        if is_new_media:
+            await self.store.store_local_media(
+                media_id=media_id,
+                media_type=media_type,
+                time_now_ms=self.clock.time_msec(),
+                upload_name=upload_name,
+                media_length=content_length,
+                user_id=auth_user,
+                sha256=sha256,
+                quarantined_by=quarantined_by,
+            )
+        else:
+            # The row was already created by `create_media_id` (async upload).
+            await self.store.update_local_media(
+                media_id=media_id,
+                media_type=media_type,
+                upload_name=upload_name,
+                media_length=content_length,
+                user_id=auth_user,
+                sha256=sha256,
+                quarantined_by=quarantined_by,
+            )
+
+        try:
+            await self._generate_thumbnails(
+                None, media_id, media_id, media_type, sha256=sha256
+            )
+        except Exception as e:
+            logger.info("Failed to generate thumbnails: %s", e)
+
+        return MXCUri(self.server_name, media_id)
+
+    async def _check_media_upload_limits(
+        self, auth_user: UserID, content_length: int
+    ) -> None:
+        """Check that uploading `content_length` more bytes keeps the user within
+        their media upload limits.
+
+        Args:
+            auth_user: The user_id of the uploader
+            content_length: The length of the content about to be uploaded
+
+        Raises:
+            UserLimitExceededError: if any of the limits would be exceeded.
+        """
         # Use limits from module API if provided
         media_upload_limits = (
             await self.media_repository_callbacks.get_media_upload_limits_for_user(
@@ -405,50 +461,22 @@ class MediaRepository:
                     can_upgrade=limit.can_upgrade,
                 )
 
+    async def _store_local_media_file(self, media_id: str, content: IO) -> str:
+        """Write uploaded content to the media store, hashing it on the way.
+
+        Args:
+            media_id: The local media ID the file is stored under
+            content: A file like object that is the content to store
+
+        Returns:
+            The hex-encoded SHA-256 of the content.
+        """
         file_info = FileInfo(server_name=None, file_id=media_id)
         sha256reader = SHA256TransparentIOReader(content)
         # This implements all of IO as it has a passthrough
         fname = await self.media_storage.store_file(sha256reader.wrap(), file_info)
-        sha256 = sha256reader.hexdigest()
-        should_quarantine = await self.store.get_is_hash_quarantined(sha256)
-
         logger.info("Stored local media in file %r", fname)
-
-        if should_quarantine:
-            logger.warning(
-                "Media has been automatically quarantined as it matched existing quarantined media"
-            )
-
-        if is_new_media:
-            await self.store.store_local_media(
-                media_id=media_id,
-                media_type=media_type,
-                time_now_ms=self.clock.time_msec(),
-                upload_name=upload_name,
-                media_length=content_length,
-                user_id=auth_user,
-                sha256=sha256,
-                quarantined_by="system" if should_quarantine else None,
-            )
-        else:
-            await self.store.update_local_media(
-                media_id=media_id,
-                media_type=media_type,
-                upload_name=upload_name,
-                media_length=content_length,
-                user_id=auth_user,
-                sha256=sha256,
-                quarantined_by="system" if should_quarantine else None,
-            )
-
-        try:
-            await self._generate_thumbnails(
-                None, media_id, media_id, media_type, sha256=sha256
-            )
-        except Exception as e:
-            logger.info("Failed to generate thumbnails: %s", e)
-
-        return MXCUri(self.server_name, media_id)
+        return sha256reader.hexdigest()
 
     def respond_not_yet_uploaded(self, request: SynapseRequest) -> None:
         respond_with_json(
@@ -898,117 +926,21 @@ class MediaRepository:
         download_ratelimiter: Ratelimiter,
         ip_address: str,
     ) -> RemoteMedia:
-        """Attempt to download the remote file from the given server name,
-        using the given file_id as the local id.
+        """Attempt to download the remote file from the given server name over the
+        legacy `/_matrix/media/v3/download` endpoint.
 
-        Args:
-            server_name: Originating server
-            media_id: The media ID of the content (as defined by the
-                remote server). This is different than the file_id, which is
-                locally generated.
-            max_timeout_ms: the maximum number of milliseconds to wait for the
-                media to be uploaded.
-            download_ratelimiter: a ratelimiter limiting remote media downloads, keyed to
-                requester IP
-            ip_address: the IP address of the requester
+        See `_download_and_store_remote_file` for the arguments.
 
         Returns:
             The media info of the file.
         """
-
-        file_id = random_string(24)
-
-        file_info = FileInfo(server_name=server_name, file_id=file_id)
-
-        async with self.media_storage.store_into_file(file_info) as (f, fname):
-            sha256writer = SHA256TransparentIOWriter(f)
-            try:
-                length, headers = await self.client.download_media(
-                    server_name,
-                    media_id,
-                    # This implements all of BinaryIO as it has a passthrough
-                    output_stream=sha256writer.wrap(),
-                    max_size=self.max_upload_size,
-                    max_timeout_ms=max_timeout_ms,
-                    download_ratelimiter=download_ratelimiter,
-                    ip_address=ip_address,
-                )
-            except RequestSendFailed as e:
-                logger.warning(
-                    "Request failed fetching remote media %s/%s: %r",
-                    server_name,
-                    media_id,
-                    e,
-                )
-                raise SynapseError(502, "Failed to fetch remote media")
-
-            except HttpResponseException as e:
-                logger.warning(
-                    "HTTP error fetching remote media %s/%s: %s",
-                    server_name,
-                    media_id,
-                    e.response,
-                )
-                if e.code == twisted.web.http.NOT_FOUND:
-                    raise e.to_synapse_error()
-                raise SynapseError(502, "Failed to fetch remote media")
-
-            except SynapseError:
-                logger.warning(
-                    "Failed to fetch remote media %s/%s", server_name, media_id
-                )
-                raise
-            except NotRetryingDestination:
-                logger.warning("Not retrying destination %r", server_name)
-                raise SynapseError(502, "Failed to fetch remote media")
-            except Exception:
-                logger.exception(
-                    "Failed to fetch remote media %s/%s", server_name, media_id
-                )
-                raise SynapseError(502, "Failed to fetch remote media")
-
-            if b"Content-Type" in headers:
-                media_type = headers[b"Content-Type"][0].decode("ascii")
-            else:
-                media_type = "application/octet-stream"
-            upload_name = get_filename_from_headers(headers)
-            time_now_ms = self.clock.time_msec()
-
-        # Multiple remote media download requests can race (when using
-        # multiple media repos), so this may throw a violation constraint
-        # exception. If it does we'll delete the newly downloaded file from
-        # disk.
-        await self._store_remote_media_with_cleanup(
-            server_name=server_name,
-            media_id=media_id,
-            media_type=media_type,
-            time_now_ms=time_now_ms,
-            upload_name=upload_name,
-            media_length=length,
-            filesystem_id=file_id,
-            sha256=sha256writer.hexdigest(),
-            fname=fname,
-        )
-
-        logger.info("Stored remote media in file %r", fname)
-
-        if self.hs.config.media.enable_authenticated_media:
-            authenticated = True
-        else:
-            authenticated = False
-
-        return RemoteMedia(
-            media_origin=server_name,
-            media_id=media_id,
-            media_type=media_type,
-            media_length=length,
-            upload_name=upload_name,
-            created_ts=time_now_ms,
-            filesystem_id=file_id,
-            last_access_ts=time_now_ms,
-            quarantined_by=None,
-            authenticated=authenticated,
-            sha256=sha256writer.hexdigest(),
+        return await self._download_and_store_remote_file(
+            server_name,
+            media_id,
+            max_timeout_ms,
+            download_ratelimiter,
+            ip_address,
+            use_federation_endpoint=False,
         )
 
     async def _federation_download_remote_file(
@@ -1019,9 +951,35 @@ class MediaRepository:
         download_ratelimiter: Ratelimiter,
         ip_address: str,
     ) -> RemoteMedia:
-        """Attempt to download the remote file from the given server name.
-        Uses the given file_id as the local id and downloads the file over the federation
-        v1 download endpoint
+        """Attempt to download the remote file from the given server name over the
+        federation `/_matrix/federation/v1/media/download` endpoint (the client
+        falls back to `/_matrix/media/v3/download` if it is not supported).
+
+        See `_download_and_store_remote_file` for the arguments.
+
+        Returns:
+            The media info of the file.
+        """
+        return await self._download_and_store_remote_file(
+            server_name,
+            media_id,
+            max_timeout_ms,
+            download_ratelimiter,
+            ip_address,
+            use_federation_endpoint=True,
+        )
+
+    async def _download_and_store_remote_file(
+        self,
+        server_name: str,
+        media_id: str,
+        max_timeout_ms: int,
+        download_ratelimiter: Ratelimiter,
+        ip_address: str,
+        use_federation_endpoint: bool,
+    ) -> RemoteMedia:
+        """Download a remote file into the local media store under a newly generated
+        file_id, and record it in the remote media cache.
 
         Args:
             server_name: Originating server
@@ -1033,19 +991,26 @@ class MediaRepository:
             download_ratelimiter: a ratelimiter limiting remote media downloads, keyed to
                 requester IP
             ip_address: the IP address of the requester
+            use_federation_endpoint: whether to download over the federation media
+                endpoint rather than the legacy media endpoint.
 
         Returns:
             The media info of the file.
         """
-
         file_id = random_string(24)
-
         file_info = FileInfo(server_name=server_name, file_id=file_id)
+
+        # Both client methods share the same signature.
+        download = (
+            self.client.federation_download_media
+            if use_federation_endpoint
+            else self.client.download_media
+        )
 
         async with self.media_storage.store_into_file(file_info) as (f, fname):
             sha256writer = SHA256TransparentIOWriter(f)
             try:
-                res = await self.client.federation_download_media(
+                res = await download(
                     server_name,
                     media_id,
                     # This implements all of BinaryIO as it has a passthrough
@@ -1055,12 +1020,9 @@ class MediaRepository:
                     download_ratelimiter=download_ratelimiter,
                     ip_address=ip_address,
                 )
-                # if we had to fall back to the _matrix/media endpoint it will only return
-                # the headers and length, check the length of the tuple before unpacking
-                if len(res) == 3:
-                    length, headers, json = res
-                else:
-                    length, headers = res
+                # The federation endpoint additionally returns the multipart JSON
+                # metadata, which we don't use. Only keep (length, headers).
+                length, headers = res[0], res[1]
             except RequestSendFailed as e:
                 logger.warning(
                     "Request failed fetching remote media %s/%s: %r",
@@ -1102,6 +1064,8 @@ class MediaRepository:
             upload_name = get_filename_from_headers(headers)
             time_now_ms = self.clock.time_msec()
 
+        sha256 = sha256writer.hexdigest()
+
         # Multiple remote media download requests can race (when using
         # multiple media repos), so this may throw a violation constraint
         # exception. If it does we'll delete the newly downloaded file from
@@ -1114,16 +1078,11 @@ class MediaRepository:
             upload_name=upload_name,
             media_length=length,
             filesystem_id=file_id,
-            sha256=sha256writer.hexdigest(),
+            sha256=sha256,
             fname=fname,
         )
 
-        logger.debug("Stored remote media in file %r", fname)
-
-        if self.hs.config.media.enable_authenticated_media:
-            authenticated = True
-        else:
-            authenticated = False
+        logger.info("Stored remote media in file %r", fname)
 
         return RemoteMedia(
             media_origin=server_name,
@@ -1135,8 +1094,8 @@ class MediaRepository:
             filesystem_id=file_id,
             last_access_ts=time_now_ms,
             quarantined_by=None,
-            authenticated=authenticated,
-            sha256=sha256writer.hexdigest(),
+            authenticated=bool(self.hs.config.media.enable_authenticated_media),
+            sha256=sha256,
         )
 
     def _get_thumbnail_requirements(
