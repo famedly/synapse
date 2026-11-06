@@ -1568,6 +1568,15 @@ class MediaRepository:
             )
 
     async def delete_old_remote_media(self, before_ts: int) -> dict[str, int]:
+        """Delete cached remote media (and its thumbnails) that was last accessed
+        before the given timestamp. Quarantined media is kept.
+
+        Args:
+            before_ts: Unix timestamp in ms.
+
+        Returns:
+            A dict with the number of deleted media under "deleted".
+        """
         old_media = await self.store.get_remote_media_ids(
             before_ts, include_quarantined_media=False
         )
@@ -1579,23 +1588,12 @@ class MediaRepository:
 
             logger.info("Deleting: %r", key)
 
-            # TODO: Should we delete from the backup store
-
             async with self.remote_media_linearizer.queue(key):
-                full_path = self.filepaths.remote_media_filepath(origin, file_id)
-                try:
-                    os.remove(full_path)
-                except OSError as e:
-                    logger.warning("Failed to remove file: %r", full_path)
-                    if e.errno == errno.ENOENT:
-                        pass
-                    else:
-                        continue
-
-                thumbnail_dir = self.filepaths.remote_media_thumbnail_dir(
-                    origin, file_id
-                )
-                shutil.rmtree(thumbnail_dir, ignore_errors=True)
+                if not self._remove_media_files_from_disk(
+                    self.filepaths.remote_media_filepath(origin, file_id),
+                    self.filepaths.remote_media_thumbnail_dir(origin, file_id),
+                ):
+                    continue
 
                 await self.store.delete_remote_media(origin, media_id)
                 deleted += 1
@@ -1606,10 +1604,10 @@ class MediaRepository:
         self, media_ids: list[str]
     ) -> tuple[list[str], int]:
         """
-        Delete the given local or remote media ID from this server
+        Delete the given local media IDs from this server.
 
         Args:
-            media_id: The media ID to delete.
+            media_ids: The media IDs to delete.
         Returns:
             A tuple of (list of deleted media IDs, total deleted media IDs).
         """
@@ -1624,7 +1622,7 @@ class MediaRepository:
         delete_protected_media: bool = False,
     ) -> tuple[list[str], int]:
         """
-        Delete local or remote media from this server by size and timestamp. Removes
+        Delete local media from this server by size and timestamp. Removes
         media files, any thumbnails and cached URLs.
 
         Args:
@@ -1652,7 +1650,7 @@ class MediaRepository:
         self, media_ids: list[str]
     ) -> tuple[list[str], int]:
         """
-        Delete local or remote media from this server. Removes media files,
+        Delete local media from this server. Removes media files,
         any thumbnails and cached URLs.
 
         Args:
@@ -1663,18 +1661,11 @@ class MediaRepository:
         removed_media = []
         for media_id in media_ids:
             logger.info("Deleting media with ID '%s'", media_id)
-            full_path = self.filepaths.local_media_filepath(media_id)
-            try:
-                os.remove(full_path)
-            except OSError as e:
-                logger.warning("Failed to remove file: %r: %s", full_path, e)
-                if e.errno == errno.ENOENT:
-                    pass
-                else:
-                    continue
-
-            thumbnail_dir = self.filepaths.local_media_thumbnail_dir(media_id)
-            shutil.rmtree(thumbnail_dir, ignore_errors=True)
+            if not self._remove_media_files_from_disk(
+                self.filepaths.local_media_filepath(media_id),
+                self.filepaths.local_media_thumbnail_dir(media_id),
+            ):
+                continue
 
             await self.store.delete_remote_media(self.server_name, media_id)
 
@@ -1684,3 +1675,30 @@ class MediaRepository:
             removed_media.append(media_id)
 
         return removed_media, len(removed_media)
+
+    def _remove_media_files_from_disk(
+        self, media_path: str, thumbnail_dir: str
+    ) -> bool:
+        """Remove a media file and its thumbnail directory from the local media store.
+
+        Only the primary local media store is touched: copies held by storage
+        providers are intentionally left in place, as they cannot be removed.
+
+        Args:
+            media_path: Path of the media file.
+            thumbnail_dir: Path of the directory holding the media's thumbnails.
+
+        Returns:
+            True if the media is gone from disk (including if the file was already
+            missing), False if the file could not be removed. On False the caller
+            must keep the media's database rows so the deletion can be retried.
+        """
+        try:
+            os.remove(media_path)
+        except OSError as e:
+            logger.warning("Failed to remove file: %r: %s", media_path, e)
+            if e.errno != errno.ENOENT:
+                return False
+
+        shutil.rmtree(thumbnail_dir, ignore_errors=True)
+        return True
