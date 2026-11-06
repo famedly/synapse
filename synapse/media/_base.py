@@ -534,6 +534,9 @@ class FileInfo:
     url_cache: bool = False
     # Whether the file is a thumbnail or not.
     thumbnail: ThumbnailInfo | None = None
+    # The SHA-256 of the original media, if known. Files are stored under this
+    # instead of `file_id`, with the `file_id` path kept as a fallback for older files.
+    sha256: str | None = None
 
     # The below properties exist to maintain compatibility with third-party modules.
     @property

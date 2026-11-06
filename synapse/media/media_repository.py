@@ -442,7 +442,9 @@ class MediaRepository:
             )
 
         try:
-            await self._generate_thumbnails(None, media_id, media_id, media_type)
+            await self._generate_thumbnails(
+                None, media_id, media_id, media_type, sha256=sha256
+            )
         except Exception as e:
             logger.info("Failed to generate thumbnails: %s", e)
 
@@ -583,7 +585,9 @@ class MediaRepository:
         upload_name = name if name else media_info.upload_name
         url_cache = media_info.url_cache
 
-        file_info = FileInfo(None, media_id, url_cache=bool(url_cache))
+        file_info = FileInfo(
+            None, media_id, url_cache=bool(url_cache), sha256=media_info.sha256
+        )
 
         responder = await self.media_storage.fetch_media(file_info)
         if federation:
@@ -779,7 +783,7 @@ class MediaRepository:
         # If we have an entry in the DB, try and look for it
         if media_info:
             file_id = media_info.filesystem_id
-            file_info = FileInfo(server_name, file_id)
+            file_info = FileInfo(server_name, file_id, sha256=media_info.sha256)
 
             if media_info.quarantined_by and not bypass_quarantine:
                 logger.info("Media is quarantined")
@@ -834,7 +838,7 @@ class MediaRepository:
         file_id = media_info.filesystem_id
         if not media_info.media_type:
             media_info = attr.evolve(media_info, media_type="application/octet-stream")
-        file_info = FileInfo(server_name, file_id)
+        file_info = FileInfo(server_name, file_id, sha256=media_info.sha256)
 
         # We generate thumbnails even if another process downloaded the media
         # as a) it's conceivable that the other download request dies before it
@@ -843,7 +847,11 @@ class MediaRepository:
         # otherwise they'll request thumbnails and get a 404 if they're not
         # ready yet.
         await self._generate_thumbnails(
-            server_name, media_id, file_id, media_info.media_type
+            server_name,
+            media_id,
+            file_id,
+            media_info.media_type,
+            sha256=media_info.sha256,
         )
 
         responder = await self.media_storage.fetch_media(file_info)
@@ -1182,9 +1190,10 @@ class MediaRepository:
         t_type: str,
         url_cache: bool,
         animated: bool = False,
+        sha256: str | None = None,
     ) -> tuple[str, FileInfo] | None:
         async with self.media_storage.ensure_media_is_in_local_cache(
-            FileInfo(None, media_id, url_cache=url_cache)
+            FileInfo(None, media_id, url_cache=url_cache, sha256=sha256)
         ) as input_path:
             try:
                 thumbnailer = Thumbnailer(input_path)
@@ -1223,6 +1232,7 @@ class MediaRepository:
                         type=t_type,
                         length=t_byte_source.getbuffer().nbytes,
                     ),
+                    sha256=sha256,
                 )
 
                 output_path = await self.media_storage.store_file(
@@ -1259,9 +1269,10 @@ class MediaRepository:
         t_method: str,
         t_type: str,
         animated: bool = False,
+        sha256: str | None = None,
     ) -> str | None:
         async with self.media_storage.ensure_media_is_in_local_cache(
-            FileInfo(server_name, file_id)
+            FileInfo(server_name, file_id, sha256=sha256)
         ) as input_path:
             try:
                 thumbnailer = Thumbnailer(input_path)
@@ -1300,6 +1311,7 @@ class MediaRepository:
                         type=t_type,
                         length=t_byte_source.getbuffer().nbytes,
                     ),
+                    sha256=sha256,
                 )
 
                 output_path = await self.media_storage.store_file(
@@ -1336,6 +1348,7 @@ class MediaRepository:
         file_id: str,
         media_type: str,
         url_cache: bool = False,
+        sha256: str | None = None,
     ) -> dict | None:
         """Generate and store thumbnails for an image.
 
@@ -1347,6 +1360,7 @@ class MediaRepository:
             media_type: The content type of the file
             url_cache: If we are thumbnailing images downloaded for the URL cache,
                 used exclusively by the url previewer
+            sha256: The SHA-256 of the media, if known
 
         Returns:
             Dict with "width" and "height" keys of original image or None if the
@@ -1357,7 +1371,7 @@ class MediaRepository:
             return None
 
         async with self.media_storage.ensure_media_is_in_local_cache(
-            FileInfo(server_name, file_id, url_cache=url_cache)
+            FileInfo(server_name, file_id, url_cache=url_cache, sha256=sha256)
         ) as input_path:
             try:
                 thumbnailer = Thumbnailer(input_path)
@@ -1456,6 +1470,7 @@ class MediaRepository:
                             t_method,
                             t_type,
                             t_byte_source,
+                            sha256,
                         )
 
                     if (
@@ -1484,6 +1499,7 @@ class MediaRepository:
                                 t_method,
                                 ANIMATED_THUMBNAIL_TYPE,
                                 a_byte_source,
+                                sha256,
                             )
 
         return {"width": m_width, "height": m_height}
@@ -1499,6 +1515,7 @@ class MediaRepository:
         t_method: str,
         t_type: str,
         t_byte_source: BytesIO,
+        sha256: str | None = None,
     ) -> None:
         """Store a generated thumbnail to the configured storage and database."""
         file_info = FileInfo(
@@ -1512,6 +1529,7 @@ class MediaRepository:
                 type=t_type,
                 length=t_byte_source.getbuffer().nbytes,
             ),
+            sha256=sha256,
         )
 
         async with self.media_storage.store_into_file(file_info) as (f, fname):
