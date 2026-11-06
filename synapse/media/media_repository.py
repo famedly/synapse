@@ -1106,6 +1106,42 @@ class MediaRepository:
             media_type = media_type[:scpos]
         return self.thumbnail_requirements.get(media_type, ())
 
+    def _is_too_large_to_thumbnail(self, thumbnailer: Thumbnailer) -> bool:
+        """Whether the source image exceeds `max_image_pixels` and must not be
+        thumbnailed (to bound memory usage when decoding it)."""
+        if thumbnailer.width * thumbnailer.height >= self.max_image_pixels:
+            logger.info(
+                "Image too large to thumbnail %r x %r > %r",
+                thumbnailer.width,
+                thumbnailer.height,
+                self.max_image_pixels,
+            )
+            return True
+        return False
+
+    @staticmethod
+    def _render_thumbnail(
+        thumbnailer: Thumbnailer,
+        t_width: int,
+        t_height: int,
+        t_method: str,
+        t_type: str,
+        animated: bool = False,
+    ) -> BytesIO | None:
+        """Render a thumbnail of exactly `t_width` x `t_height` with the given
+        method. Blocking: must be run off the reactor thread.
+
+        Returns:
+            The encoded thumbnail, or None if `t_method` is not recognized.
+        """
+        if t_method == "crop":
+            return thumbnailer.crop(t_width, t_height, t_type, animated=animated)
+        elif t_method == "scale":
+            return thumbnailer.scale(t_width, t_height, t_type, animated=animated)
+
+        logger.error("Unrecognized method: %r", t_method)
+        return None
+
     def _generate_thumbnail(
         self,
         thumbnailer: Thumbnailer,
@@ -1115,30 +1151,25 @@ class MediaRepository:
         t_type: str,
         animated: bool = False,
     ) -> BytesIO | None:
-        m_width = thumbnailer.width
-        m_height = thumbnailer.height
-
-        if m_width * m_height >= self.max_image_pixels:
-            logger.info(
-                "Image too large to thumbnail %r x %r > %r",
-                m_width,
-                m_height,
-                self.max_image_pixels,
-            )
+        """Generate a single thumbnail for the requested size. Blocking: must be
+        run off the reactor thread."""
+        if self._is_too_large_to_thumbnail(thumbnailer):
             return None
 
+        m_width = thumbnailer.width
+        m_height = thumbnailer.height
         if thumbnailer.transpose_method is not None:
             m_width, m_height = thumbnailer.transpose()
 
-        if t_method == "crop":
-            return thumbnailer.crop(t_width, t_height, t_type, animated=animated)
-        elif t_method == "scale":
+        if t_method == "scale":
+            # Preserve the aspect ratio, and never upscale.
             t_width, t_height = thumbnailer.aspect(t_width, t_height)
             t_width = min(m_width, t_width)
             t_height = min(m_height, t_height)
-            return thumbnailer.scale(t_width, t_height, t_type, animated=animated)
 
-        return None
+        return self._render_thumbnail(
+            thumbnailer, t_width, t_height, t_method, t_type, animated
+        )
 
     async def generate_local_exact_thumbnail(
         self,
@@ -1151,72 +1182,25 @@ class MediaRepository:
         animated: bool = False,
         sha256: str | None = None,
     ) -> tuple[str, FileInfo] | None:
-        async with self.media_storage.ensure_media_is_in_local_cache(
-            FileInfo(None, media_id, url_cache=url_cache, sha256=sha256)
-        ) as input_path:
-            try:
-                thumbnailer = Thumbnailer(input_path)
-            except ThumbnailError as e:
-                logger.warning(
-                    "Unable to generate a thumbnail for local media %s using a method of %s and type of %s: %s",
-                    media_id,
-                    t_method,
-                    t_type,
-                    e,
-                )
-                return None
+        """Generate and store a single thumbnail of local media.
 
-            with thumbnailer:
-                t_byte_source = await defer_to_thread(
-                    self.hs.get_reactor(),
-                    self._generate_thumbnail,
-                    thumbnailer,
-                    t_width,
-                    t_height,
-                    t_method,
-                    t_type,
-                    animated,
-                )
-
-        if t_byte_source:
-            try:
-                file_info = FileInfo(
-                    server_name=None,
-                    file_id=media_id,
-                    url_cache=url_cache,
-                    thumbnail=ThumbnailInfo(
-                        width=t_width,
-                        height=t_height,
-                        method=t_method,
-                        type=t_type,
-                        length=t_byte_source.getbuffer().nbytes,
-                    ),
-                    sha256=sha256,
-                )
-
-                output_path = await self.media_storage.store_file(
-                    t_byte_source, file_info
-                )
-            finally:
-                t_byte_source.close()
-
-            logger.info("Stored thumbnail in file %r", output_path)
-
-            t_len = os.path.getsize(output_path)
-
-            await self.store.store_local_thumbnail(
-                media_id,
-                t_width,
-                t_height,
-                t_type,
-                t_method,
-                t_len,
-            )
-
-            return output_path, file_info
-
-        # Could not generate thumbnail.
-        return None
+        Returns:
+            The path of the stored thumbnail and its file info, or None if the
+            thumbnail could not be generated.
+        """
+        return await self._generate_exact_thumbnail(
+            server_name=None,
+            media_id=media_id,
+            # Local media is stored under its media ID.
+            file_id=media_id,
+            t_width=t_width,
+            t_height=t_height,
+            t_method=t_method,
+            t_type=t_type,
+            url_cache=url_cache,
+            animated=animated,
+            sha256=sha256,
+        )
 
     async def generate_remote_exact_thumbnail(
         self,
@@ -1230,16 +1214,68 @@ class MediaRepository:
         animated: bool = False,
         sha256: str | None = None,
     ) -> str | None:
+        """Generate and store a single thumbnail of cached remote media.
+
+        Returns:
+            The path of the stored thumbnail, or None if the thumbnail could not
+            be generated.
+        """
+        result = await self._generate_exact_thumbnail(
+            server_name=server_name,
+            media_id=media_id,
+            file_id=file_id,
+            t_width=t_width,
+            t_height=t_height,
+            t_method=t_method,
+            t_type=t_type,
+            url_cache=False,
+            animated=animated,
+            sha256=sha256,
+        )
+        return result[0] if result else None
+
+    async def _generate_exact_thumbnail(
+        self,
+        server_name: str | None,
+        media_id: str,
+        file_id: str,
+        t_width: int,
+        t_height: int,
+        t_method: str,
+        t_type: str,
+        url_cache: bool,
+        animated: bool,
+        sha256: str | None,
+    ) -> tuple[str, FileInfo] | None:
+        """Generate a single thumbnail of the requested size and store it to the
+        media store and database.
+
+        Args:
+            server_name: The server name if remote media, else None if local
+            media_id: The media ID of the content
+            file_id: Local file ID (same as `media_id` for local media)
+            t_width: The requested width
+            t_height: The requested height
+            t_method: The thumbnailing method, "crop" or "scale"
+            t_type: The content type of the thumbnail
+            url_cache: Whether the media is part of the URL preview cache
+            animated: Whether to generate an animated thumbnail
+            sha256: The SHA-256 of the media, if known
+
+        Returns:
+            The path of the stored thumbnail and its file info, or None if the
+            thumbnail could not be generated.
+        """
         async with self.media_storage.ensure_media_is_in_local_cache(
-            FileInfo(server_name, file_id, sha256=sha256)
+            FileInfo(server_name, file_id, url_cache=url_cache, sha256=sha256)
         ) as input_path:
             try:
                 thumbnailer = Thumbnailer(input_path)
             except ThumbnailError as e:
                 logger.warning(
-                    "Unable to generate a thumbnail for remote media %s from %s using a method of %s and type of %s: %s",
+                    "Unable to generate a thumbnail for media %s from %s using a method of %s and type of %s: %s",
                     media_id,
-                    server_name,
+                    server_name or self.server_name,
                     t_method,
                     t_type,
                     e,
@@ -1258,46 +1294,24 @@ class MediaRepository:
                     animated,
                 )
 
-        if t_byte_source:
-            try:
-                file_info = FileInfo(
-                    server_name=server_name,
-                    file_id=file_id,
-                    thumbnail=ThumbnailInfo(
-                        width=t_width,
-                        height=t_height,
-                        method=t_method,
-                        type=t_type,
-                        length=t_byte_source.getbuffer().nbytes,
-                    ),
-                    sha256=sha256,
-                )
+        if not t_byte_source:
+            # Could not generate thumbnail.
+            return None
 
-                output_path = await self.media_storage.store_file(
-                    t_byte_source, file_info
-                )
-            finally:
-                t_byte_source.close()
-
-            logger.info("Stored thumbnail in file %r", output_path)
-
-            t_len = os.path.getsize(output_path)
-
-            await self.store.store_remote_media_thumbnail(
-                server_name,
-                media_id,
-                file_id,
-                t_width,
-                t_height,
-                t_type,
-                t_method,
-                t_len,
-            )
-
-            return output_path
-
-        # Could not generate thumbnail.
-        return None
+        output_path, file_info = await self._store_thumbnail(
+            server_name,
+            media_id,
+            file_id,
+            url_cache,
+            t_width,
+            t_height,
+            t_method,
+            t_type,
+            t_byte_source,
+            sha256,
+        )
+        logger.info("Stored thumbnail in file %r", output_path)
+        return output_path, file_info
 
     @trace
     async def _generate_thumbnails(
@@ -1345,18 +1359,11 @@ class MediaRepository:
                 return None
 
             with thumbnailer:
-                m_width = thumbnailer.width
-                m_height = thumbnailer.height
-
-                if m_width * m_height >= self.max_image_pixels:
-                    logger.info(
-                        "Image too large to thumbnail %r x %r > %r",
-                        m_width,
-                        m_height,
-                        self.max_image_pixels,
-                    )
+                if self._is_too_large_to_thumbnail(thumbnailer):
                     return None
 
+                m_width = thumbnailer.width
+                m_height = thumbnailer.height
                 if thumbnailer.transpose_method is not None:
                     m_width, m_height = await defer_to_thread(
                         self.hs.get_reactor(), thumbnailer.transpose
@@ -1397,57 +1404,26 @@ class MediaRepository:
                 # the animated thumbnail is always WebP regardless of `t_type`.
                 animated_done: set[tuple[int, int, str]] = set()
                 for (t_width, t_height, t_type), t_method in thumbnails.items():
-                    # Generate the thumbnail
-                    if t_method == "crop":
-                        t_byte_source = await defer_to_thread(
-                            self.hs.get_reactor(),
-                            thumbnailer.crop,
-                            t_width,
-                            t_height,
-                            t_type,
-                        )
-                    elif t_method == "scale":
-                        t_byte_source = await defer_to_thread(
-                            self.hs.get_reactor(),
-                            thumbnailer.scale,
-                            t_width,
-                            t_height,
-                            t_type,
-                        )
-                    else:
-                        logger.error("Unrecognized method: %r", t_method)
-                        continue
-
-                    if t_byte_source:
-                        await self._store_thumbnail(
-                            server_name,
-                            media_id,
-                            file_id,
-                            url_cache,
-                            t_width,
-                            t_height,
-                            t_method,
-                            t_type,
-                            t_byte_source,
-                            sha256,
-                        )
-
+                    variants = [(t_type, False)]
                     if (
                         thumbnailer.is_animated
                         and (t_width, t_height, t_method) not in animated_done
                     ):
                         animated_done.add((t_width, t_height, t_method))
-                        a_byte_source = await defer_to_thread(
+                        variants.append((ANIMATED_THUMBNAIL_TYPE, True))
+
+                    for v_type, animated in variants:
+                        t_byte_source = await defer_to_thread(
                             self.hs.get_reactor(),
-                            thumbnailer.crop
-                            if t_method == "crop"
-                            else thumbnailer.scale,
+                            self._render_thumbnail,
+                            thumbnailer,
                             t_width,
                             t_height,
-                            ANIMATED_THUMBNAIL_TYPE,
-                            True,
+                            t_method,
+                            v_type,
+                            animated,
                         )
-                        if a_byte_source:
+                        if t_byte_source:
                             await self._store_thumbnail(
                                 server_name,
                                 media_id,
@@ -1456,8 +1432,8 @@ class MediaRepository:
                                 t_width,
                                 t_height,
                                 t_method,
-                                ANIMATED_THUMBNAIL_TYPE,
-                                a_byte_source,
+                                v_type,
+                                t_byte_source,
                                 sha256,
                             )
 
@@ -1475,8 +1451,13 @@ class MediaRepository:
         t_type: str,
         t_byte_source: BytesIO,
         sha256: str | None = None,
-    ) -> None:
-        """Store a generated thumbnail to the configured storage and database."""
+    ) -> tuple[str, FileInfo]:
+        """Store a generated thumbnail to the configured storage and database.
+
+        Returns:
+            The path of the stored thumbnail in the primary media store and its
+            file info.
+        """
         file_info = FileInfo(
             server_name=server_name,
             file_id=file_id,
@@ -1542,6 +1523,8 @@ class MediaRepository:
                 await self.store.store_local_thumbnail(
                     media_id, t_width, t_height, t_type, t_method, t_len
                 )
+
+        return fname, file_info
 
     async def _apply_media_retention_rules(self) -> None:
         """
