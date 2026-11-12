@@ -5,7 +5,9 @@ notes](https://github.com/element-hq/synapse/blob/release-v1.165/docs/upgrade.md
 
 No significant changes since 1.165.0rc1.
 
+## Famedly additions for v1.165.0_1
 
+- feat!: Disable synapse-domain-rule-checker from famedly image (itsoyou)
 
 
 # Synapse 1.165.0rc1 (2026-11-04)
