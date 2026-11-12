@@ -147,11 +147,16 @@ class PostgresSequenceGenerator(SequenceGenerator):
         # above.
         max_stream_id = row[0]
         txn.execute(
-            "SELECT last_value, is_called FROM %(seq)s" % {"seq": self._sequence_name}
+            f"SELECT last_value FROM pg_sequences WHERE sequencename = '{self._sequence_name}'"
         )
         fetch_res = txn.fetchone()
         assert fetch_res is not None
-        last_value, is_called = fetch_res
+        last_value = fetch_res[0]
+
+        # `last_value` here can be NULL if the sequence was never called, such as for a
+        # fresh database. Streams in Synapse start at 1 so the first value would be 0.
+        if last_value is None:
+            last_value = 0
 
         # If we have an associated stream check the stream_positions table.
         max_in_stream_positions = None
@@ -164,16 +169,10 @@ class PostgresSequenceGenerator(SequenceGenerator):
             if row:
                 max_in_stream_positions = row[0]
 
-        # If `is_called` is False then `last_value` is actually the value that
-        # will be generated next, so we decrement to get the true "last value".
-        if not is_called:
-            last_value -= 1
-
         if max_stream_id > last_value:
             # The sequence is lagging behind the tables. This is probably due to
-            # rolling back to a version before the sequence was used and then
-            # forwards again. We resolve this by setting the sequence to the
-            # right value.
+            # rolling back to a version before the sequence was used and then forwards
+            # again. We resolve this by setting the sequence to the right value.
             logger.warning(
                 "Postgres sequence %s is behind table %s: %d < %d. Updating sequence.",
                 self._sequence_name,
@@ -184,7 +183,7 @@ class PostgresSequenceGenerator(SequenceGenerator):
 
             sql = f"""
                 SELECT setval('{self._sequence_name}', GREATEST(
-                    (SELECT last_value FROM {self._sequence_name}),
+                    (SELECT last_value FROM pg_sequences WHERE sequencename = '{self._sequence_name}'),
                     ({table_sql})
                 ));
             """
@@ -201,21 +200,43 @@ class PostgresSequenceGenerator(SequenceGenerator):
                     "seq": self._sequence_name,
                     "stream_name": stream_name,
                     "last_value": last_value,
-                    "is_called": is_called,
+                    # `is_called` here is in reference to whether the sequence has
+                    # *ever* been called on. If it is 0, then it was never called.
+                    "is_called": last_value > 0,
                     "max_stream_id": max_stream_id,
                     "max_in_stream_positions": max_in_stream_positions,
                 }
             )
 
     def get_max_allocated(self, txn: Cursor) -> int:
-        # We just read from the sequence what the last value we fetched was.
-        txn.execute(f"SELECT last_value, is_called FROM {self._sequence_name}")
+        """
+        Read from the `pq_sequences` Postgres view what the `last_value` is.
+
+        This avoids a racy heap tuple attribute swap that is not covered by the content
+        lock on the sequence database row itself.
+
+        Returns: The int representing the maximum sequence value
+
+        """
+        # `last_value` will be `NULL` when the sequence has never been called. Since all
+        # sequences for Synapse start at `1`, an uncalled sequence would imply a 0.
+        # Historically, uncalled stream writer sequences have to start at 1 whereas
+        # non-stream writer sequences start at 0.
+        # It is unclear why this is. Observe the `get_first_callback` argument used to
+        # initialize `SequenceGenerator`s for evidence, and that `max_stream_id` in
+        # `check_consistency()` defaults to 0 and `MultiWriterIdGenerator` starts the
+        # default at 1. Be aware that `check_consistency()` also used to use this value
+        # after subtracting a 1 but that behavior was removed.
+        txn.execute(
+            "SELECT last_value FROM pg_sequences WHERE sequencename = ?",
+            (self._sequence_name,),
+        )
         row = txn.fetchone()
         assert row is not None
 
-        last_value, is_called = row
-        if not is_called:
-            last_value -= 1
+        last_value = row[0]
+        if last_value is None:
+            last_value = 1
         return last_value
 
 
