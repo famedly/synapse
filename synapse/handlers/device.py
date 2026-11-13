@@ -1808,8 +1808,17 @@ class DeviceListUpdater(DeviceListWorkerUpdater):
         # Check that we haven't gone and fetched the devices since we last
         # checked if we needed to resync these device lists.
         if await self.store.get_users_whose_devices_are_cached([user_id]):
+            # Answer in the shape of a federation response, which callers expect.
             cached = await self.store.get_cached_devices_for_user(user_id)
-            return cached, False
+            result: JsonDict = {"user_id": user_id, "devices": list(cached.values())}
+            for key_type, field in (
+                ("master", "master_key"),
+                ("self_signing", "self_signing_key"),
+            ):
+                key = await self.store.get_e2e_cross_signing_key(user_id, key_type)
+                if key is not None:
+                    result[field] = key
+            return result, False
 
         logger.debug("Attempting to resync the device list for %s", user_id)
         log_kv({"message": "Doing resync to update device list."})
