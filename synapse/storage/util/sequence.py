@@ -182,6 +182,13 @@ class PostgresSequenceGenerator(SequenceGenerator):
             """
             txn.execute(sql)
 
+        if max_stream_id < last_value and last_value > 1:
+            # The sequence is ahead of the tables, and we only care when the value is
+            # greater than 1. 1 begins the sequence, not 0. Advance the sequence to
+            # guarantee a Postgres WAL checkpoint of the sequence in case of high
+            # availability failover. Sequence gaps are allowed.
+            last_value = self.get_next_id_txn(txn)
+
         txn.close()
 
         # If we have values in the stream positions table then they have to be
