@@ -146,17 +146,7 @@ class PostgresSequenceGenerator(SequenceGenerator):
         # Now we fetch the current value from the sequence and compare with the
         # above.
         max_stream_id = row[0]
-        txn.execute(
-            f"SELECT last_value FROM pg_sequences WHERE sequencename = '{self._sequence_name}'"
-        )
-        fetch_res = txn.fetchone()
-        assert fetch_res is not None
-        last_value = fetch_res[0]
-
-        # `last_value` here can be NULL if the sequence was never called, such as for a
-        # fresh database. Streams in Synapse start at 1 so the first value would be 0.
-        if last_value is None:
-            last_value = 0
+        last_value = self.get_max_allocated(txn)
 
         # If we have an associated stream check the stream_positions table.
         max_in_stream_positions = None
