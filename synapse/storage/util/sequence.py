@@ -186,7 +186,7 @@ class PostgresSequenceGenerator(SequenceGenerator):
             # The sequence was just reset, so we use that value as the new `last_value`.
             last_value = row[0]
 
-        if max_stream_id < last_value and last_value > 1:
+        if max_stream_id < last_value and abs(last_value) > 1:
             # The sequence is ahead of the tables, and we only care when the value is
             # greater than 1. 1 begins the sequence, not 0. Advance the sequence to
             # guarantee a Postgres WAL checkpoint of the sequence in case of high
