@@ -181,6 +181,10 @@ class PostgresSequenceGenerator(SequenceGenerator):
                 ));
             """
             txn.execute(sql)
+            row = txn.fetchone()
+            assert row is not None
+            # The sequence was just reset, so we use that value as the new `last_value`.
+            last_value = row[0]
 
         if max_stream_id < last_value and last_value > 1:
             # The sequence is ahead of the tables, and we only care when the value is
