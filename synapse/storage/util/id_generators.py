@@ -422,10 +422,9 @@ class MultiWriterIdGenerator(AbstractStreamIdGenerator):
         # sequence value as our own position.
         if self._instance_name in self._writers:
             if isinstance(self._db.engine, PostgresEngine):
-                cur.execute(f"SELECT last_value FROM {sequence_name}")
-                row = cur.fetchone()
-                assert row is not None
-                self._current_positions[self._instance_name] = row[0]
+                self._current_positions[self._instance_name] = (
+                    self._sequence_gen.get_max_allocated(cur)
+                )
 
         # We set the `_persisted_upto_position` to be the minimum of all current
         # positions. If empty we use the max stream ID from the DB table.
