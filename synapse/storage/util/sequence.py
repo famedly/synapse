@@ -171,6 +171,9 @@ class PostgresSequenceGenerator(SequenceGenerator):
                 max_stream_id,
             )
 
+            # There is a potential race here. Subqueries do not guarantee atomic updates
+            # so the actual sequence may have been updated between the read and the
+            # write. There does not seem to be a better way.
             sql = f"""
                 SELECT setval('{self._sequence_name}', GREATEST(
                     (SELECT last_value FROM pg_sequences WHERE sequencename = '{self._sequence_name}'),
