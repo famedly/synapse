@@ -75,17 +75,17 @@ class SequenceGenerator(metaclass=abc.ABCMeta):
     def check_consistency(
         self,
         db_conn: "LoggingDatabaseConnection",
-        table: str,
-        id_column: str,
+        list_of_stream_table_tuples: list[tuple[str, str | None, str]],
         stream_name: str | None = None,
         positive: bool = True,
     ) -> None:
         """Should be called during start up to test that the current value of
-        the sequence is greater than or equal to the maximum ID in the table.
+        the sequence is greater than or equal to the maximum ID in all tables.
 
         This is to handle various cases where the sequence value can get out of
         sync with the table, e.g. if Synapse gets rolled back to a previous
-        version and the rolled forwards again.
+        version and the rolled forwards again, or to checkpoint for high availability
+        Postgres failover during startup.
 
         If a stream name is given then this will check that any value in the
         `stream_positions` table is less than or equal to the current sequence
@@ -120,8 +120,7 @@ class PostgresSequenceGenerator(SequenceGenerator):
     def check_consistency(
         self,
         db_conn: "LoggingDatabaseConnection",
-        table: str,
-        id_column: str,
+        list_of_stream_table_tuples: list[tuple[str, str | None, str]],
         stream_name: str | None = None,
         positive: bool = True,
     ) -> None:
@@ -129,29 +128,32 @@ class PostgresSequenceGenerator(SequenceGenerator):
 
         txn = db_conn.cursor(txn_name="sequence.check_consistency")
 
-        # First we get the current max ID from the table.
-        table_sql = "SELECT GREATEST(%(agg)s(%(id)s), 0) FROM %(table)s" % {
-            "id": id_column,
-            "table": table,
-            "agg": "MAX" if positive else "-MIN",
-        }
+        max_stream_id = 0
+        # First we get the current max ID from all tables.
+        for table, _, id_column in list_of_stream_table_tuples:
+            assert id_column
+            table_sql = "SELECT GREATEST(%(agg)s(%(id)s), 0) FROM %(table)s" % {
+                "id": id_column,
+                "table": table,
+                "agg": "MAX" if positive else "-MIN",
+            }
 
-        txn.execute(table_sql)
-        row = txn.fetchone()
-        if not row:
-            # Table is empty, so nothing to do.
+            txn.execute(table_sql)
+            row = txn.fetchone()
+            if row is None:
+                # There may be more than one table, if this one is empty continue to the
+                # next.
+                continue
+            # Only the largest of the absolute values of any tables matter. Need to
+            # compare the sequence, not a specific table.
+            max_stream_id = max(row[0], max_stream_id)
+
+        if not max_stream_id:
+            # Any/all tables are empty, so nothing to do.
             txn.close()
             return
 
-        # Now we fetch the current value from the sequence and compare with the
-        # above.
-        max_stream_id = row[0]
-        txn.execute(
-            "SELECT last_value, is_called FROM %(seq)s" % {"seq": self._sequence_name}
-        )
-        fetch_res = txn.fetchone()
-        assert fetch_res is not None
-        last_value, is_called = fetch_res
+        last_value = self.get_max_allocated(txn)
 
         # If we have an associated stream check the stream_positions table.
         max_in_stream_positions = None
@@ -164,16 +166,10 @@ class PostgresSequenceGenerator(SequenceGenerator):
             if row:
                 max_in_stream_positions = row[0]
 
-        # If `is_called` is False then `last_value` is actually the value that
-        # will be generated next, so we decrement to get the true "last value".
-        if not is_called:
-            last_value -= 1
-
         if max_stream_id > last_value:
             # The sequence is lagging behind the tables. This is probably due to
-            # rolling back to a version before the sequence was used and then
-            # forwards again. We resolve this by setting the sequence to the
-            # right value.
+            # rolling back to a version before the sequence was used and then forwards
+            # again. We resolve this by setting the sequence to the right value.
             logger.warning(
                 "Postgres sequence %s is behind table %s: %d < %d. Updating sequence.",
                 self._sequence_name,
@@ -182,13 +178,27 @@ class PostgresSequenceGenerator(SequenceGenerator):
                 max_stream_id,
             )
 
+            # There is a potential race here. Subqueries do not guarantee atomic updates
+            # so the actual sequence may have been updated between the read and the
+            # write. There does not seem to be a better way.
             sql = f"""
                 SELECT setval('{self._sequence_name}', GREATEST(
-                    (SELECT last_value FROM {self._sequence_name}),
+                    (SELECT last_value FROM pg_sequences WHERE sequencename = '{self._sequence_name}'),
                     ({table_sql})
                 ));
             """
             txn.execute(sql)
+            row = txn.fetchone()
+            assert row is not None
+            # The sequence was just reset, so we use that value as the new `last_value`.
+            last_value = row[0]
+
+        if max_stream_id < last_value and abs(last_value) > 1:
+            # The sequence is ahead of the tables, and we only care when the value is
+            # greater than 1. 1 begins the sequence, not 0. Advance the sequence to
+            # guarantee a Postgres WAL checkpoint of the sequence in case of high
+            # availability failover. Sequence gaps are allowed.
+            last_value = self.get_next_id_txn(txn)
 
         txn.close()
 
@@ -201,21 +211,43 @@ class PostgresSequenceGenerator(SequenceGenerator):
                     "seq": self._sequence_name,
                     "stream_name": stream_name,
                     "last_value": last_value,
-                    "is_called": is_called,
+                    # `is_called` here is in reference to whether the sequence has
+                    # *ever* been called on. If it is 0, then it was never called.
+                    "is_called": last_value > 0,
                     "max_stream_id": max_stream_id,
                     "max_in_stream_positions": max_in_stream_positions,
                 }
             )
 
     def get_max_allocated(self, txn: Cursor) -> int:
-        # We just read from the sequence what the last value we fetched was.
-        txn.execute(f"SELECT last_value, is_called FROM {self._sequence_name}")
+        """
+        Read from the `pq_sequences` Postgres view what the `last_value` is.
+
+        This avoids a racy heap tuple attribute swap that is not covered by the content
+        lock on the sequence database row itself.
+
+        Returns: The int representing the maximum sequence value
+
+        """
+        # `last_value` will be `NULL` when the sequence has never been called. Since all
+        # sequences for Synapse start at `1`, an uncalled sequence would imply a 0.
+        # Historically, uncalled stream writer sequences have to start at 1 whereas
+        # non-stream writer sequences start at 0.
+        # It is unclear why this is. Observe the `get_first_callback` argument used to
+        # initialize `SequenceGenerator`s for evidence, and that `max_stream_id` in
+        # `check_consistency()` defaults to 0 and `MultiWriterIdGenerator` starts the
+        # default at 1. Be aware that `check_consistency()` also used to use this value
+        # after subtracting a 1 but that behavior was removed.
+        txn.execute(
+            "SELECT last_value FROM pg_sequences WHERE sequencename = ?",
+            (self._sequence_name,),
+        )
         row = txn.fetchone()
         assert row is not None
 
-        last_value, is_called = row
-        if not is_called:
-            last_value -= 1
+        last_value = row[0]
+        if last_value is None:
+            last_value = 1
         return last_value
 
 
@@ -246,30 +278,21 @@ class LocalSequenceGenerator(SequenceGenerator):
         # We do application locking here since if we're using sqlite then
         # we are a single process synapse.
         with self._lock:
-            if self._current_max_id is None:
-                assert self._callback is not None
-                self._current_max_id = self._callback(txn)
-                self._callback = None
-
-            self._current_max_id += 1
+            self._current_max_id = self._get_max_allocated_locked(txn) + 1
+            assert self._current_max_id is not None
             return self._current_max_id
 
     def get_next_mult_txn(self, txn: Cursor, n: int) -> list[int]:
         with self._lock:
-            if self._current_max_id is None:
-                assert self._callback is not None
-                self._current_max_id = self._callback(txn)
-                self._callback = None
-
-            first_id = self._current_max_id + 1
+            first_id = self._get_max_allocated_locked(txn) + 1
+            assert self._current_max_id is not None
             self._current_max_id += n
             return [first_id + i for i in range(n)]
 
     def check_consistency(
         self,
         db_conn: Connection,
-        table: str,
-        id_column: str,
+        list_of_stream_table_tuples: list[tuple[str, str | None, str]],
         stream_name: str | None = None,
         positive: bool = True,
     ) -> None:
@@ -278,12 +301,15 @@ class LocalSequenceGenerator(SequenceGenerator):
 
     def get_max_allocated(self, txn: Cursor) -> int:
         with self._lock:
-            if self._current_max_id is None:
-                assert self._callback is not None
-                self._current_max_id = self._callback(txn)
-                self._callback = None
+            return self._get_max_allocated_locked(txn)
 
-            return self._current_max_id
+    def _get_max_allocated_locked(self, txn: Cursor) -> int:
+        if self._current_max_id is None:
+            assert self._callback is not None
+            self._current_max_id = self._callback(txn)
+            self._callback = None
+
+        return self._current_max_id
 
 
 def build_sequence_generator(
@@ -291,8 +317,7 @@ def build_sequence_generator(
     database_engine: BaseDatabaseEngine,
     get_first_callback: GetFirstCallbackType,
     sequence_name: str,
-    table: str | None,
-    id_column: str | None,
+    list_of_stream_table_tuples: list[tuple[str, str | None, str]],
     stream_name: str | None = None,
     positive: bool = True,
 ) -> SequenceGenerator:
@@ -315,12 +340,10 @@ def build_sequence_generator(
     else:
         seq = LocalSequenceGenerator(get_first_callback)
 
-    if table:
-        assert id_column
+    if list_of_stream_table_tuples:
         seq.check_consistency(
             db_conn=db_conn,
-            table=table,
-            id_column=id_column,
+            list_of_stream_table_tuples=list_of_stream_table_tuples,
             stream_name=stream_name,
             positive=positive,
         )

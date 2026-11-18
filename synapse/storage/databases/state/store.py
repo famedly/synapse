@@ -143,8 +143,7 @@ class StateGroupDataStore(StateBackgroundUpdateStore, SQLBaseStore):
             self.database_engine,
             get_max_state_group_txn,
             "state_group_id_seq",
-            table="state_groups",
-            id_column="id",
+            list_of_stream_table_tuples=[("state_groups", None, "id")],
         )
 
     @cached(max_entries=10000, iterable=True)

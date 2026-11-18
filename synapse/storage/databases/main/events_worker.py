@@ -345,8 +345,7 @@ class EventsWorkerStore(SQLBaseStore):
             database.engine,
             get_chain_id_txn,
             "event_auth_chain_id",
-            table="event_auth_chains",
-            id_column="chain_id",
+            list_of_stream_table_tuples=[("event_auth_chains", None, "chain_id")],
         )
 
         self._un_partial_stated_events_stream_id_gen: AbstractStreamIdGenerator
