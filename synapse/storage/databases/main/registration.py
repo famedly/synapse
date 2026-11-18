@@ -193,8 +193,7 @@ class RegistrationWorkerStore(StatsStore, CacheInvalidationWorkerStore):
             database.engine,
             find_max_generated_user_id_localpart,
             "user_id_seq",
-            table=None,
-            id_column=None,
+            list_of_stream_table_tuples=[],
         )
 
         self._account_validity_enabled = (

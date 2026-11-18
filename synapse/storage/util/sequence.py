@@ -75,13 +75,12 @@ class SequenceGenerator(metaclass=abc.ABCMeta):
     def check_consistency(
         self,
         db_conn: "LoggingDatabaseConnection",
-        table: str,
-        id_column: str,
+        list_of_stream_table_tuples: list[tuple[str, str | None, str]],
         stream_name: str | None = None,
         positive: bool = True,
     ) -> None:
         """Should be called during start up to test that the current value of
-        the sequence is greater than or equal to the maximum ID in the table.
+        the sequence is greater than or equal to the maximum ID in all tables.
 
         This is to handle various cases where the sequence value can get out of
         sync with the table, e.g. if Synapse gets rolled back to a previous
@@ -121,8 +120,7 @@ class PostgresSequenceGenerator(SequenceGenerator):
     def check_consistency(
         self,
         db_conn: "LoggingDatabaseConnection",
-        table: str,
-        id_column: str,
+        list_of_stream_table_tuples: list[tuple[str, str | None, str]],
         stream_name: str | None = None,
         positive: bool = True,
     ) -> None:
@@ -130,23 +128,31 @@ class PostgresSequenceGenerator(SequenceGenerator):
 
         txn = db_conn.cursor(txn_name="sequence.check_consistency")
 
-        # First we get the current max ID from the table.
-        table_sql = "SELECT GREATEST(%(agg)s(%(id)s), 0) FROM %(table)s" % {
-            "id": id_column,
-            "table": table,
-            "agg": "MAX" if positive else "-MIN",
-        }
+        max_stream_id = 0
+        # First we get the current max ID from all tables.
+        for table, _, id_column in list_of_stream_table_tuples:
+            assert id_column
+            table_sql = "SELECT GREATEST(%(agg)s(%(id)s), 0) FROM %(table)s" % {
+                "id": id_column,
+                "table": table,
+                "agg": "MAX" if positive else "-MIN",
+            }
 
-        txn.execute(table_sql)
-        row = txn.fetchone()
-        if not row:
-            # Table is empty, so nothing to do.
+            txn.execute(table_sql)
+            row = txn.fetchone()
+            if row is None:
+                # There may be more than one table, if this one is empty continue to the
+                # next.
+                continue
+            # Only the largest of the absolute values of any tables matter. Need to
+            # compare the sequence, not a specific table.
+            max_stream_id = max(row[0], max_stream_id)
+
+        if not max_stream_id:
+            # Any/all tables are empty, so nothing to do.
             txn.close()
             return
 
-        # Now we fetch the current value from the sequence and compare with the
-        # above.
-        max_stream_id = row[0]
         last_value = self.get_max_allocated(txn)
 
         # If we have an associated stream check the stream_positions table.
@@ -286,8 +292,7 @@ class LocalSequenceGenerator(SequenceGenerator):
     def check_consistency(
         self,
         db_conn: Connection,
-        table: str,
-        id_column: str,
+        list_of_stream_table_tuples: list[tuple[str, str | None, str]],
         stream_name: str | None = None,
         positive: bool = True,
     ) -> None:
@@ -312,8 +317,7 @@ def build_sequence_generator(
     database_engine: BaseDatabaseEngine,
     get_first_callback: GetFirstCallbackType,
     sequence_name: str,
-    table: str | None,
-    id_column: str | None,
+    list_of_stream_table_tuples: list[tuple[str, str | None, str]],
     stream_name: str | None = None,
     positive: bool = True,
 ) -> SequenceGenerator:
@@ -336,12 +340,10 @@ def build_sequence_generator(
     else:
         seq = LocalSequenceGenerator(get_first_callback)
 
-    if table:
-        assert id_column
+    if list_of_stream_table_tuples:
         seq.check_consistency(
             db_conn=db_conn,
-            table=table,
-            id_column=id_column,
+            list_of_stream_table_tuples=list_of_stream_table_tuples,
             stream_name=stream_name,
             positive=positive,
         )

@@ -100,8 +100,7 @@ class ApplicationServiceWorkerStore(RoomMemberWorkerStore):
             database.engine,
             get_max_as_txn_id,
             "application_services_txn_id_seq",
-            table="application_services_txns",
-            id_column="txn_id",
+            list_of_stream_table_tuples=[("application_services_txns", None, "txn_id")],
         )
 
         super().__init__(database, db_conn, hs)
