@@ -85,7 +85,8 @@ class SequenceGenerator(metaclass=abc.ABCMeta):
 
         This is to handle various cases where the sequence value can get out of
         sync with the table, e.g. if Synapse gets rolled back to a previous
-        version and the rolled forwards again.
+        version and the rolled forwards again, or to checkpoint for high availability
+        Postgres failover during startup.
 
         If a stream name is given then this will check that any value in the
         `stream_positions` table is less than or equal to the current sequence
