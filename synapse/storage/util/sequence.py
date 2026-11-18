@@ -271,22 +271,14 @@ class LocalSequenceGenerator(SequenceGenerator):
         # We do application locking here since if we're using sqlite then
         # we are a single process synapse.
         with self._lock:
-            if self._current_max_id is None:
-                assert self._callback is not None
-                self._current_max_id = self._callback(txn)
-                self._callback = None
-
-            self._current_max_id += 1
+            self._current_max_id = self._get_max_allocated_locked(txn) + 1
+            assert self._current_max_id is not None
             return self._current_max_id
 
     def get_next_mult_txn(self, txn: Cursor, n: int) -> list[int]:
         with self._lock:
-            if self._current_max_id is None:
-                assert self._callback is not None
-                self._current_max_id = self._callback(txn)
-                self._callback = None
-
-            first_id = self._current_max_id + 1
+            first_id = self._get_max_allocated_locked(txn) + 1
+            assert self._current_max_id is not None
             self._current_max_id += n
             return [first_id + i for i in range(n)]
 
@@ -303,12 +295,15 @@ class LocalSequenceGenerator(SequenceGenerator):
 
     def get_max_allocated(self, txn: Cursor) -> int:
         with self._lock:
-            if self._current_max_id is None:
-                assert self._callback is not None
-                self._current_max_id = self._callback(txn)
-                self._callback = None
+            return self._get_max_allocated_locked(txn)
 
-            return self._current_max_id
+    def _get_max_allocated_locked(self, txn: Cursor) -> int:
+        if self._current_max_id is None:
+            assert self._callback is not None
+            self._current_max_id = self._callback(txn)
+            self._callback = None
+
+        return self._current_max_id
 
 
 def build_sequence_generator(
